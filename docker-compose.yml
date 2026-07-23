@@ -1,0 +1,12 @@
+services:
+  kyb:
+    image: ghcr.io/dip-labs/kyb:latest
+    container_name: kyb
+    restart: unless-stopped
+    # Run as the host uid, or the canon under ./data ends up owned by root
+    # and can't be read/edited by hand (and git-as-truth is the whole point).
+    user: "1000:1000"
+    ports:
+      - "9310:9310" # internal network only; do not expose publicly (no auth)
+    volumes:
+      - ./data:/data # ./data/kyb-data — git canon, ./data/index — Tantivy

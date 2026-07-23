@@ -1,0 +1,11 @@
+target/
+kyb-data/
+index/
+audit.jsonl
+.env
+*.log
+model/
+# internal, never in the public repo
+PLAN.md
+.codehaus/
+scripts/fleet.local.sh

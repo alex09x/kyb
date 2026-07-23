@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# kyb — CLI for Know Your Business: our shared infrastructure knowledge base.
+# The service runs in docker on booster; the data is shared by every agent and machine.
+set -euo pipefail
+
+KYB_HOST="${KYB_HOST:-127.0.0.1}"        # set to your server's address (e.g. over Tailscale)
+ADDR="${KYB_ADDR:-$KYB_HOST:9310}"
+BASE="http://$ADDR"
+
+die() { echo "kyb: $*" >&2; exit 1; }
+
+pretty() { if command -v jq >/dev/null 2>&1; then jq .; else cat; fi; }
+
+urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${1:-}"; }
+
+# The container has restart:unless-stopped, so it is normally already up.
+# If not, bring it up over ssh; if that fails too, fail loudly.
+ensure_up() {
+  curl -sf -m 3 "$BASE/healthz" >/dev/null 2>&1 && return 0
+  echo "kyb: $ADDR is not responding, starting the container..." >&2
+  ssh -o ConnectTimeout=5 -o BatchMode=yes "$KYB_HOST" \
+      'cd ~/kyb && docker compose up -d' >/dev/null 2>&1 \
+    || die "cannot reach $KYB_HOST (is tailscale up? is the server alive?)"
+  for _ in $(seq 1 40); do
+    curl -sf -m 2 "$BASE/healthz" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  die "container still not responding, check: ssh $KYB_HOST 'docker logs kyb'"
+}
+
+usage() {
+  cat >&2 <<'EOF'
+kyb — Know Your Business (our infrastructure knowledge base)
+  kyb query "text" [--tag a,b] [--history] [--recent] [--limit N]
+            [--kind knowledge|incident] [--status S] [--service X]
+  kyb tags                                          (which topics the base covers)
+  kyb add --key <slug> --title "..." [--tags a,b] [--refs r1,r2]   (body on stdin)
+  kyb get <key> [--at <sha>]
+  kyb history <key>
+  kyb rm <key>
+  kyb reindex
+  kyb health
+
+incident reports (key must start with inc-, e.g. inc-2026-07-22-orders-api-oom):
+  kyb incident --template                       (print the body skeleton to fill in)
+  kyb incident --key inc-<date>-<slug> --title "..." --service <svc> --severity low|medium|high|critical
+               [--hosts a,b] [--status open|mitigated|resolved] [--knowledge key1,key2]
+               [--detection "cmd + expected healthy result"]
+               [--affected '[{"scope":"okx","from":"...Z","to":"...Z"}]']   (JSON array)
+               [--started <rfc3339>] [--detected <rfc3339>]
+               [--resolution "..."] [--tags a,b] [--refs r1,r2]    (body on stdin)
+  kyb incidents [--status S] [--service X] [--open-followups] [--limit N]  (open first, freshest on top)
+  kyb resolve <key> [--status mitigated] [--resolution "how it ended"]
+               (no --resolution: the closing comment is read from stdin)
+EOF
+  exit 1
+}
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift || true
+
+case "$cmd" in
+  query|q)
+    text="${1:-}"; [ $# -gt 0 ] && shift || true
+    tag=""; history="false"; limit="10"; sort=""; kind=""; status=""; service=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --tag|--tags) tag="$2"; shift 2 ;;
+        --history) history="true"; shift ;;
+        --limit) limit="$2"; shift 2 ;;
+        --recent) sort="recent"; shift ;;
+        --kind) kind="$2"; shift 2 ;;
+        --status) status="$2"; shift 2 ;;
+        --service) service="$2"; shift 2 ;;
+        *) die "query: unknown flag $1" ;;
+      esac
+    done
+    ensure_up
+    curl -s "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")" | pretty
+    ;;
+  tags)
+    ensure_up
+    curl -s "$BASE/tags" | pretty
+    ;;
+  add)
+    key=""; title=""; tags=""; refs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --key) key="$2"; shift 2 ;;
+        --title) title="$2"; shift 2 ;;
+        --tags) tags="$2"; shift 2 ;;
+        --refs) refs="$2"; shift 2 ;;
+        *) die "add: unknown flag $1" ;;
+      esac
+    done
+    [ -n "$key" ] && [ -n "$title" ] || die "add: --key and --title are required (body comes from stdin)"
+    body="$(cat)"
+    ensure_up
+    BODY="$body" python3 -c '
+import json, os, sys
+key, title, tags, refs = sys.argv[1:5]
+print(json.dumps({
+    "key": key, "title": title, "body": os.environ["BODY"],
+    "tags": [t.strip() for t in tags.split(",") if t.strip()],
+    "refs": [r.strip() for r in refs.split(",") if r.strip()],
+}))' "$key" "$title" "$tags" "$refs" \
+      | curl -s -X POST "$BASE/knowledge" -H 'content-type: application/json' -d @- | pretty
+    ;;
+  incident)
+    if [ "${1:-}" = "--template" ]; then
+      cat <<'TPL'
+# The skeleton of a proper incident report. Each section answers "what can the
+# next agent DO". Fill it, then file with:
+#
+#   kyb incident --key inc-$(date -u +%F)-<slug> --title "<symptom, not diagnosis>" \
+#     --service <svc> --hosts <h1,h2> --severity low|medium|high|critical \
+#     --detection "<command/SQL + expected healthy result>" \
+#     --affected '[{"scope":"<exchange/table/host>","from":"<UTC>","to":"<UTC>"}]' \
+#     --knowledge <arch-entry,host-entry> --tags <a,b> <<'EOF' ... EOF
+#
+# (--started/--detected RFC3339 if known; mitigated/resolved are stamped by the server)
+
+Symptom: <what it LOOKS like, verbatim — "heatmap shows +38,000,000%". The search anchor.>
+
+Impact: <what is broken for whom; exact poisoned windows go to --affected, not prose>
+
+Root cause (verified|suspected|unknown): <mark the confidence honestly>
+
+Cure / runbook:
+  1. <step>                      # SAFE — agent may do this alone
+  2. <verify: detection returns to healthy>
+  3. <step>                      # APPROVAL — only with a human
+
+Actions log:
+  <UTC time> | <action> | <verification right after it — an action without one = not done>
+
+Follow-ups:
+- [ ] <loose end; the server counts these — kyb incidents --open-followups>
+TPL
+      exit 0
+    fi
+    key=""; title=""; service=""; hosts=""; severity=""; status="open"
+    knowledge=""; resolution=""; detection=""; affected=""; started=""; detected=""; tags=""; refs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --key) key="$2"; shift 2 ;;
+        --title) title="$2"; shift 2 ;;
+        --service) service="$2"; shift 2 ;;
+        --hosts) hosts="$2"; shift 2 ;;
+        --severity) severity="$2"; shift 2 ;;
+        --status) status="$2"; shift 2 ;;
+        --knowledge) knowledge="$2"; shift 2 ;;
+        --resolution) resolution="$2"; shift 2 ;;
+        --detection) detection="$2"; shift 2 ;;
+        --affected) affected="$2"; shift 2 ;;
+        --started) started="$2"; shift 2 ;;
+        --detected) detected="$2"; shift 2 ;;
+        --tags) tags="$2"; shift 2 ;;
+        --refs) refs="$2"; shift 2 ;;
+        *) die "incident: unknown flag $1" ;;
+      esac
+    done
+    [ -n "$key" ] && [ -n "$title" ] && [ -n "$service" ] && [ -n "$severity" ] \
+      || die "incident: --key, --title, --service and --severity are required (body comes from stdin)"
+    body="$(cat)"
+    ensure_up
+    BODY="$body" RESOLUTION="$resolution" DETECTION="$detection" AFFECTED="$affected" python3 -c '
+import json, os, sys
+key, title, service, hosts, severity, status, knowledge, started, detected, tags, refs = sys.argv[1:12]
+split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
+affected = os.environ["AFFECTED"].strip()
+try:
+    affected = json.loads(affected) if affected else []
+except json.JSONDecodeError as e:
+    sys.exit(f"kyb: --affected is not valid JSON ({e}); expected: [{{\"scope\":...,\"from\":...,\"to\":...}}]")
+print(json.dumps({
+    "key": key, "title": title, "body": os.environ["BODY"],
+    "service": service, "hosts": split(hosts), "severity": severity, "status": status,
+    "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
+    "detection": os.environ["DETECTION"], "affected": affected,
+    "started_at": started, "detected_at": detected,
+    "tags": split(tags), "refs": split(refs),
+}))' "$key" "$title" "$service" "$hosts" "$severity" "$status" "$knowledge" "$started" "$detected" "$tags" "$refs" \
+      | curl -s -X POST "$BASE/incidents" -H 'content-type: application/json' -d @- | pretty
+    ;;
+  incidents)
+    status=""; service=""; followups=""; limit="50"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --service) service="$2"; shift 2 ;;
+        --open-followups) followups="open"; shift ;;
+        --limit) limit="$2"; shift 2 ;;
+        *) die "incidents: unknown flag $1" ;;
+      esac
+    done
+    ensure_up
+    curl -s "$BASE/incidents?status=$(urlenc "$status")&service=$(urlenc "$service")&followups=$followups&limit=$limit" | pretty
+    ;;
+  resolve)
+    key="${1:-}"; [ -n "$key" ] || usage; shift || true
+    status="resolved"; resolution=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --resolution) resolution="$2"; shift 2 ;;
+        *) die "resolve: unknown flag $1" ;;
+      esac
+    done
+    # no --resolution: read the closing comment from stdin (required to close)
+    if [ -z "$resolution" ] && ! [ -t 0 ]; then resolution="$(cat)"; fi
+    ensure_up
+    RESOLUTION="$resolution" python3 -c '
+import json, os, sys
+print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}))' "$status" \
+      | curl -s -X POST "$BASE/incidents/$key/resolve" -H 'content-type: application/json' -d @- | pretty
+    ;;
+  get)
+    key="${1:-}"; [ -n "$key" ] || usage; shift || true
+    at=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at) at="$2"; shift 2 ;;
+        *) die "get: unknown flag $1" ;;
+      esac
+    done
+    ensure_up
+    q=""; [ -n "$at" ] && q="?at=$(urlenc "$at")"
+    curl -s "$BASE/knowledge/$key$q" | pretty
+    ;;
+  history)
+    key="${1:-}"; [ -n "$key" ] || usage
+    ensure_up
+    curl -s "$BASE/knowledge/$key/history" | pretty
+    ;;
+  rm|delete)
+    key="${1:-}"; [ -n "$key" ] || usage
+    ensure_up
+    curl -s -X DELETE "$BASE/knowledge/$key" | pretty
+    ;;
+  reindex)
+    ensure_up
+    curl -s -X POST "$BASE/reindex" | pretty
+    ;;
+  health)
+    ensure_up
+    curl -s "$BASE/healthz" | pretty
+    ;;
+  *)
+    usage
+    ;;
+esac

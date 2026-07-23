@@ -1,0 +1,8 @@
+target/
+kyb-data/
+index/
+.git/
+.env
+*.log
+skills/
+model/
