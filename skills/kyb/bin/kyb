@@ -3,7 +3,10 @@
 # The service runs in docker on booster; the data is shared by every agent and machine.
 set -euo pipefail
 
-KYB_HOST="${KYB_HOST:-127.0.0.1}"        # set to your server's address (e.g. over Tailscale)
+# Server address, in priority order: env KYB_HOST/KYB_ADDR -> the host file
+# written by the installer (~/.config/kyb/host) -> localhost.
+KYB_HOST="${KYB_HOST:-$(cat "$HOME/.config/kyb/host" 2>/dev/null || true)}"
+KYB_HOST="${KYB_HOST:-127.0.0.1}"
 ADDR="${KYB_ADDR:-$KYB_HOST:9310}"
 BASE="http://$ADDR"
 

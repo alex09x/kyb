@@ -17,6 +17,15 @@ install -d "$HOME/.local/bin"
 install -m 755 "$SRC/kyb/bin/kyb" "$HOME/.local/bin/kyb"
 echo "✓ CLI      ~/.local/bin/kyb"
 
+# The server address is deployment-specific and never lives in this repo:
+# the deployer passes KYB_SERVER (from its own gitignored fleet config) and
+# the CLI reads the host file at run time.
+if [ -n "${KYB_SERVER:-}" ]; then
+  install -d "$HOME/.config/kyb"
+  printf '%s\n' "$KYB_SERVER" > "$HOME/.config/kyb/host"
+  echo "✓ HOST     ~/.config/kyb/host -> $KYB_SERVER"
+fi
+
 for agent in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/config/skills"; do
   if [ -d "$(dirname "$agent")" ]; then
     install -d "$agent/kyb"

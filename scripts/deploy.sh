@@ -51,15 +51,18 @@ if [ "${1:-}" != "--skills" ]; then
   curl -sf -m 3 "$KYB_URL/healthz" | head -c 200; echo
 fi
 
+# the CLI's server address comes from the fleet config, never from the repo
+KYB_SERVER="${BOOSTER#*@}"
+
 step "skills + CLI: this machine"
-bash "$REPO/skills/install.sh"
+KYB_SERVER="$KYB_SERVER" bash "$REPO/skills/install.sh"
 
 for h in "${FLEET[@]}"; do
   step "skills + CLI: $h"
   scp -q -r "$REPO/skills" "$h:/tmp/kyb-skills-rollout"
   # single quotes: several hosts run fish as the login shell
   ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" \
-    'bash -lc "bash /tmp/kyb-skills-rollout/install.sh; rm -rf /tmp/kyb-skills-rollout"' \
+    "bash -lc 'KYB_SERVER=$KYB_SERVER bash /tmp/kyb-skills-rollout/install.sh; rm -rf /tmp/kyb-skills-rollout'" \
     | grep -E '✓|ready|warning' || true
 done
 
