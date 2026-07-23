@@ -14,9 +14,9 @@ and **write back everything you learned** while working.
 **Where it lives:** a docker service on the **booster** server (`$KYB_HOST:9310`, over
 Tailscale). The base is **shared** — every agent (Claude Code, Codex, Antigravity) on every
 machine sees it, so anything written here is instantly available everywhere. The canon is a
-git repo on booster (`~/kyb/data/kyb-data`): one md file per entry, one commit per change.
-**A commit sha is a version id**, so nothing is ever lost — old versions stay searchable and
-retrievable.
+git repo on booster (`~/kyb/data/kyb-data`): one md file per entry (in `knowledge/`,
+`incidents/` or `tasks/` by kind), one commit per change. **A commit sha is a version id**,
+so nothing is ever lost — old versions stay searchable and retrievable.
 
 CLI: **`kyb`** (on PATH, `~/.local/bin/kyb`), every response is JSON. The container runs
 permanently; if it is ever down the CLI brings it up over ssh. Another instance:
@@ -164,9 +164,16 @@ Write-time limits (otherwise `400`): key is not a slug · empty title · body or
 something that looks like a secret (`ghp_…`, `sk-…`, `AKIA…`, `-----BEGIN … PRIVATE KEY`,
 `password: …`).
 
-Every entry also has a `kind`: `knowledge` (default, everything above) or `incident` —
+Every entry also has a `kind`: `knowledge` (default, everything above), `incident` —
 an operational event report with extra fields (`service`, `hosts`, `severity`, `status`,
-`knowledge` links, `resolution`). See §7.
+`knowledge` links, `resolution`, see §7) — or `task`, a lightweight note/idea with a
+resolution loop (see §8).
+
+**Lifecycle rule (all kinds): the canon holds only what is live.** Closing an incident or
+a task *archives* it — the file leaves the working tree, but the final version stays in
+the **default search** and stays readable via `kyb get` (marked `"archived": true`).
+`kyb rm` on plain knowledge is different: that is a *retraction* ("this was wrong"), and a
+retracted entry drops out of the default search (history keeps it, as always).
 
 ---
 
@@ -262,9 +269,11 @@ Search behaviour:
   queries are lexical-only, and so is the service when no model is installed.
 - **Russian stemming**: «стримах» finds «стримы». Latin words (NATS, CreateOrUpdateStream) pass
   through as-is, case-insensitive. Exception: loanwords ending in «-й» («деплой») are not stemmed.
-- **Without `--history`** only current knowledge is searched (`is_head:true`).
+- **Without `--history`** the search covers the *latest version of every key*: current
+  knowledge AND archived (closed) incidents/tasks — "how did we fix this last time" lands
+  without any special flag. Retracted knowledge (`kyb rm`) is the one thing excluded.
   **With `--history`** only historical versions are searched (`is_head:false`), including
-  versions of deleted entries. The two modes never return duplicates of each other.
+  every superseded version. The two modes never return duplicates of each other.
 - Broken query syntax never fails the request — the parser is lenient.
 
 ---
@@ -390,6 +399,12 @@ the transition. Closing with unfinished `- [ ]` follow-ups succeeds but returns 
 with the count — reassign or finish them; `kyb incidents --open-followups` lists reports
 (resolved included) that still have loose ends.
 
+**Closing archives the report**: the file leaves the canon, so the tree holds only open and
+mitigated incidents. Nothing is lost — the resolved report stays in `kyb incidents` (with
+`"archived": true`), in the default `kyb query`, and in `kyb get`. To amend a closed report,
+run `kyb resolve` again with a new resolution; re-filing the same key (`kyb incident`) or
+parking it (`--status mitigated`) reopens it.
+
 At the start of a session, the triage pass is:
 ```bash
 kyb incidents --status open        # anything burning? run its detection to see if it still is
@@ -418,21 +433,55 @@ kyb query "ch proxy" --service orders_api               # exact service filter o
 
 ---
 
-## 8. The rest
+## 8. Tasks and ideas
+
+A task is the third kind: a short actionable note — "do X", "look into Y", an idea worth
+keeping — with the same close-with-an-outcome discipline as incidents, but none of the
+ceremony. No service, no severity, no detection. Keys start with `task-` (no date — a task
+may live long; its birth date is in git).
 
 ```bash
-kyb rm <key>       # remove the current version (history stays in git, searchable via --history)
-kyb reindex        # full index rebuild from git (rarely needed: the service does it on start)
-kyb health         # {"ok":true,"entries":N,"open_incidents":K,"index_docs":M,"last_commit":{…}}
+kyb task --key task-raise-log-retention --title "Raise container log retention to 72h" \
+         --tags observability [--knowledge web-app-architecture] <<'EOF'
+Short retention loses evidence during incidents.
+- [ ] measure current log volume first
+EOF
+
+kyb tasks                                  # open first, freshest on top
+kyb tasks --open-followups                 # loose ends inside tasks
+kyb done task-raise-log-retention <<< "Raised to 72h with a 2G disk budget."
+kyb done task-try-foo --status dropped <<< "Obsolete after the bar rewrite."
 ```
 
-`entries` — how many current facts, `open_incidents` — incidents with status `open`,
-`index_docs` — documents in the index (current + every historical version), `last_commit` —
-the canon's latest commit.
+- `status`: `open → done | dropped`. **Both closings require a resolution** — what came of
+  it, or why it was dropped; "dropped because obsolete" is knowledge too.
+- Closing archives the task (same rule as incidents): the file leaves the canon, the task
+  stays in `kyb tasks`, in the default search and in `kyb get` with `"archived": true`.
+  The server stamps `resolved_at` on close.
+- An idea is just a task tagged `idea`. Follow-ups discovered while resolving an incident
+  that deserve their own life → file them as tasks and link the incident via `--knowledge`.
+- Session triage: `kyb incidents --status open` + `kyb tasks --status open`.
+- `kyb health` reports `open_tasks` next to `open_incidents`.
 
 ---
 
-## 9. Write rules (governance — mandatory)
+## 9. The rest
+
+```bash
+kyb rm <key>       # knowledge: retract a wrong entry (drops out of the default search).
+                   # incident/task: archive it (stays searchable) — closing via
+                   # resolve/done is the normal path, rm is the manual override
+kyb reindex        # full index rebuild from git (rarely needed: the service does it on start)
+kyb health         # {"ok":true,"entries":N,"open_incidents":K,"open_tasks":T,"index_docs":M,"last_commit":{…}}
+```
+
+`entries` — how many live facts in the canon, `open_incidents`/`open_tasks` — what is
+currently broken / pending, `index_docs` — documents in the index (live + every historical
+version), `last_commit` — the canon's latest commit.
+
+---
+
+## 10. Write rules (governance — mandatory)
 
 1. **ALWAYS run `kyb query` before `add`.** Found something close → overwrite it under **the
    same key**. A new key only when the knowledge genuinely does not exist. Duplicates kill the base.
@@ -450,7 +499,7 @@ the canon's latest commit.
 
 ---
 
-## 10. When something breaks
+## 11. When something breaks
 
 - Not responding → check tailscale (`tailscale status`), then
   `ssh $KYB_HOST 'cd ~/kyb && docker compose up -d; docker logs kyb | tail'`.

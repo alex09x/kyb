@@ -52,6 +52,16 @@ incident reports (key must start with inc-, e.g. inc-2026-07-22-orders-api-oom):
   kyb incidents [--status S] [--service X] [--open-followups] [--limit N]  (open first, freshest on top)
   kyb resolve <key> [--status mitigated] [--resolution "how it ended"]
                (no --resolution: the closing comment is read from stdin)
+
+tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
+  kyb task --key task-<slug> --title "..." [--status open|done|dropped]
+           [--knowledge key1,key2] [--resolution "..."] [--tags a,b] [--refs r1,r2]   (body on stdin)
+  kyb tasks [--status S] [--open-followups] [--limit N]     (open first, freshest on top)
+  kyb done <key> [--status dropped] [--resolution "what came of it"]
+           (no --resolution: the closing comment is read from stdin)
+
+Closing an incident or a task archives it: the file leaves the canon, the
+report stays searchable (kyb query) and readable (kyb get) forever.
 EOF
   exit 1
 }
@@ -213,6 +223,65 @@ print(json.dumps({
 import json, os, sys
 print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}))' "$status" \
       | curl -s -X POST "$BASE/incidents/$key/resolve" -H 'content-type: application/json' -d @- | pretty
+    ;;
+  task)
+    key=""; title=""; status="open"; knowledge=""; resolution=""; tags=""; refs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --key) key="$2"; shift 2 ;;
+        --title) title="$2"; shift 2 ;;
+        --status) status="$2"; shift 2 ;;
+        --knowledge) knowledge="$2"; shift 2 ;;
+        --resolution) resolution="$2"; shift 2 ;;
+        --tags) tags="$2"; shift 2 ;;
+        --refs) refs="$2"; shift 2 ;;
+        *) die "task: unknown flag $1" ;;
+      esac
+    done
+    [ -n "$key" ] && [ -n "$title" ] || die "task: --key and --title are required (body comes from stdin)"
+    body="$(cat)"
+    ensure_up
+    BODY="$body" RESOLUTION="$resolution" python3 -c '
+import json, os, sys
+key, title, status, knowledge, tags, refs = sys.argv[1:7]
+split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
+print(json.dumps({
+    "key": key, "title": title, "body": os.environ["BODY"], "status": status,
+    "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
+    "tags": split(tags), "refs": split(refs),
+}))' "$key" "$title" "$status" "$knowledge" "$tags" "$refs" \
+      | curl -s -X POST "$BASE/tasks" -H 'content-type: application/json' -d @- | pretty
+    ;;
+  tasks)
+    status=""; followups=""; limit="50"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --open-followups) followups="open"; shift ;;
+        --limit) limit="$2"; shift 2 ;;
+        *) die "tasks: unknown flag $1" ;;
+      esac
+    done
+    ensure_up
+    curl -s "$BASE/tasks?status=$(urlenc "$status")&followups=$followups&limit=$limit" | pretty
+    ;;
+  done)
+    key="${1:-}"; [ -n "$key" ] || usage; shift || true
+    status="done"; resolution=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --resolution) resolution="$2"; shift 2 ;;
+        *) die "done: unknown flag $1" ;;
+      esac
+    done
+    # no --resolution: read the closing comment from stdin (required to close)
+    if [ -z "$resolution" ] && ! [ -t 0 ]; then resolution="$(cat)"; fi
+    ensure_up
+    RESOLUTION="$resolution" python3 -c '
+import json, os, sys
+print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}))' "$status" \
+      | curl -s -X POST "$BASE/tasks/$key/resolve" -H 'content-type: application/json' -d @- | pretty
     ;;
   get)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true

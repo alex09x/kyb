@@ -1,7 +1,7 @@
-use crate::model::{Entry, Window};
+use crate::model::{Entry, Window, KIND_KNOWLEDGE};
 use crate::store::Store;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tantivy::collector::TopDocs;
 use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, TermQuery};
@@ -329,26 +329,58 @@ impl SearchIndex {
         Ok(())
     }
 
-    /// Full rebuild from git: entire history + current HEAD. Returns (head, history).
+    /// Full rebuild from git: entire history, plus one "live" doc per key —
+    /// the version the default search sees. Live is the working tree for keys
+    /// that exist there, and the latest historical version for archived
+    /// incidents/tasks (closed things stay findable). Deleted knowledge is a
+    /// retraction: history-only. Returns (live, history) doc counts.
     pub fn reindex(&self, w: &mut IndexWriter, store: &Store) -> Result<(usize, usize)> {
         w.delete_all_documents()?;
         // walk_history is chronological, so seq = walk order
         let hist = store.walk_history()?;
         let mut seq = 0u64;
-        let mut last: HashMap<String, (String, i64, u64)> = HashMap::new();
+        let mut last: HashMap<String, (Entry, String, i64, u64)> = HashMap::new();
         for h in &hist {
             seq += 1;
             w.add_document(self.make_doc(&h.entry, &h.sha, h.committed_at, false, seq))?;
-            last.insert(h.entry.key.clone(), (h.sha.clone(), h.committed_at, seq));
+            last.insert(h.entry.key.clone(), (h.entry.clone(), h.sha.clone(), h.committed_at, seq));
         }
         let heads = store.list_head()?;
+        let mut live = 0usize;
+        let mut alive: HashSet<&str> = HashSet::new();
         for e in &heads {
-            let (sha, at, sq) = last.get(&e.key).cloned().unwrap_or_default();
+            alive.insert(e.key.as_str());
+            let (sha, at, sq) = last
+                .get(&e.key)
+                .map(|(_, s, a, q)| (s.clone(), *a, *q))
+                .unwrap_or_default();
             w.add_document(self.make_doc(e, &sha, at, true, sq))?;
+            live += 1;
+        }
+        for (key, (entry, sha, at, sq)) in &last {
+            if alive.contains(key.as_str()) || entry.kind == KIND_KNOWLEDGE {
+                continue;
+            }
+            w.add_document(self.make_doc(entry, sha, *at, true, *sq))?;
+            live += 1;
         }
         self.next_seq.store(seq + 1, AtomicOrdering::SeqCst);
         self.commit_and_reload(w)?;
-        Ok((heads.len(), hist.len()))
+        Ok((live, hist.len()))
+    }
+
+    /// The live doc of one key (tree version, or the archived latest).
+    pub fn get_live(&self, key: &str) -> Result<Option<Hit>> {
+        let searcher = self.reader.searcher();
+        let q = TermQuery::new(
+            Term::from_field_text(self.fields.doc_id, &head_doc_id(key)),
+            IndexRecordOption::Basic,
+        );
+        let top = searcher.search(&q, &TopDocs::with_limit(1))?;
+        match top.first() {
+            None => Ok(None),
+            Some((score, addr)) => Ok(Some(self.to_hit(&searcher, *addr, *score)?)),
+        }
     }
 
     pub fn search(&self, q: &str, opts: &SearchOpts) -> Result<Vec<Hit>> {
@@ -434,42 +466,49 @@ impl SearchIndex {
         };
         let mut hits = vec![];
         for (score, addr) in top {
-            let doc: TantivyDocument = searcher.doc(addr)?;
-            let text = |f: Field| {
-                doc.get_first(f).and_then(|v| v.as_str()).unwrap_or_default().to_string()
-            };
-            let multi = |f: Field| -> Vec<String> {
-                doc.get_all(f).filter_map(|v| v.as_str()).map(String::from).collect()
-            };
-            hits.push(Hit {
-                key: text(self.fields.key),
-                title: text(self.fields.title),
-                kind: text(self.fields.kind),
-                body: text(self.fields.body),
-                tags: multi(self.fields.tags),
-                service: text(self.fields.service),
-                hosts: multi(self.fields.hosts),
-                severity: text(self.fields.severity),
-                status: text(self.fields.status),
-                knowledge: multi(self.fields.knowledge),
-                resolution: text(self.fields.resolution),
-                detection: text(self.fields.detection),
-                affected: serde_json::from_str(&text(self.fields.affected)).unwrap_or_default(),
-                started_at: text(self.fields.started_at),
-                detected_at: text(self.fields.detected_at),
-                mitigated_at: text(self.fields.mitigated_at),
-                resolved_at: text(self.fields.resolved_at),
-                sha: text(self.fields.sha),
-                committed_at: iso(
-                    doc.get_first(self.fields.committed_at).and_then(|v| v.as_i64()).unwrap_or(0),
-                ),
-                is_head: doc.get_first(self.fields.is_head).and_then(|v| v.as_u64()).unwrap_or(0)
-                    == 1,
-                updated_at: text(self.fields.updated_at),
-                score,
-            });
+            hits.push(self.to_hit(&searcher, addr, score)?);
         }
         Ok(hits)
+    }
+
+    fn to_hit(
+        &self,
+        searcher: &tantivy::Searcher,
+        addr: tantivy::DocAddress,
+        score: f32,
+    ) -> Result<Hit> {
+        let doc: TantivyDocument = searcher.doc(addr)?;
+        let text =
+            |f: Field| doc.get_first(f).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let multi = |f: Field| -> Vec<String> {
+            doc.get_all(f).filter_map(|v| v.as_str()).map(String::from).collect()
+        };
+        Ok(Hit {
+            key: text(self.fields.key),
+            title: text(self.fields.title),
+            kind: text(self.fields.kind),
+            body: text(self.fields.body),
+            tags: multi(self.fields.tags),
+            service: text(self.fields.service),
+            hosts: multi(self.fields.hosts),
+            severity: text(self.fields.severity),
+            status: text(self.fields.status),
+            knowledge: multi(self.fields.knowledge),
+            resolution: text(self.fields.resolution),
+            detection: text(self.fields.detection),
+            affected: serde_json::from_str(&text(self.fields.affected)).unwrap_or_default(),
+            started_at: text(self.fields.started_at),
+            detected_at: text(self.fields.detected_at),
+            mitigated_at: text(self.fields.mitigated_at),
+            resolved_at: text(self.fields.resolved_at),
+            sha: text(self.fields.sha),
+            committed_at: iso(
+                doc.get_first(self.fields.committed_at).and_then(|v| v.as_i64()).unwrap_or(0),
+            ),
+            is_head: doc.get_first(self.fields.is_head).and_then(|v| v.as_u64()).unwrap_or(0) == 1,
+            updated_at: text(self.fields.updated_at),
+            score,
+        })
     }
 }
 
@@ -624,6 +663,38 @@ mod tests {
         assert_eq!(hits[0].kind, "knowledge");
         assert!(hits[0].service.is_empty());
         assert!(hits[0].status.is_empty());
+    }
+
+    // the two deletion semantics: archived closed entries stay in the default
+    // search as their latest version; deleted knowledge is a retraction and
+    // drops to history-only
+    #[test]
+    fn archived_entries_live_in_default_search() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        store.upsert(entry("gone-note", "Wrong note", "a retracted statement"), "2026-07-20").unwrap();
+        store.delete("gone-note").unwrap();
+        let mut inc = make_incident("inc-2026-07-20-oom", "svc", "resolved");
+        inc.resolution = "raised the memory limit".into();
+        store.upsert(inc, "2026-07-20").unwrap();
+        store.archive("inc-2026-07-20-oom").unwrap();
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        // the archived incident is a first-class default-search citizen
+        let hits = index.search("memory limit", &o(false)).unwrap();
+        assert_eq!(hits.len(), 1, "{:?}", hits.iter().map(|h| &h.key).collect::<Vec<_>>());
+        assert_eq!(hits[0].key, "inc-2026-07-20-oom");
+        assert!(hits[0].is_head);
+        assert_eq!(hits[0].status, "resolved");
+        assert!(index.get_live("inc-2026-07-20-oom").unwrap().is_some());
+
+        // the retracted note is not; history still holds both
+        assert!(index.search("retracted statement", &o(false)).unwrap().is_empty());
+        assert_eq!(index.search("retracted statement", &o(true)).unwrap().len(), 1);
+        assert!(index.get_live("gone-note").unwrap().is_none());
     }
 
     #[test]

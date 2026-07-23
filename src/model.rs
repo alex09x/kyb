@@ -4,12 +4,15 @@ use std::sync::OnceLock;
 
 pub const KIND_KNOWLEDGE: &str = "knowledge";
 pub const KIND_INCIDENT: &str = "incident";
-/// Incident keys carry this prefix so the flat key space stays readable and
-/// a knowledge entry can never collide with a report.
+pub const KIND_TASK: &str = "task";
+/// Incident/task keys carry a prefix so the flat key space stays readable and
+/// a knowledge entry can never collide with a report or a task.
 pub const INCIDENT_PREFIX: &str = "inc-";
+pub const TASK_PREFIX: &str = "task-";
 
 pub const SEVERITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 pub const STATUSES: [&str; 3] = ["open", "mitigated", "resolved"];
+pub const TASK_STATUSES: [&str; 3] = ["open", "done", "dropped"];
 
 fn default_kind() -> String {
     KIND_KNOWLEDGE.to_string()
@@ -187,6 +190,17 @@ impl Entry {
         self.kind == KIND_INCIDENT
     }
 
+    pub fn is_task(&self) -> bool {
+        self.kind == KIND_TASK
+    }
+
+    /// A closed entry leaves the working tree (archive-on-close); its latest
+    /// version stays in the default search.
+    pub fn is_closed(&self) -> bool {
+        (self.is_incident() && self.status == "resolved")
+            || (self.is_task() && matches!(self.status.as_str(), "done" | "dropped"))
+    }
+
     /// Unfinished follow-ups: `- [ ]` checklist items in the body (a body
     /// convention, not schema). Lets a resolve warn about loose ends and a
     /// listing surface reports that still need work.
@@ -205,6 +219,28 @@ impl Entry {
             KIND_KNOWLEDGE => {
                 if self.key.starts_with(INCIDENT_PREFIX) {
                     bail!("keys starting with '{INCIDENT_PREFIX}' are reserved for incident reports");
+                }
+                if self.key.starts_with(TASK_PREFIX) {
+                    bail!("keys starting with '{TASK_PREFIX}' are reserved for tasks");
+                }
+            }
+            KIND_TASK => {
+                if !self.key.starts_with(TASK_PREFIX) {
+                    bail!("task keys must start with '{TASK_PREFIX}' (e.g. task-raise-log-retention)");
+                }
+                if !TASK_STATUSES.contains(&self.status.as_str()) {
+                    bail!("task status must be one of: {}", TASK_STATUSES.join("|"));
+                }
+                if self.is_closed() && self.resolution.trim().is_empty() {
+                    bail!("closing a task needs a resolution: what came of it, or why it was dropped");
+                }
+                for k in &self.knowledge {
+                    if !is_valid_key(k) {
+                        bail!("knowledge link '{k}' is not a valid key slug");
+                    }
+                }
+                if let Some(hit) = find_secret(&self.resolution) {
+                    bail!("resolution looks like a secret ({hit}…) — store secrets as pointers in refs");
                 }
             }
             KIND_INCIDENT => {
@@ -242,7 +278,9 @@ impl Entry {
                     bail!("detection looks like a secret ({hit}…) — store secrets as pointers in refs");
                 }
             }
-            other => bail!("kind must be '{KIND_KNOWLEDGE}' or '{KIND_INCIDENT}', got '{other}'"),
+            other => bail!(
+                "kind must be '{KIND_KNOWLEDGE}', '{KIND_INCIDENT}' or '{KIND_TASK}', got '{other}'"
+            ),
         }
         if let Some(hit) = find_secret(&self.body) {
             bail!("body looks like a secret ({hit}…) — store secrets as pointers in refs");

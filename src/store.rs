@@ -1,14 +1,32 @@
-use crate::model::Entry;
+use crate::model::{Entry, INCIDENT_PREFIX, KIND_KNOWLEDGE, TASK_PREFIX};
 use anyhow::{Context, Result};
 use git2::{Delta, DiffOptions, Repository, Signature, Sort};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The `kyb-data/` git repo is the single source of truth. A Repository is
 /// opened per operation (cheap, and sidesteps Send/Sync questions); parallel
 /// writes are serialized by the shared write mutex in AppState.
+///
+/// Layout v2: one directory per kind — `knowledge/`, `incidents/`, `tasks/` —
+/// and the working tree holds only what is live (open incidents/tasks,
+/// current knowledge). Closed entries are archived: the file is removed, the
+/// content stays in git history and in the search index.
 pub struct Store {
     root: PathBuf,
+}
+
+const KIND_DIRS: [&str; 3] = ["knowledge", "incidents", "tasks"];
+
+fn dir_for_key(key: &str) -> &'static str {
+    if key.starts_with(INCIDENT_PREFIX) {
+        "incidents"
+    } else if key.starts_with(TASK_PREFIX) {
+        "tasks"
+    } else {
+        "knowledge"
+    }
 }
 
 pub struct Committed {
@@ -50,7 +68,9 @@ impl Store {
         if Repository::open(root).is_err() {
             Repository::init(root).context("git init kyb-data")?;
         }
-        Ok(Store { root: root.to_path_buf() })
+        let store = Store { root: root.to_path_buf() };
+        store.migrate_layout()?;
+        Ok(store)
     }
 
     fn repo(&self) -> Result<Repository> {
@@ -62,21 +82,98 @@ impl Store {
         Ok(Signature::now("kyb", "kyb@local")?)
     }
 
-    fn file_name(key: &str) -> String {
+    /// Layout-v2 path of a key, plus the legacy flat path — old commits (and
+    /// stray hand-made files) live at the repo root.
+    fn file_rel(key: &str) -> String {
+        format!("{}/{key}.md", dir_for_key(key))
+    }
+
+    fn legacy_rel(key: &str) -> String {
         format!("{key}.md")
     }
 
-    fn file_path(&self, key: &str) -> PathBuf {
-        self.root.join(Self::file_name(key))
+    fn existing_rel(&self, key: &str) -> Option<String> {
+        [Self::file_rel(key), Self::legacy_rel(key)]
+            .into_iter()
+            .find(|rel| self.root.join(rel).is_file())
+    }
+
+    /// One-time move from the flat layout to per-kind directories, done by the
+    /// service itself on start: the canon is self-migrating, no manual step on
+    /// the server. Closed incidents/tasks are archived in the same pass — the
+    /// new invariant is "the tree holds only what is live".
+    fn migrate_layout(&self) -> Result<()> {
+        let mut moves: Vec<Entry> = vec![];
+        for f in fs::read_dir(&self.root)? {
+            let p = f?.path();
+            if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(s) = fs::read_to_string(&p) else { continue };
+            let Ok(entry) = Entry::from_markdown(&s) else { continue };
+            // only files named after their key move; foreign md stays put
+            if p.file_name().and_then(|n| n.to_str()) != Some(&Self::legacy_rel(&entry.key)) {
+                continue;
+            }
+            moves.push(entry);
+        }
+        if moves.is_empty() {
+            return Ok(());
+        }
+        let repo = self.repo()?;
+        let mut idx = repo.index()?;
+        for e in &moves {
+            let old_rel = Self::legacy_rel(&e.key);
+            let new_rel = Self::file_rel(&e.key);
+            let new_abs = self.root.join(&new_rel);
+            fs::create_dir_all(new_abs.parent().expect("kind dir has a parent"))?;
+            fs::rename(self.root.join(&old_rel), &new_abs)?;
+            // an uncommitted stray file is not in the index — move it silently
+            if idx.get_path(Path::new(&old_rel), 0).is_some() {
+                idx.remove_path(Path::new(&old_rel))?;
+            }
+            idx.add_path(Path::new(&new_rel))?;
+        }
+        self.commit_index(&repo, &mut idx, &format!("kyb: migrate layout v2 ({} entries)", moves.len()))?;
+        eprintln!("kyb: migrated {} entries to the per-kind layout", moves.len());
+
+        let closed: Vec<&Entry> = moves.iter().filter(|e| e.is_closed()).collect();
+        if !closed.is_empty() {
+            for e in &closed {
+                let rel = Self::file_rel(&e.key);
+                fs::remove_file(self.root.join(&rel))?;
+                idx.remove_path(Path::new(&rel))?;
+            }
+            self.commit_index(
+                &repo,
+                &mut idx,
+                &format!("kyb: archive {} closed entries (layout migration)", closed.len()),
+            )?;
+            eprintln!("kyb: archived {} closed entries during migration", closed.len());
+        }
+        Ok(())
+    }
+
+    fn commit_index(&self, repo: &Repository, idx: &mut git2::Index, msg: &str) -> Result<(String, i64)> {
+        idx.write()?;
+        let tree = repo.find_tree(idx.write_tree()?)?;
+        let sig = Self::sig()?;
+        let parent = match repo.head() {
+            Ok(h) => Some(h.peel_to_commit()?),
+            Err(_) => None,
+        };
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let oid = repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)?;
+        let at = repo.find_commit(oid)?.time().seconds();
+        Ok((oid.to_string(), at))
     }
 
     pub fn get(&self, key: &str) -> Result<Option<Entry>> {
-        let p = self.file_path(key);
-        if !p.exists() {
+        let Some(rel) = self.existing_rel(key) else {
             return Ok(None);
-        }
-        let s = fs::read_to_string(&p)?;
-        Ok(Some(Entry::from_markdown(&s).with_context(|| format!("corrupt file {key}.md"))?))
+        };
+        let s = fs::read_to_string(self.root.join(&rel))?;
+        Ok(Some(Entry::from_markdown(&s).with_context(|| format!("corrupt file {rel}"))?))
     }
 
     /// Version of a key at a specific commit (sha or any rev).
@@ -90,12 +187,14 @@ impl Store {
             return Ok(None);
         };
         let tree = commit.tree()?;
-        let Some(te) = tree.get_name(&Self::file_name(key)) else {
-            return Ok(None);
-        };
-        let blob = te.to_object(&repo)?.peel_to_blob()?;
-        let s = std::str::from_utf8(blob.content()).context("file is not utf-8")?;
-        Ok(Some(Entry::from_markdown(s)?))
+        // pre-migration commits hold the file at the legacy flat path
+        for rel in [Self::file_rel(key), Self::legacy_rel(key)] {
+            let Ok(te) = tree.get_path(Path::new(&rel)) else { continue };
+            let blob = te.to_object(&repo)?.peel_to_blob()?;
+            let s = std::str::from_utf8(blob.content()).context("file is not utf-8")?;
+            return Ok(Some(Entry::from_markdown(s)?));
+        }
+        Ok(None)
     }
 
     fn commit_path(&self, rel: &str, msg: &str, delete: bool) -> Result<(String, i64)> {
@@ -128,43 +227,103 @@ impl Store {
             }
         }
         entry.updated_at = today.to_string();
-        fs::write(self.file_path(&entry.key), entry.to_markdown())?;
-        let (sha, committed_at) = self.commit_path(
-            &Self::file_name(&entry.key),
-            &format!("kyb: upsert {}", entry.key),
-            false,
-        )?;
+        let rel = Self::file_rel(&entry.key);
+        let abs = self.root.join(&rel);
+        fs::create_dir_all(abs.parent().expect("kind dir has a parent"))?;
+        fs::write(&abs, entry.to_markdown())?;
+        let (sha, committed_at) =
+            self.commit_path(&rel, &format!("kyb: upsert {}", entry.key), false)?;
         let c = Committed { sha, committed_at, entry };
         Ok(if existing.is_some() { UpsertOutcome::Updated(c) } else { UpsertOutcome::Created(c) })
     }
 
-    pub fn delete(&self, key: &str) -> Result<Option<String>> {
-        let p = self.file_path(key);
-        if !p.exists() {
+    fn remove_file(&self, key: &str, msg: &str) -> Result<Option<String>> {
+        let Some(rel) = self.existing_rel(key) else {
             return Ok(None);
-        }
-        fs::remove_file(&p)?;
-        let (sha, _) = self.commit_path(&Self::file_name(key), &format!("kyb: delete {key}"), true)?;
+        };
+        fs::remove_file(self.root.join(&rel))?;
+        let (sha, _) = self.commit_path(&rel, msg, true)?;
         Ok(Some(sha))
+    }
+
+    /// Retraction: the entry was wrong. It leaves the default search
+    /// (history keeps it, as everything else).
+    pub fn delete(&self, key: &str) -> Result<Option<String>> {
+        self.remove_file(key, &format!("kyb: delete {key}"))
+    }
+
+    /// Archival: a closed incident/task leaves the working tree, but its
+    /// latest version stays in the default search.
+    pub fn archive(&self, key: &str) -> Result<Option<String>> {
+        self.remove_file(key, &format!("kyb: archive {key}"))
     }
 
     pub fn list_head(&self) -> Result<Vec<Entry>> {
         let mut out = vec![];
-        for e in fs::read_dir(&self.root)? {
-            let p = e?.path();
-            if p.extension().and_then(|x| x.to_str()) != Some("md") {
-                continue;
+        let mut dirs = vec![self.root.clone()];
+        for d in KIND_DIRS {
+            let p = self.root.join(d);
+            if p.is_dir() {
+                dirs.push(p);
             }
-            let s = fs::read_to_string(&p)?;
-            match Entry::from_markdown(&s) {
-                Ok(en) => out.push(en),
-                Err(err) => eprintln!("kyb: skipping {}: {err:#}", p.display()),
+        }
+        for dir in dirs {
+            for e in fs::read_dir(&dir)? {
+                let p = e?.path();
+                if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("md") {
+                    continue;
+                }
+                let s = fs::read_to_string(&p)?;
+                match Entry::from_markdown(&s) {
+                    Ok(en) => out.push(en),
+                    Err(err) => eprintln!("kyb: skipping {}: {err:#}", p.display()),
+                }
             }
         }
         Ok(out)
     }
 
+    /// Latest content version of a key straight from history — how archived
+    /// entries are read after their file is gone.
+    pub fn latest_version(&self, key: &str) -> Result<Option<Entry>> {
+        let repo = self.repo()?;
+        if repo.head().is_err() {
+            return Ok(None);
+        }
+        let mut walk = repo.revwalk()?;
+        walk.push_head()?;
+        walk.set_sorting(Sort::TOPOLOGICAL)?;
+        for oid in walk {
+            let oid = oid?;
+            let commit = repo.find_commit(oid)?;
+            let tree = commit.tree()?;
+            for rel in [Self::file_rel(key), Self::legacy_rel(key)] {
+                let Ok(te) = tree.get_path(Path::new(&rel)) else { continue };
+                let blob = te.to_object(&repo)?.peel_to_blob()?;
+                let Ok(s) = std::str::from_utf8(blob.content()) else { continue };
+                return Ok(Entry::from_markdown(s).ok());
+            }
+        }
+        Ok(None)
+    }
+
+    /// Latest versions of archived incidents/tasks: keys that are gone from
+    /// the tree but must stay findable (feeds the vector side).
+    pub fn archived_latest(&self) -> Result<Vec<Entry>> {
+        let alive: HashSet<String> = self.list_head()?.into_iter().map(|e| e.key).collect();
+        let mut last: HashMap<String, Entry> = HashMap::new();
+        for h in self.walk_history()? {
+            last.insert(h.entry.key.clone(), h.entry);
+        }
+        Ok(last
+            .into_values()
+            .filter(|e| !alive.contains(&e.key) && e.kind != KIND_KNOWLEDGE)
+            .collect())
+    }
+
     /// Full history: every commit × changed .md files → one version per doc.
+    /// A version identical in content to the key's previous one (the layout
+    /// migration is a pure rename) is skipped — moves are not new knowledge.
     pub fn walk_history(&self) -> Result<Vec<HistoryDoc>> {
         let repo = self.repo()?;
         if repo.head().is_err() {
@@ -175,6 +334,7 @@ impl Store {
         // topological order: same-second commits don't shuffle
         walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
         let mut out = vec![];
+        let mut last_content: HashMap<String, Entry> = HashMap::new();
         for oid in walk {
             let oid = oid?;
             let commit = repo.find_commit(oid)?;
@@ -197,11 +357,17 @@ impl Store {
                 let Ok(blob) = obj.peel_to_blob() else { continue };
                 let Ok(s) = std::str::from_utf8(blob.content()) else { continue };
                 match Entry::from_markdown(s) {
-                    Ok(entry) => out.push(HistoryDoc {
-                        sha: oid.to_string(),
-                        committed_at: commit.time().seconds(),
-                        entry,
-                    }),
+                    Ok(entry) => {
+                        if last_content.get(&entry.key).is_some_and(|prev| prev.same_content(&entry)) {
+                            continue;
+                        }
+                        last_content.insert(entry.key.clone(), entry.clone());
+                        out.push(HistoryDoc {
+                            sha: oid.to_string(),
+                            committed_at: commit.time().seconds(),
+                            entry,
+                        })
+                    }
                     Err(err) => eprintln!("kyb: history skip {}@{oid}: {err:#}", path.display()),
                 }
             }
@@ -219,7 +385,6 @@ impl Store {
         walk.push_head()?;
         // topological: newest first, stable even for same-second commits
         walk.set_sorting(Sort::TOPOLOGICAL)?;
-        let rel = Self::file_name(key);
         let mut out = vec![];
         for oid in walk {
             let oid = oid?;
@@ -230,15 +395,24 @@ impl Store {
                 Err(_) => None,
             };
             let mut dopts = DiffOptions::new();
-            dopts.pathspec(&rel);
+            // both layouts: the key's current path and its pre-migration one
+            dopts.pathspec(Self::file_rel(key));
+            dopts.pathspec(Self::legacy_rel(key));
             let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut dopts))?;
-            for d in diff.deltas() {
-                let change = match d.status() {
-                    Delta::Added => "added",
-                    Delta::Modified => "modified",
-                    Delta::Deleted => "deleted",
-                    _ => continue,
-                };
+            let changes: Vec<&str> = diff
+                .deltas()
+                .filter_map(|d| match d.status() {
+                    Delta::Added => Some("added"),
+                    Delta::Modified => Some("modified"),
+                    Delta::Deleted => Some("deleted"),
+                    _ => None,
+                })
+                .collect();
+            // added+deleted in one commit = the migration move, not a change
+            if changes.contains(&"added") && changes.contains(&"deleted") {
+                continue;
+            }
+            for change in changes {
                 out.push(VersionInfo {
                     sha: oid.to_string(),
                     committed_at: iso(commit.time().seconds()),
@@ -411,8 +585,74 @@ mod tests {
         let store = Store::open(dir.path()).unwrap();
         store.upsert(entry("k", "original body"), "2026-07-20").unwrap();
         let manual = store.get("k").unwrap().unwrap().to_markdown().replace("original", "hand-edited");
-        std::fs::write(dir.path().join("k.md"), manual).unwrap();
+        std::fs::write(dir.path().join("knowledge/k.md"), manual).unwrap();
         assert!(store.get("k").unwrap().unwrap().body.contains("hand-edited"));
+    }
+
+    // legacy flat repos migrate themselves on open: files move into per-kind
+    // dirs, closed entries are archived, history and old shas stay readable
+    #[test]
+    fn layout_migration_from_flat() {
+        let dir = tempfile::tempdir().unwrap();
+        // build a v1 (flat) canon by hand: knowledge + resolved incident at the root
+        let legacy_sha = {
+            let repo = Repository::init(dir.path()).unwrap();
+            let know = entry("alpha", "the knowledge body");
+            let mut inc = entry("inc-2026-07-20-oom", "it broke and was fixed");
+            inc.kind = "incident".into();
+            inc.service = "svc".into();
+            inc.severity = "low".into();
+            inc.status = "resolved".into();
+            inc.resolution = "restarted the recorder".into();
+            fs::write(dir.path().join("alpha.md"), know.to_markdown()).unwrap();
+            fs::write(dir.path().join("inc-2026-07-20-oom.md"), inc.to_markdown()).unwrap();
+            let mut idx = repo.index().unwrap();
+            idx.add_path(Path::new("alpha.md")).unwrap();
+            idx.add_path(Path::new("inc-2026-07-20-oom.md")).unwrap();
+            idx.write().unwrap();
+            let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+            let sig = Signature::now("kyb", "kyb@local").unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "legacy layout", &tree, &[]).unwrap().to_string()
+        };
+
+        let store = Store::open(dir.path()).unwrap(); // migrates here
+        // knowledge moved into its dir; the closed incident was archived
+        assert!(dir.path().join("knowledge/alpha.md").is_file());
+        assert!(!dir.path().join("alpha.md").exists());
+        assert!(!dir.path().join("incidents/inc-2026-07-20-oom.md").exists());
+        assert_eq!(store.get("alpha").unwrap().unwrap().body, "the knowledge body");
+        assert!(store.get("inc-2026-07-20-oom").unwrap().is_none());
+        // ...but its latest version is still readable and listed as archived
+        let latest = store.latest_version("inc-2026-07-20-oom").unwrap().unwrap();
+        assert_eq!(latest.resolution, "restarted the recorder");
+        let archived = store.archived_latest().unwrap();
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].key, "inc-2026-07-20-oom");
+        // pre-migration shas resolve through the legacy path
+        let old = store.get_at("alpha", &legacy_sha).unwrap().unwrap();
+        assert_eq!(old.body, "the knowledge body");
+        // the pure rename is not a new version: one content version per key
+        assert_eq!(store.walk_history().unwrap().len(), 2);
+        let hist = store.history("alpha").unwrap();
+        assert_eq!(hist.len(), 1, "rename skipped: {hist:?}");
+        assert_eq!(hist[0].change, "added");
+        // reopening is idempotent — no new commits on a second open
+        let head_before = store.head_info().unwrap();
+        let store2 = Store::open(dir.path()).unwrap();
+        assert_eq!(store2.head_info().unwrap(), head_before);
+    }
+
+    // archive and delete leave different traces in the log
+    #[test]
+    fn archive_and_delete_messages_differ() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store.upsert(entry("a", "x"), "2026-07-20").unwrap();
+        store.upsert(entry("b", "y"), "2026-07-20").unwrap();
+        store.archive("a").unwrap().unwrap();
+        store.delete("b").unwrap().unwrap();
+        assert!(store.history("a").unwrap()[0].message.contains("archive"));
+        assert!(store.history("b").unwrap()[0].message.contains("delete"));
     }
 
     #[test]

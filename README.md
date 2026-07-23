@@ -13,7 +13,7 @@ truth that survives between sessions and across machines.
 <br/>
 
 [![license](https://img.shields.io/badge/license-MIT-00b3c4?labelColor=1a1d24)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-219_passing-2ea043?labelColor=1a1d24)](#stack--tests)
+[![tests](https://img.shields.io/badge/tests-223_passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
@@ -41,11 +41,17 @@ reports**: what broke, the impact, how to live with it, and how it ended.
 ## How it works
 
 - **Git is the canon — there is no database.** One markdown file (YAML frontmatter + body)
-  per entry, one commit per change, **a commit sha is a version id**. History, diff and
-  rollback come for free; the canon can be read and edited with any text editor.
+  per entry — under `knowledge/`, `incidents/` or `tasks/` by kind — one commit per change,
+  **a commit sha is a version id**. History, diff and rollback come for free; the canon can
+  be read and edited with any text editor. (Flat pre-v2 canons migrate themselves on start.)
+- **The tree holds only what is live.** Closing an incident or a task *archives* it: the
+  file leaves the working tree, but the final version — resolution included — stays in the
+  **default search**, in the listings and in `GET` (marked `archived`). Deleting plain
+  knowledge is a *retraction* and drops it from the default search. Git keeps everything
+  either way.
 - **Tantivy is the index** — a disposable cache rebuilt from git on every start. It covers
-  the current state *and every historical version*, so agents can search what the knowledge
-  said before it changed (`--history`: "what moved where").
+  the latest version of every key *and every historical version*, so agents can search what
+  the knowledge said before it changed (`--history`: "what moved where").
 - **Search is hybrid** — BM25 fused (reciprocal rank) with vector search over every entry
   (multilingual-e5-small, int8 ONNX, runs locally on CPU in ~5 ms). Ask in one language about
   a base written in another and it lands; exact technical terms still rank first. No model on
@@ -86,6 +92,19 @@ a story*:
 The server teaches structure instead of gating on it: a bare report is accepted but the
 reply carries `hints` naming the missing actionable parts. `kyb incident --template` prints
 the canonical skeleton.
+
+Resolving archives the report: the canon stays clean (open things only), the record stays
+searchable forever.
+
+---
+
+## Tasks
+
+The third kind (`kind: task`, keys prefixed `task-`): short actionable notes and ideas with
+the same close-with-an-outcome discipline — `open → done | dropped`, **a resolution is
+required either way** ("dropped: obsolete after the rewrite" is knowledge too) — and none of
+the incident ceremony. Closing archives the task; `kyb tasks` and the search keep the full
+record.
 
 ---
 
@@ -131,7 +150,11 @@ kyb incident --key inc-2026-07-22-orders-api-oom --title "..." --service orders_
              [--detection "check + healthy result"] \
              [--affected '[{"scope":"...","from":"...","to":"..."}]'] <<< "body"
 kyb incidents [--status open] [--service X] [--open-followups]
-kyb resolve inc-2026-07-22-orders-api-oom <<< "what fixed it"   # resolution is mandatory
+kyb resolve inc-2026-07-22-orders-api-oom <<< "what fixed it"   # resolution is mandatory; closing archives
+
+kyb task --key task-raise-log-retention --title "..." [--tags idea] <<< "body"
+kyb tasks [--status open] [--open-followups]
+kyb done task-raise-log-retention <<< "what came of it"         # or --status dropped + why
 ```
 
 ---
@@ -163,16 +186,19 @@ something breaks and fold the lesson back into knowledge after resolving.
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/knowledge` | upsert by key. Body: `{key, title, body, tags?, refs?}` → `{key, sha, changed, action}`. Identical content = `changed:false`, no commit |
-| `GET` | `/knowledge/{key}` | current entry (+ incident fields when `kind:incident`); `?at=<sha>` returns a version from history |
+| `GET` | `/knowledge/{key}` | the entry (kind-specific fields included); archived incidents/tasks come back with `archived:true`; `?at=<sha>` returns a version from history |
 | `GET` | `/knowledge/{key}/history` | `{key, versions:[{sha, committed_at, message, change}]}`, newest first |
-| `POST` | `/incidents` | upsert a report; reply carries `unknown_knowledge` for dangling links and `hints` for missing structure. `status:resolved` requires `resolution` |
-| `GET` | `/incidents` | `?status=&service=&followups=open&limit=` — open first, freshest on top |
-| `POST` | `/incidents/{key}/resolve` | `{resolution, status?=resolved}` — flips status, records the outcome, stamps the timeline |
+| `POST` | `/incidents` | upsert a report; reply carries `unknown_knowledge` for dangling links and `hints` for missing structure. `status:resolved` requires `resolution` and archives |
+| `GET` | `/incidents` | `?status=&service=&followups=open&limit=` — open first, freshest on top; archived reports included |
+| `POST` | `/incidents/{key}/resolve` | `{resolution, status?=resolved}` — flips status, records the outcome, stamps the timeline, archives on close |
+| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, knowledge?, resolution?, tags?, refs?}`; closing statuses require `resolution` and archive |
+| `GET` | `/tasks` | `?status=&followups=open&limit=` — open first, freshest on top |
+| `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — close (`done`/`dropped`) with an outcome, archives |
 | `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=` → ranked hits with full bodies |
 | `GET` | `/tags` | which topics the base covers, most used first |
-| `DELETE` | `/knowledge/{key}` | drops the current version; history stays searchable |
+| `DELETE` | `/knowledge/{key}` | knowledge: retract (drops from the default search); incident/task: archive (stays searchable) |
 | `POST` | `/reindex` | full index rebuild from git |
-| `GET` | `/healthz` | `{ok, entries, open_incidents, index_docs, last_commit}` |
+| `GET` | `/healthz` | `{ok, entries, open_incidents, open_tasks, index_docs, last_commit}` |
 
 Every request except `/healthz` is appended to a JSONL audit log: timestamp, client ip,
 method, path, query, status, duration.
@@ -200,7 +226,7 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 219 cases
+cargo test        # 223 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.

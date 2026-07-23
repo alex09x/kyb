@@ -46,13 +46,19 @@ fn embed_text(e: &model::Entry) -> String {
 
 async fn rebuild_vectors(st: &AppState) {
     let Some(sem) = st.semantic.as_ref() else { return };
-    let entries = match st.store.list_head() {
+    // live tree + archived incidents/tasks: everything the default search
+    // covers must be reachable semantically too
+    let mut entries = match st.store.list_head() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("kyb: cannot list canon for embeddings: {e:#}");
             return;
         }
     };
+    match st.store.archived_latest() {
+        Ok(mut archived) => entries.append(&mut archived),
+        Err(e) => eprintln!("kyb: archived entries not embedded: {e:#}"),
+    }
     let docs: Vec<(String, String)> =
         entries.iter().map(|e| (e.key.clone(), embed_text(e))).collect();
     match sem.rebuild(docs).await {
@@ -92,6 +98,8 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/knowledge/{key}/history", get(history))
         .route("/incidents", post(upsert_incident).get(list_incidents))
         .route("/incidents/{key}/resolve", post(resolve_incident))
+        .route("/tasks", post(upsert_task).get(list_tasks))
+        .route("/tasks/{key}/resolve", post(resolve_task))
         .route("/search", get(search))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
@@ -217,11 +225,21 @@ fn now_utc() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// The stored version of a key: the tree file, or — for archived
+/// incidents/tasks — the latest version from history. Lets wholesale updates
+/// and resolves work across the archive boundary.
+fn stored_version(st: &AppState, key: &str) -> Option<model::Entry> {
+    if let Ok(Some(e)) = st.store.get(key) {
+        return Some(e);
+    }
+    st.store.latest_version(key).ok().flatten().filter(|e| e.kind != model::KIND_KNOWLEDGE)
+}
+
 /// Server-managed incident timeline. Wholesale upserts must not wipe stamps
 /// the server set earlier, so empty timeline fields inherit from the stored
 /// version; then status transitions get stamped if the writer left them empty.
 fn stamp_timeline(st: &AppState, entry: &mut model::Entry) {
-    if let Ok(Some(old)) = st.store.get(&entry.key) {
+    if let Some(old) = stored_version(st, &entry.key) {
         let inherit = [
             (&mut entry.started_at, old.started_at),
             (&mut entry.detected_at, old.detected_at),
@@ -234,13 +252,14 @@ fn stamp_timeline(st: &AppState, entry: &mut model::Entry) {
             }
         }
     }
-    if entry.detected_at.trim().is_empty() {
+    if entry.is_incident() && entry.detected_at.trim().is_empty() {
         entry.detected_at = now_utc();
     }
     if entry.status == "mitigated" && entry.mitigated_at.trim().is_empty() {
         entry.mitigated_at = now_utc();
     }
-    if entry.status == "resolved" && entry.resolved_at.trim().is_empty() {
+    // resolved incidents and done/dropped tasks both stamp the close time
+    if entry.is_closed() && entry.resolved_at.trim().is_empty() {
         entry.resolved_at = now_utc();
     }
 }
@@ -297,7 +316,13 @@ async fn upsert_incident(State(st): St, Json(r): Json<IncidentReq>) -> Reply {
         extra.insert("hints".into(), json!(hints));
     }
     let extra = if extra.is_empty() { Value::Null } else { Value::Object(extra) };
-    commit_entry(&st, entry, extra).await
+    let closed = entry.is_closed();
+    let key = entry.key.clone();
+    let mut reply = commit_entry(&st, entry, extra).await;
+    if closed {
+        archive_closed(&st, &key, &mut reply).await;
+    }
+    reply
 }
 
 #[derive(Deserialize)]
@@ -305,34 +330,49 @@ struct ResolveReq {
     /// How it ended: what fixed it, or the accepted outcome / closing comment.
     #[serde(default)]
     resolution: String,
-    /// Target status; "resolved" when omitted. "mitigated" parks it instead.
+    /// Target status; the kind's closing status when omitted
+    /// ("resolved" for incidents, "done" for tasks).
     status: Option<String>,
 }
 
-/// Close the loop on an incident without resending the whole report: flip the
-/// status and record how it ended; every other field stays as stored.
-async fn resolve_incident(
-    State(st): St,
-    Path(key): Path<String>,
-    Json(r): Json<ResolveReq>,
-) -> Reply {
+/// Archive a closed entry: the file leaves the working tree, the latest
+/// version (already committed with the final status) stays in the default
+/// search. The live index doc and the vector are intentionally kept.
+async fn archive_closed(st: &Arc<AppState>, key: &str, reply: &mut Reply) {
+    if reply.0 != StatusCode::OK {
+        return;
+    }
+    let _w = st.writer.lock().await; // serialize git ops with other writers
+    match st.store.archive(key) {
+        Err(e) => eprintln!("kyb: archive failed for {key}: {e:#}"),
+        Ok(None) => {} // already archived
+        Ok(Some(sha)) => {
+            if let Some(obj) = reply.1.as_object_mut() {
+                obj.insert("archived".into(), json!(true));
+                obj.insert("archive_sha".into(), json!(sha));
+            }
+        }
+    }
+}
+
+/// Close the loop on an incident or a task without resending the whole entry:
+/// flip the status, record how it ended; every other field stays as stored.
+/// A closing status also archives the entry.
+async fn close_entry(st: &Arc<AppState>, key: String, want_task: bool, r: ResolveReq) -> Reply {
     if let Some(resp) = bad_key(&key) {
         return resp;
     }
-    let mut e = match st.store.get(&key) {
-        Err(err) => return err500(err),
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
-        }
-        Ok(Some(e)) => e,
+    // archived entries can still be closed again (amended resolution) or
+    // parked back to a non-closing status, which reopens the file
+    let Some(mut e) = stored_version(&st, &key) else {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})));
     };
-    if !e.is_incident() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("'{key}' is not an incident report")})),
-        );
+    if want_task != e.is_task() || (!want_task && !e.is_incident()) {
+        let what = if want_task { "a task" } else { "an incident report" };
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": format!("'{key}' is not {what}")})));
     }
-    e.status = r.status.unwrap_or_else(|| "resolved".to_string());
+    let default_close = if want_task { "done" } else { "resolved" };
+    e.status = r.status.unwrap_or_else(|| default_close.to_string());
     // an empty resolution keeps whatever was recorded before, so closing
     // twice never wipes the outcome
     if !r.resolution.trim().is_empty() {
@@ -341,7 +381,8 @@ async fn resolve_incident(
     stamp_timeline(&st, &mut e);
     // loose ends do not block a close, but they must not go silent either
     let open = e.open_followups();
-    let extra = if open > 0 && e.status == "resolved" {
+    let closed = e.is_closed();
+    let extra = if open > 0 && closed {
         json!({
             "open_followups": open,
             "warning": format!("{open} unfinished follow-up(s) (`- [ ]`) remain in the body — reassign or finish them"),
@@ -349,7 +390,84 @@ async fn resolve_incident(
     } else {
         Value::Null
     };
-    commit_entry(&st, e, extra).await
+    let mut reply = commit_entry(st, e, extra).await;
+    if closed {
+        archive_closed(st, &key, &mut reply).await;
+    }
+    reply
+}
+
+async fn resolve_incident(
+    State(st): St,
+    Path(key): Path<String>,
+    Json(r): Json<ResolveReq>,
+) -> Reply {
+    close_entry(&st, key, false, r).await
+}
+
+async fn resolve_task(State(st): St, Path(key): Path<String>, Json(r): Json<ResolveReq>) -> Reply {
+    close_entry(&st, key, true, r).await
+}
+
+#[derive(Deserialize)]
+struct TaskReq {
+    key: String,
+    title: String,
+    body: String,
+    #[serde(default = "default_status")]
+    status: String,
+    /// Keys of knowledge entries this task concerns.
+    #[serde(default)]
+    knowledge: Vec<String>,
+    /// What came of it; required when closing (done/dropped).
+    #[serde(default)]
+    resolution: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    refs: Vec<String>,
+}
+
+async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
+    let mut entry = model::Entry {
+        key: r.key,
+        title: r.title,
+        kind: model::KIND_TASK.into(),
+        status: r.status,
+        knowledge: r.knowledge,
+        resolution: r.resolution,
+        tags: r.tags,
+        refs: r.refs,
+        body: r.body,
+        ..Default::default()
+    };
+    // tasks carry one server stamp: when they were closed
+    if entry.is_closed() && entry.resolved_at.trim().is_empty() {
+        if let Ok(Some(old)) = st.store.get(&entry.key) {
+            entry.resolved_at = old.resolved_at;
+        }
+        if entry.resolved_at.trim().is_empty() {
+            entry.resolved_at = now_utc();
+        }
+    }
+    let mut unknown = vec![];
+    for k in &entry.knowledge {
+        if model::is_valid_key(k) && !matches!(st.store.get(k), Ok(Some(_))) {
+            unknown.push(k.clone());
+        }
+    }
+    let extra = if unknown.is_empty() {
+        Value::Null
+    } else {
+        json!({"unknown_knowledge": unknown})
+    };
+    let closed = entry.is_closed();
+    let key = entry.key.clone();
+    let mut reply = commit_entry(&st, entry, extra).await;
+    if closed {
+        archive_closed(&st, &key, &mut reply).await;
+    }
+    reply
 }
 
 #[derive(Deserialize)]
@@ -362,47 +480,97 @@ struct IncidentsQ {
     limit: Option<usize>,
 }
 
-/// Current incidents from the canon: open first, then mitigated, then
-/// resolved; fresher on top within a group. `?status=` / `?service=` filter.
-async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
-    let entries = match st.store.list_head() {
-        Err(e) => return err500(e),
-        Ok(v) => v,
-    };
-    let status_rank = |s: &str| model::STATUSES.iter().position(|x| *x == s).unwrap_or(9);
+/// Open followups of a body: `- [ ]` checklist items (same rule as
+/// Entry::open_followups, but hits carry plain text).
+fn open_followups_of(body: &str) -> usize {
+    body.lines().filter(|l| l.trim_start().starts_with("- [ ]")).count()
+}
+
+/// Listings come from the index, not the tree: archived (closed) entries are
+/// part of the record. Open first, fresher on top within a group.
+fn list_kind(
+    st: &AppState,
+    kind: &str,
+    status_order: &[&str],
+    q: &IncidentsQ,
+) -> Result<Vec<index::Hit>, Reply> {
     // an empty ?status= from the CLI is "no filter", not "match nothing"
     let status = q.status.as_deref().filter(|s| !s.trim().is_empty());
     let service = q.service.as_deref().filter(|s| !s.trim().is_empty());
     let only_open_followups = q.followups.as_deref() == Some("open");
-    let mut incs: Vec<model::Entry> = entries
-        .into_iter()
-        .filter(|e| e.is_incident())
-        .filter(|e| status.is_none_or(|s| e.status == s))
-        .filter(|e| service.is_none_or(|s| e.service.eq_ignore_ascii_case(s)))
-        .filter(|e| !only_open_followups || e.open_followups() > 0)
-        .collect();
-    incs.sort_by(|a, b| {
-        status_rank(&a.status)
-            .cmp(&status_rank(&b.status))
+    let opts = index::SearchOpts {
+        limit: 500,
+        kind: Some(kind.to_string()),
+        status: status.map(String::from),
+        service: service.map(String::from),
+        ..Default::default()
+    };
+    let mut hits = match st.index.search("", &opts) {
+        Err(e) => return Err(err500(e)),
+        Ok(h) => h,
+    };
+    if only_open_followups {
+        hits.retain(|h| open_followups_of(&h.body) > 0);
+    }
+    let rank = |s: &str| status_order.iter().position(|x| *x == s).unwrap_or(9);
+    hits.sort_by(|a, b| {
+        rank(&a.status)
+            .cmp(&rank(&b.status))
             .then(b.updated_at.cmp(&a.updated_at))
             .then(a.key.cmp(&b.key))
     });
-    incs.truncate(q.limit.unwrap_or(50).min(200));
-    let rows: Vec<Value> = incs
+    hits.truncate(q.limit.unwrap_or(50).min(200));
+    Ok(hits)
+}
+
+/// `archived` on a listing row: the file is gone from the tree, the entry
+/// lives on in the index and in git history.
+fn is_archived(st: &AppState, key: &str) -> bool {
+    !matches!(st.store.get(key), Ok(Some(_)))
+}
+
+async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
+    let hits = match list_kind(&st, model::KIND_INCIDENT, &model::STATUSES, &q) {
+        Err(r) => return r,
+        Ok(h) => h,
+    };
+    let rows: Vec<Value> = hits
         .iter()
-        .map(|e| {
+        .map(|h| {
             json!({
-                "key": e.key, "title": e.title, "service": e.service, "hosts": e.hosts,
-                "severity": e.severity, "status": e.status, "knowledge": e.knowledge,
-                "resolution": e.resolution, "detection": e.detection, "affected": e.affected,
-                "started_at": e.started_at, "detected_at": e.detected_at,
-                "mitigated_at": e.mitigated_at, "resolved_at": e.resolved_at,
-                "open_followups": e.open_followups(),
-                "tags": e.tags, "updated_at": e.updated_at,
+                "key": h.key, "title": h.title, "service": h.service, "hosts": h.hosts,
+                "severity": h.severity, "status": h.status, "knowledge": h.knowledge,
+                "resolution": h.resolution, "detection": h.detection, "affected": h.affected,
+                "started_at": h.started_at, "detected_at": h.detected_at,
+                "mitigated_at": h.mitigated_at, "resolved_at": h.resolved_at,
+                "open_followups": open_followups_of(&h.body),
+                "tags": h.tags, "updated_at": h.updated_at,
+                "archived": is_archived(&st, &h.key),
             })
         })
         .collect();
     (StatusCode::OK, Json(json!({"count": rows.len(), "incidents": rows})))
+}
+
+async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
+    let hits = match list_kind(&st, model::KIND_TASK, &model::TASK_STATUSES, &q) {
+        Err(r) => return r,
+        Ok(h) => h,
+    };
+    let rows: Vec<Value> = hits
+        .iter()
+        .map(|h| {
+            json!({
+                "key": h.key, "title": h.title, "status": h.status,
+                "knowledge": h.knowledge, "resolution": h.resolution,
+                "resolved_at": h.resolved_at,
+                "open_followups": open_followups_of(&h.body),
+                "tags": h.tags, "updated_at": h.updated_at,
+                "archived": is_archived(&st, &h.key),
+            })
+        })
+        .collect();
+    (StatusCode::OK, Json(json!({"count": rows.len(), "tasks": rows})))
 }
 
 #[derive(Deserialize)]
@@ -418,6 +586,35 @@ fn bad_key(key: &str) -> Option<Reply> {
     }
 }
 
+fn entry_json(e: &model::Entry, archived: bool) -> Value {
+    let mut out = json!({
+        "key": e.key, "title": e.title, "kind": e.kind, "tags": e.tags, "refs": e.refs,
+        "updated_at": e.updated_at, "body": e.body,
+    });
+    let obj = out.as_object_mut().expect("out is an object");
+    if e.is_incident() {
+        obj.insert("service".into(), json!(e.service));
+        obj.insert("hosts".into(), json!(e.hosts));
+        obj.insert("severity".into(), json!(e.severity));
+        obj.insert("detection".into(), json!(e.detection));
+        obj.insert("affected".into(), json!(e.affected));
+        obj.insert("started_at".into(), json!(e.started_at));
+        obj.insert("detected_at".into(), json!(e.detected_at));
+        obj.insert("mitigated_at".into(), json!(e.mitigated_at));
+    }
+    if e.is_incident() || e.is_task() {
+        obj.insert("status".into(), json!(e.status));
+        obj.insert("knowledge".into(), json!(e.knowledge));
+        obj.insert("resolution".into(), json!(e.resolution));
+        obj.insert("resolved_at".into(), json!(e.resolved_at));
+        obj.insert("open_followups".into(), json!(e.open_followups()));
+    }
+    if archived {
+        obj.insert("archived".into(), json!(true));
+    }
+    out
+}
+
 async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
@@ -428,29 +625,20 @@ async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) 
     };
     match res {
         Err(e) => err500(e),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")}))),
-        Ok(Some(e)) => {
-            let mut out = json!({
-                "key": e.key, "title": e.title, "kind": e.kind, "tags": e.tags, "refs": e.refs,
-                "updated_at": e.updated_at, "body": e.body,
-            });
-            if e.is_incident() {
-                let obj = out.as_object_mut().expect("out is an object");
-                obj.insert("service".into(), json!(e.service));
-                obj.insert("hosts".into(), json!(e.hosts));
-                obj.insert("severity".into(), json!(e.severity));
-                obj.insert("status".into(), json!(e.status));
-                obj.insert("knowledge".into(), json!(e.knowledge));
-                obj.insert("resolution".into(), json!(e.resolution));
-                obj.insert("detection".into(), json!(e.detection));
-                obj.insert("affected".into(), json!(e.affected));
-                obj.insert("started_at".into(), json!(e.started_at));
-                obj.insert("detected_at".into(), json!(e.detected_at));
-                obj.insert("mitigated_at".into(), json!(e.mitigated_at));
-                obj.insert("resolved_at".into(), json!(e.resolved_at));
-                obj.insert("open_followups".into(), json!(e.open_followups()));
+        Ok(Some(e)) => (StatusCode::OK, Json(entry_json(&e, false))),
+        Ok(None) if q.at.is_none() => {
+            // not in the tree — an archived incident/task is still readable
+            // from history; deleted knowledge stays a 404 (retraction)
+            match st.store.latest_version(&key) {
+                Err(e) => err500(e),
+                Ok(Some(e)) if e.kind != model::KIND_KNOWLEDGE => {
+                    (StatusCode::OK, Json(entry_json(&e, true)))
+                }
+                _ => (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")}))),
             }
-            (StatusCode::OK, Json(out))
+        }
+        Ok(None) => {
+            (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
         }
     }
 }
@@ -552,44 +740,22 @@ async fn hybrid(
     for key in embed::fuse_lists(&lexical_keys, &scored, 0.6) {
         let hit = match by_key.remove(&key) {
             Some(h) => Some(h),
-            // semantic-only candidate: materialize it from the canon, but only
-            // if it passes the same filters the lexical side applied
-            None => match st.store.get(&key) {
-                Ok(Some(e)) => {
+            // semantic-only candidate: materialize its live doc (tree version
+            // or archived latest), but only if it passes the same filters the
+            // lexical side applied
+            None => match st.index.get_live(&key) {
+                Ok(Some(h)) => {
                     let keeps = opts
                         .tags
                         .iter()
-                        .all(|t| e.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
-                        && opts.kind.as_deref().is_none_or(|k| e.kind == k)
-                        && opts.status.as_deref().is_none_or(|s| e.status == s)
+                        .all(|t| h.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
+                        && opts.kind.as_deref().is_none_or(|k| h.kind == k)
+                        && opts.status.as_deref().is_none_or(|s| h.status == s)
                         && opts
                             .service
                             .as_deref()
-                            .is_none_or(|s| e.service.eq_ignore_ascii_case(s));
-                    keeps.then(|| index::Hit {
-                        key: e.key.clone(),
-                        title: e.title.clone(),
-                        kind: e.kind.clone(),
-                        body: e.body.clone(),
-                        tags: e.tags.clone(),
-                        service: e.service.clone(),
-                        hosts: e.hosts.clone(),
-                        severity: e.severity.clone(),
-                        status: e.status.clone(),
-                        knowledge: e.knowledge.clone(),
-                        resolution: e.resolution.clone(),
-                        detection: e.detection.clone(),
-                        affected: e.affected.clone(),
-                        started_at: e.started_at.clone(),
-                        detected_at: e.detected_at.clone(),
-                        mitigated_at: e.mitigated_at.clone(),
-                        resolved_at: e.resolved_at.clone(),
-                        sha: String::new(),
-                        committed_at: String::new(),
-                        is_head: true,
-                        updated_at: e.updated_at.clone(),
-                        score: 0.0,
-                    })
+                            .is_none_or(|s| h.service.eq_ignore_ascii_case(s));
+                    keeps.then_some(h)
                 }
                 _ => None,
             },
@@ -627,24 +793,50 @@ async fn tags(State(st): St) -> Reply {
     (StatusCode::OK, Json(json!({"count": tags.len(), "tags": tags})))
 }
 
+/// DELETE by kind: knowledge is retracted (drops out of the default search),
+/// an incident/task is archived (its latest version stays searchable).
 async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
+    let entry = match st.store.get(&key) {
+        Err(e) => return err500(e),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
+        }
+        Ok(Some(e)) => e,
+    };
     let mut w = st.writer.lock().await;
-    match st.store.delete(&key) {
-        Err(e) => err500(e),
-        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")}))),
-        Ok(Some(sha)) => {
-            st.index.delete_head(&mut w, &key);
-            if let Err(e) = st.index.commit_and_reload(&mut w) {
-                return err500(e.context("git committed but the index was not updated — run POST /reindex"));
+    if entry.kind == model::KIND_KNOWLEDGE {
+        match st.store.delete(&key) {
+            Err(e) => err500(e),
+            Ok(None) => {
+                (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
             }
-            drop(w);
-            if let Some(sem) = st.semantic.as_ref() {
-                sem.remove(&key).await;
+            Ok(Some(sha)) => {
+                st.index.delete_head(&mut w, &key);
+                if let Err(e) = st.index.commit_and_reload(&mut w) {
+                    return err500(
+                        e.context("git committed but the index was not updated — run POST /reindex"),
+                    );
+                }
+                drop(w);
+                if let Some(sem) = st.semantic.as_ref() {
+                    sem.remove(&key).await;
+                }
+                (StatusCode::OK, Json(json!({"key": key, "deleted": true, "sha": sha})))
             }
-            (StatusCode::OK, Json(json!({"key": key, "deleted": true, "sha": sha})))
+        }
+    } else {
+        // live index doc and vector stay: archived means findable
+        match st.store.archive(&key) {
+            Err(e) => err500(e),
+            Ok(None) => {
+                (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
+            }
+            Ok(Some(sha)) => {
+                (StatusCode::OK, Json(json!({"key": key, "archived": true, "sha": sha})))
+            }
         }
     }
 }
@@ -666,6 +858,7 @@ async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
     let open_incidents =
         heads.iter().filter(|e| e.is_incident() && e.status == "open").count();
+    let open_tasks = heads.iter().filter(|e| e.is_task() && e.status == "open").count();
     let index_docs = st.index.reader.searcher().num_docs();
     let last = st.store.head_info().ok().flatten();
     (
@@ -674,6 +867,7 @@ async fn healthz(State(st): St) -> Reply {
             "ok": true,
             "entries": heads.len(),
             "open_incidents": open_incidents,
+            "open_tasks": open_tasks,
             "index_docs": index_docs,
             "last_commit": last.map(|(sha, time)| json!({"sha": sha, "time": time})),
         })),
@@ -1070,41 +1264,52 @@ mod api_tests {
         assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
         assert!(v["error"].as_str().unwrap().contains("resolution"));
 
-        // close it properly: status flips, the outcome is recorded, version committed
+        // close it properly: status flips, the outcome is recorded, and the
+        // report is archived — the file leaves the tree
         let (st, v) = call(&app, "POST", &format!("/incidents/{key}/resolve"),
             Some(json!({"resolution": "Raised the memory limit to 2G; fixed the batch flush leak."}))).await;
         assert_eq!(st, StatusCode::OK, "{v}");
         assert_eq!(v["action"], "updated");
+        assert_eq!(v["archived"], true, "{v}");
         let (_, v) = call(&app, "GET", "/incidents?status=open", None).await;
         assert_eq!(v["count"], 1);
         let (_, v) = call(&app, "GET", "/healthz", None).await;
         assert_eq!(v["open_incidents"], 1);
-        // the rest of the report survived the close untouched
+        // the archived report still reads in full, marked as archived
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
         assert_eq!(v["status"], "resolved");
+        assert_eq!(v["archived"], true, "{v}");
         assert!(v["resolution"].as_str().unwrap().contains("memory limit"));
         assert_eq!(v["service"], "orders_api");
         assert_eq!(v["knowledge"], json!(["orders-api-architecture"]));
         assert!(v["body"].as_str().unwrap().contains("What happened"));
-        // resolved incidents drop to the bottom of the listing
+        // resolved incidents stay in the listing (archived), at the bottom
         let (_, v) = call(&app, "GET", "/incidents", None).await;
+        assert_eq!(v["count"], 2);
         assert_eq!(v["incidents"][1]["key"], key);
         assert_eq!(v["incidents"][1]["status"], "resolved");
-        // and the open version is still in history
+        assert_eq!(v["incidents"][1]["archived"], true);
+        // history: filed, resolved, archived
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}/history"), None).await;
-        assert_eq!(v["versions"].as_array().unwrap().len(), 2);
+        assert_eq!(v["versions"].as_array().unwrap().len(), 3);
+        assert_eq!(v["versions"][0]["change"], "deleted");
+        assert!(v["versions"][0]["message"].as_str().unwrap().contains("archive"));
 
-        // the recorded outcome is searchable — "how did we fix it" lands here
+        // the recorded outcome is searchable in the DEFAULT search even though
+        // the file is gone — "how did we fix it" lands here
         let (_, v) = call(&app, "GET", "/search?q=memory%20limit&kind=incident", None).await;
         assert_eq!(v["count"], 1, "{v}");
         assert_eq!(v["hits"][0]["resolution"].as_str().unwrap().contains("2G"), true);
+        assert_eq!(v["hits"][0]["is_head"], true);
 
-        // closing again with a new comment updates it; empty resolution keeps the old one
+        // parking an archived report back to mitigated reopens it (the file
+        // returns); the empty resolution keeps the recorded outcome
         let (_, v) = call(&app, "POST", &format!("/incidents/{key}/resolve"),
             Some(json!({"status": "mitigated"}))).await;
-        assert_eq!(v["action"], "updated");
+        assert_eq!(v["action"], "created", "reopen recreates the file: {v}");
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
         assert_eq!(v["status"], "mitigated");
+        assert!(v.get("archived").is_none(), "back in the tree: {v}");
         assert!(v["resolution"].as_str().unwrap().contains("memory limit"), "kept: {v}");
     }
 
@@ -1151,24 +1356,27 @@ mod api_tests {
         let (_, v) = call(&app, "GET", "/search?q=yesterday%20max", None).await;
         assert_eq!(v["count"], 1);
 
-        // resolve with an open follow-up: closes, but warns; resolved_at stamped
+        // resolve with an open follow-up: closes (and archives), but warns
         let (_, v) = call(&app, "POST", &format!("/incidents/{key}/resolve"),
             Some(json!({"resolution": "Recorders restarted; windows purged from CH."}))).await;
         assert_eq!(v["open_followups"], 1, "{v}");
         assert!(v["warning"].as_str().unwrap().contains("follow-up"));
+        assert_eq!(v["archived"], true);
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
         assert!(v["resolved_at"].as_str().unwrap().contains('T'));
         let (_, v) = call(&app, "GET", "/incidents?followups=open", None).await;
         assert_eq!(v["count"], 1, "resolved but loose ends still listed");
 
-        // wholesale re-add without timestamps must NOT wipe server stamps
+        // wholesale re-add without timestamps must NOT wipe server stamps,
+        // even across the archive boundary
         let (_, v) = call(&app, "POST", "/incidents", Some(json!({
             "key": key, "title": "prices 50x off after symbol remap", "service": "web_app2",
             "hosts": ["host-b"], "severity": "high", "status": "resolved",
             "resolution": "Recorders restarted; windows purged from CH.",
             "body": "Everything from before, follow-ups all done:\n- [x] guard dev NATS\n",
         }))).await;
-        assert_eq!(v["action"], "updated");
+        assert_eq!(v["action"], "created", "re-filing an archived report recreates the file: {v}");
+        assert_eq!(v["archived"], true, "and a closed status archives it again: {v}");
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
         assert_eq!(v["started_at"], "2026-07-22T08:09:40Z", "inherited: {v}");
         assert!(v["resolved_at"].as_str().unwrap().contains('T'), "inherited: {v}");
@@ -1274,23 +1482,121 @@ mod api_tests {
         assert!(v["error"].as_str().unwrap().contains("reserved"));
     }
 
-    // incidents delete like any entry; history keeps the report
+    // filing a report that is already resolved archives it immediately;
+    // archived reports stay listed, searchable and readable
     #[tokio::test]
     async fn incident_delete_and_history_search() {
         let (app, _data, _idx) = app_with_tmp();
         let key = "inc-2026-07-20-nats-lag";
-        call(&app, "POST", "/incidents", Some(json!({
+        let (_, v) = call(&app, "POST", "/incidents", Some(json!({
             "key": key, "title": "NATS consumer lag", "body": "Consumers fell behind.",
             "service": "nats", "severity": "low", "status": "resolved",
             "resolution": "Consumers caught up after the stream limit was raised.",
         }))).await;
-        let (_, v) = call(&app, "DELETE", &format!("/knowledge/{key}"), None).await;
-        assert_eq!(v["deleted"], true);
+        assert_eq!(v["archived"], true, "{v}");
+        // gone from the tree: a second DELETE has nothing to remove
+        let (st, _) = call(&app, "DELETE", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        // still part of the record: listed, found by default search, readable
         let (_, v) = call(&app, "GET", "/incidents", None).await;
-        assert_eq!(v["count"], 0);
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["incidents"][0]["archived"], true);
+        let (_, v) = call(&app, "GET", "/search?q=consumer&kind=incident", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["hits"][0]["is_head"], true);
+        assert!(v["hits"][0]["resolution"].as_str().unwrap().contains("stream limit"));
         let (_, v) = call(&app, "GET", "/search?q=consumer&history=true&kind=incident", None).await;
         assert_eq!(v["count"], 1, "{v}");
         assert_eq!(v["hits"][0]["is_head"], false);
+        // an OPEN incident deletes as an archive, not a retraction
+        let key2 = "inc-2026-07-21-open-one";
+        call(&app, "POST", "/incidents", Some(json!({
+            "key": key2, "title": "open one", "body": "x", "service": "nats", "severity": "low",
+        }))).await;
+        let (_, v) = call(&app, "DELETE", &format!("/knowledge/{key2}"), None).await;
+        assert_eq!(v["archived"], true, "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key2}"), None).await;
+        assert_eq!(v["archived"], true, "readable after archive: {v}");
+    }
+
+    // tasks: the third kind — lightweight notes/ideas with a resolution loop
+    #[tokio::test]
+    async fn task_full_flow() {
+        let (app, _data, _idx) = app_with_tmp();
+
+        // the task- namespace is fenced off from plain knowledge
+        let (st, v) = call(&app, "POST", "/knowledge",
+            Some(json!({"key": "task-fake", "title": "t", "body": "x"}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("reserved"));
+        // and task keys must carry the prefix
+        let (st, v) = call(&app, "POST", "/tasks",
+            Some(json!({"key": "fix-logs", "title": "t", "body": "x"}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+
+        // file a task; an idea is just a task tagged accordingly
+        let key = "task-raise-log-retention";
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": key, "title": "Raise container log retention to 72h",
+            "body": "Short retention loses evidence.\n\n- [ ] measure log volume first\n",
+            "tags": ["idea", "observability"],
+            "knowledge": ["web-app-architecture"],
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["action"], "created");
+        assert_eq!(v["unknown_knowledge"], json!(["web-app-architecture"]));
+
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["tasks"][0]["status"], "open");
+        assert_eq!(v["tasks"][0]["archived"], false);
+        assert_eq!(v["tasks"][0]["open_followups"], 1);
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 1);
+        let (_, v) = call(&app, "GET", "/search?q=&kind=task", None).await;
+        assert_eq!(v["count"], 1);
+
+        // closing without saying what came of it is refused
+        let (st, v) = call(&app, "POST", &format!("/tasks/{key}/resolve"), Some(json!({}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("resolution"));
+
+        // done: closed, archived, still listed and searchable
+        let (st, v) = call(&app, "POST", &format!("/tasks/{key}/resolve"),
+            Some(json!({"resolution": "Retention raised to 72h with a 2G disk budget."}))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["archived"], true, "{v}");
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["tasks"][0]["status"], "done");
+        assert_eq!(v["tasks"][0]["archived"], true);
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 0);
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["kind"], "task");
+        assert_eq!(v["archived"], true);
+        assert!(v["resolved_at"].as_str().unwrap().contains('T'), "stamped: {v}");
+        let (_, v) = call(&app, "GET", "/search?q=retention%20disk&kind=task", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["hits"][0]["is_head"], true);
+
+        // dropped needs a reason too, and ranks below done in the listing
+        call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-try-foo", "title": "Try foo", "body": "x",
+        }))).await;
+        let (_, v) = call(&app, "POST", "/tasks/task-try-foo/resolve",
+            Some(json!({"status": "dropped", "resolution": "Obsolete after the bar rewrite."}))).await;
+        assert_eq!(v["archived"], true, "{v}");
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 2);
+        assert_eq!(v["tasks"][0]["status"], "done");
+        assert_eq!(v["tasks"][1]["status"], "dropped");
+
+        // the incident endpoint refuses tasks
+        let (st, v) = call(&app, "POST", &format!("/incidents/{key}/resolve"),
+            Some(json!({"resolution": "x"}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("not an incident"));
     }
 
     #[tokio::test]
