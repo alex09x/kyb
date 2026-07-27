@@ -338,7 +338,7 @@ fn secret_res() -> &'static [regex::Regex] {
             r"ghp_[A-Za-z0-9]{20,}",
             r"github_pat_[A-Za-z0-9_]{20,}",
             r"xox[baprs]-[A-Za-z0-9-]{10,}",
-            r"sk-[A-Za-z0-9_-]{24,}",
+            r"\bsk-[A-Za-z0-9_-]{24,}",
             r"AKIA[0-9A-Z]{16}",
             r"-----BEGIN [A-Z ]*PRIVATE KEY",
             r#"(?i)(password|passwd|пароль)\s*[:=]\s*[^\s"']{6,}"#,
@@ -632,6 +632,7 @@ mod tests {
     #[case("password policy: minimum 12 chars")]
     #[case("plain text about nats and streams")]
     #[case("xoxb- truncated is harmless")]
+    #[case("[[task-prod-code-landing-rs-symbol-references-coordinate-base]]")]
     fn secrets_not_flagged(#[case] s: &str) {
         assert!(find_secret(s).is_none(), "false positive on: {s}");
     }
