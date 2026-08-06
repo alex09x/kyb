@@ -57,9 +57,13 @@ KYB_SERVER="${BOOSTER#*@}"
 step "skills + CLI: this machine"
 KYB_SERVER="$KYB_SERVER" bash "$REPO/skills/install.sh"
 
+# a sleeping laptop must not abort the whole rollout — skip dead hosts
 for h in "${FLEET[@]}"; do
   step "skills + CLI: $h"
-  scp -q -r "$REPO/skills" "$h:/tmp/kyb-skills-rollout"
+  if ! scp -q -r -o ConnectTimeout=8 -o BatchMode=yes "$REPO/skills" "$h:/tmp/kyb-skills-rollout" 2>/dev/null; then
+    echo "  skipped: $h is unreachable"
+    continue
+  fi
   # single quotes: several hosts run fish as the login shell
   ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" \
     "bash -lc 'KYB_SERVER=$KYB_SERVER bash /tmp/kyb-skills-rollout/install.sh; rm -rf /tmp/kyb-skills-rollout'" \
@@ -67,14 +71,16 @@ for h in "${FLEET[@]}"; do
 done
 
 step "verify: kyb answers from every machine"
-ok=0; fail=0
+ok=0; fail=0; skipped=0
 for h in "${FLEET[@]}"; do
-  if ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" 'bash -lc "kyb health >/dev/null 2>&1"'; then
+  if ! ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" true 2>/dev/null; then
+    echo "  $h  SKIP (unreachable)"; skipped=$((skipped+1))
+  elif ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" 'bash -lc "kyb health >/dev/null 2>&1"'; then
     echo "  $h  ok"; ok=$((ok+1))
   else
     echo "  $h  FAIL"; fail=$((fail+1))
   fi
 done
 echo
-echo "deploy done: $ok ok, $fail failed"
+echo "deploy done: $ok ok, $fail failed, $skipped unreachable"
 [ "$fail" -eq 0 ]
