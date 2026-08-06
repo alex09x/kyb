@@ -52,14 +52,17 @@ incident reports (key must start with inc-, e.g. inc-2026-07-22-orders-api-oom):
                [--affected '[{"scope":"okx","from":"...Z","to":"...Z"}]']   (JSON array)
                [--started <rfc3339>] [--detected <rfc3339>]
                [--resolution "..."] [--tags a,b] [--refs r1,r2]    (body on stdin)
-  kyb incidents [--status S] [--service X] [--open-followups] [--limit N]  (open first, freshest on top)
+  kyb incidents [--status S] [--service X] [--open-followups] [--all] [--limit N]
+               (live reports only, open first, freshest on top; --all adds archived closed ones,
+                an explicit --status also looks into the archive)
   kyb resolve <key> [--status mitigated] [--resolution "how it ended"]
                (no --resolution: the closing comment is read from stdin)
 
 tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
   kyb task --key task-<slug> --title "..." [--status open|done|dropped]
            [--knowledge key1,key2] [--resolution "..."] [--tags a,b] [--refs r1,r2]   (body on stdin)
-  kyb tasks [--status S] [--open-followups] [--limit N]     (open first, freshest on top)
+  kyb tasks [--status S] [--open-followups] [--all] [--limit N]
+           (open tasks only, freshest on top; --all adds archived closed ones)
   kyb done <key> [--status dropped] [--resolution "what came of it"]
            (no --resolution: the closing comment is read from stdin)
 
@@ -196,18 +199,19 @@ print(json.dumps({
       | curl -s -X POST "$BASE/incidents" -H 'content-type: application/json' -d @- | pretty
     ;;
   incidents)
-    status=""; service=""; followups=""; limit="50"
+    status=""; service=""; followups=""; all=""; limit="50"
     while [ $# -gt 0 ]; do
       case "$1" in
         --status) status="$2"; shift 2 ;;
         --service) service="$2"; shift 2 ;;
         --open-followups) followups="open"; shift ;;
+        --all) all="true"; shift ;;
         --limit) limit="$2"; shift 2 ;;
         *) die "incidents: unknown flag $1" ;;
       esac
     done
     ensure_up
-    curl -s "$BASE/incidents?status=$(urlenc "$status")&service=$(urlenc "$service")&followups=$followups&limit=$limit" | pretty
+    curl -s "$BASE/incidents?status=$(urlenc "$status")&service=$(urlenc "$service")&followups=$followups&all=$all&limit=$limit" | pretty
     ;;
   resolve)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true
@@ -256,17 +260,18 @@ print(json.dumps({
       | curl -s -X POST "$BASE/tasks" -H 'content-type: application/json' -d @- | pretty
     ;;
   tasks)
-    status=""; followups=""; limit="50"
+    status=""; followups=""; all=""; limit="50"
     while [ $# -gt 0 ]; do
       case "$1" in
         --status) status="$2"; shift 2 ;;
         --open-followups) followups="open"; shift ;;
+        --all) all="true"; shift ;;
         --limit) limit="$2"; shift 2 ;;
         *) die "tasks: unknown flag $1" ;;
       esac
     done
     ensure_up
-    curl -s "$BASE/tasks?status=$(urlenc "$status")&followups=$followups&limit=$limit" | pretty
+    curl -s "$BASE/tasks?status=$(urlenc "$status")&followups=$followups&all=$all&limit=$limit" | pretty
     ;;
   done)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true

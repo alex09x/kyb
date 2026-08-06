@@ -227,8 +227,8 @@ history, update it rather than deleting; `kyb rm` is for entries that were simpl
 kyb tags                                 # which topics the base covers, most used first
 kyb query "nats streams"                 # across current knowledge
 kyb query "config" --tag infra           # + tag filter (several tags = AND)
-kyb query "" --limit 50                  # empty query = list everything
-kyb query "" --recent --limit 10         # what changed lately (commit order, not relevance)
+kyb query "" --limit 50                  # empty query = list everything, newest first
+kyb query "" --recent --limit 10         # what changed lately (same order, explicit flag)
 kyb query "old rule" --history           # search ALL versions, deleted ones included
 ```
 
@@ -384,9 +384,10 @@ timeline stays in `kyb history <key>`.
 ### Lifecycle: open → mitigated → resolved
 
 ```bash
-kyb incidents                              # everything, open first, freshest on top
-kyb incidents --status open                # what is broken right now
-kyb incidents --service orders_api           # incident history of one service
+kyb incidents                              # LIVE reports only (open + mitigated), freshest on top
+kyb incidents --all                        # + archived (resolved) reports, at the bottom
+kyb incidents --status resolved            # an explicit status looks into the archive by itself
+kyb incidents --service orders_api           # incident history of one service (live)
 kyb resolve inc-2026-07-22-orders-api-oom <<< "Raised the limit to 2G; fixed the flush leak in the write buffer."
 kyb resolve inc-2026-07-22-orders-api-oom --status mitigated --resolution "Cron restarts it hourly while the fix bakes."
 ```
@@ -400,10 +401,11 @@ with the count — reassign or finish them; `kyb incidents --open-followups` lis
 (resolved included) that still have loose ends.
 
 **Closing archives the report**: the file leaves the canon, so the tree holds only open and
-mitigated incidents. Nothing is lost — the resolved report stays in `kyb incidents` (with
-`"archived": true`), in the default `kyb query`, and in `kyb get`. To amend a closed report,
-run `kyb resolve` again with a new resolution; re-filing the same key (`kyb incident`) or
-parking it (`--status mitigated`) reopens it.
+mitigated incidents. Nothing is lost — the resolved report stays in the default `kyb query`,
+in `kyb get`, and in `kyb incidents --all` / `--status resolved` / `--open-followups`
+(marked `"archived": true`); the plain `kyb incidents` shows only what is live. To amend a
+closed report, run `kyb resolve` again with a new resolution; re-filing the same key
+(`kyb incident`) or parking it (`--status mitigated`) reopens it.
 
 At the start of a session, the triage pass is:
 ```bash
@@ -447,8 +449,9 @@ Short retention loses evidence during incidents.
 - [ ] measure current log volume first
 EOF
 
-kyb tasks                                  # open first, freshest on top
-kyb tasks --open-followups                 # loose ends inside tasks
+kyb tasks                                  # open tasks only, freshest on top
+kyb tasks --all                            # + archived (done/dropped), at the bottom
+kyb tasks --open-followups                 # loose ends inside tasks (archived included)
 kyb done task-raise-log-retention <<< "Raised to 72h with a 2G disk budget."
 kyb done task-try-foo --status dropped <<< "Obsolete after the bar rewrite."
 ```
@@ -456,8 +459,8 @@ kyb done task-try-foo --status dropped <<< "Obsolete after the bar rewrite."
 - `status`: `open → done | dropped`. **Both closings require a resolution** — what came of
   it, or why it was dropped; "dropped because obsolete" is knowledge too.
 - Closing archives the task (same rule as incidents): the file leaves the canon, the task
-  stays in `kyb tasks`, in the default search and in `kyb get` with `"archived": true`.
-  The server stamps `resolved_at` on close.
+  stays in the default search, in `kyb get` and in `kyb tasks --all` with `"archived": true`;
+  plain `kyb tasks` shows only open ones. The server stamps `resolved_at` on close.
 - An idea is just a task tagged `idea`. Follow-ups discovered while resolving an incident
   that deserve their own life → file them as tasks and link the incident via `--knowledge`.
 - Session triage: `kyb incidents --status open` + `kyb tasks --status open`.

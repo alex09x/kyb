@@ -13,7 +13,7 @@ truth that survives between sessions and across machines.
 <br/>
 
 [![license](https://img.shields.io/badge/license-MIT-00b3c4?labelColor=1a1d24)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-223_passing-2ea043?labelColor=1a1d24)](#stack--tests)
+[![tests](https://img.shields.io/badge/tests-224_passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
@@ -149,11 +149,11 @@ kyb incident --key inc-2026-07-22-orders-api-oom --title "..." --service orders_
              --severity high [--hosts host-a] [--knowledge orders-api-architecture] \
              [--detection "check + healthy result"] \
              [--affected '[{"scope":"...","from":"...","to":"..."}]'] <<< "body"
-kyb incidents [--status open] [--service X] [--open-followups]
+kyb incidents [--status X] [--service X] [--open-followups] [--all]   # live by default, --all adds archived
 kyb resolve inc-2026-07-22-orders-api-oom <<< "what fixed it"   # resolution is mandatory; closing archives
 
 kyb task --key task-raise-log-retention --title "..." [--tags idea] <<< "body"
-kyb tasks [--status open] [--open-followups]
+kyb tasks [--status X] [--open-followups] [--all]               # open by default, --all adds archived
 kyb done task-raise-log-retention <<< "what came of it"         # or --status dropped + why
 ```
 
@@ -189,12 +189,12 @@ something breaks and fold the lesson back into knowledge after resolving.
 | `GET` | `/knowledge/{key}` | the entry (kind-specific fields included); archived incidents/tasks come back with `archived:true`; `?at=<sha>` returns a version from history |
 | `GET` | `/knowledge/{key}/history` | `{key, versions:[{sha, committed_at, message, change}]}`, newest first |
 | `POST` | `/incidents` | upsert a report; reply carries `unknown_knowledge` for dangling links and `hints` for missing structure. `status:resolved` requires `resolution` and archives |
-| `GET` | `/incidents` | `?status=&service=&followups=open&limit=` — open first, freshest on top; archived reports included |
+| `GET` | `/incidents` | `?status=&service=&followups=open&all=true&limit=` — live reports by default, open first, freshest on top; `all=true`, an explicit `status=` or `followups=open` include archived ones |
 | `POST` | `/incidents/{key}/resolve` | `{resolution, status?=resolved}` — flips status, records the outcome, stamps the timeline, archives on close |
 | `POST` | `/tasks` | upsert a task: `{key, title, body, status?, knowledge?, resolution?, tags?, refs?}`; closing statuses require `resolution` and archive |
-| `GET` | `/tasks` | `?status=&followups=open&limit=` — open first, freshest on top |
+| `GET` | `/tasks` | `?status=&followups=open&all=true&limit=` — open tasks by default, freshest on top; same archive rules as `/incidents` |
 | `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — close (`done`/`dropped`) with an outcome, archives |
-| `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=` → ranked hits with full bodies |
+| `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=` → ranked hits with full bodies; an empty `q` lists newest first |
 | `GET` | `/tags` | which topics the base covers, most used first |
 | `DELETE` | `/knowledge/{key}` | knowledge: retract (drops from the default search); incident/task: archive (stays searchable) |
 | `POST` | `/reindex` | full index rebuild from git |
@@ -226,7 +226,7 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 223 cases
+cargo test        # 224 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.

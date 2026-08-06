@@ -9,3 +9,4 @@ model/
 PLAN.md
 .codehaus/
 scripts/fleet.local.sh
+.prod/

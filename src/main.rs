@@ -475,8 +475,11 @@ struct IncidentsQ {
     status: Option<String>,
     service: Option<String>,
     /// followups=open keeps only reports with unfinished `- [ ]` items —
-    /// the loose ends a session can pick up.
+    /// the loose ends a session can pick up (archived included).
     followups: Option<String>,
+    /// all=true includes archived (closed) entries; the default shows only
+    /// what is live in the canon.
+    all: Option<String>,
     limit: Option<usize>,
 }
 
@@ -486,18 +489,22 @@ fn open_followups_of(body: &str) -> usize {
     body.lines().filter(|l| l.trim_start().starts_with("- [ ]")).count()
 }
 
-/// Listings come from the index, not the tree: archived (closed) entries are
-/// part of the record. Open first, fresher on top within a group.
+/// Listings come from the index, not the tree, so archived (closed) entries
+/// stay part of the record — but the DEFAULT view is what is live in the
+/// canon. Archived rows appear with `?all=true`, with an explicit `?status=`
+/// filter, or in the loose-ends view (`?followups=open`). Open first,
+/// freshest on top within a group.
 fn list_kind(
     st: &AppState,
     kind: &str,
     status_order: &[&str],
     q: &IncidentsQ,
-) -> Result<Vec<index::Hit>, Reply> {
+) -> Result<Vec<(index::Hit, bool)>, Reply> {
     // an empty ?status= from the CLI is "no filter", not "match nothing"
     let status = q.status.as_deref().filter(|s| !s.trim().is_empty());
     let service = q.service.as_deref().filter(|s| !s.trim().is_empty());
     let only_open_followups = q.followups.as_deref() == Some("open");
+    let all = matches!(q.all.as_deref(), Some("true" | "1" | "yes"));
     let opts = index::SearchOpts {
         limit: 500,
         kind: Some(kind.to_string()),
@@ -512,15 +519,27 @@ fn list_kind(
     if only_open_followups {
         hits.retain(|h| open_followups_of(&h.body) > 0);
     }
+    let mut rows: Vec<(index::Hit, bool)> = hits
+        .into_iter()
+        .map(|h| {
+            let archived = is_archived(st, &h.key);
+            (h, archived)
+        })
+        .collect();
+    if !all && status.is_none() && !only_open_followups {
+        rows.retain(|(_, archived)| !archived);
+    }
     let rank = |s: &str| status_order.iter().position(|x| *x == s).unwrap_or(9);
-    hits.sort_by(|a, b| {
+    rows.sort_by(|(a, _), (b, _)| {
         rank(&a.status)
             .cmp(&rank(&b.status))
+            // committed_at is exact (ISO); updated_at only has day granularity
+            .then(b.committed_at.cmp(&a.committed_at))
             .then(b.updated_at.cmp(&a.updated_at))
             .then(a.key.cmp(&b.key))
     });
-    hits.truncate(q.limit.unwrap_or(50).min(200));
-    Ok(hits)
+    rows.truncate(q.limit.unwrap_or(50).min(200));
+    Ok(rows)
 }
 
 /// `archived` on a listing row: the file is gone from the tree, the entry
@@ -530,13 +549,13 @@ fn is_archived(st: &AppState, key: &str) -> bool {
 }
 
 async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
-    let hits = match list_kind(&st, model::KIND_INCIDENT, &model::STATUSES, &q) {
+    let rows = match list_kind(&st, model::KIND_INCIDENT, &model::STATUSES, &q) {
         Err(r) => return r,
         Ok(h) => h,
     };
-    let rows: Vec<Value> = hits
+    let rows: Vec<Value> = rows
         .iter()
-        .map(|h| {
+        .map(|(h, archived)| {
             json!({
                 "key": h.key, "title": h.title, "service": h.service, "hosts": h.hosts,
                 "severity": h.severity, "status": h.status, "knowledge": h.knowledge,
@@ -545,7 +564,7 @@ async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
                 "mitigated_at": h.mitigated_at, "resolved_at": h.resolved_at,
                 "open_followups": open_followups_of(&h.body),
                 "tags": h.tags, "updated_at": h.updated_at,
-                "archived": is_archived(&st, &h.key),
+                "archived": archived,
             })
         })
         .collect();
@@ -553,20 +572,20 @@ async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
 }
 
 async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
-    let hits = match list_kind(&st, model::KIND_TASK, &model::TASK_STATUSES, &q) {
+    let rows = match list_kind(&st, model::KIND_TASK, &model::TASK_STATUSES, &q) {
         Err(r) => return r,
         Ok(h) => h,
     };
-    let rows: Vec<Value> = hits
+    let rows: Vec<Value> = rows
         .iter()
-        .map(|h| {
+        .map(|(h, archived)| {
             json!({
                 "key": h.key, "title": h.title, "status": h.status,
                 "knowledge": h.knowledge, "resolution": h.resolution,
                 "resolved_at": h.resolved_at,
                 "open_followups": open_followups_of(&h.body),
                 "tags": h.tags, "updated_at": h.updated_at,
-                "archived": is_archived(&st, &h.key),
+                "archived": archived,
             })
         })
         .collect();
@@ -680,7 +699,11 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
         .unwrap_or_default();
     let q = p.q.as_deref().unwrap_or("");
     let limit = p.limit.unwrap_or(10).min(100);
-    let recent = p.sort.as_deref() == Some("recent");
+    // an empty ?sort= from the CLI means "unspecified"
+    let sort = p.sort.as_deref().filter(|s| !s.trim().is_empty());
+    // relevance is meaningless without a query: an empty q is a listing,
+    // and listings read newest first
+    let recent = sort == Some("recent") || (q.trim().is_empty() && sort.is_none());
     let history = p.history.unwrap_or(false);
     // Semantic retrieval covers current knowledge only: history questions are
     // "what did this say back then", which is a lexical, not a fuzzy, ask.
@@ -1283,12 +1306,17 @@ mod api_tests {
         assert_eq!(v["service"], "orders_api");
         assert_eq!(v["knowledge"], json!(["orders-api-architecture"]));
         assert!(v["body"].as_str().unwrap().contains("What happened"));
-        // resolved incidents stay in the listing (archived), at the bottom
+        // the default listing shows only live reports; --all adds the archive
         let (_, v) = call(&app, "GET", "/incidents", None).await;
+        assert_eq!(v["count"], 1, "archived hidden by default: {v}");
+        let (_, v) = call(&app, "GET", "/incidents?all=true", None).await;
         assert_eq!(v["count"], 2);
         assert_eq!(v["incidents"][1]["key"], key);
         assert_eq!(v["incidents"][1]["status"], "resolved");
         assert_eq!(v["incidents"][1]["archived"], true);
+        // an explicit status filter looks into the archive on its own
+        let (_, v) = call(&app, "GET", "/incidents?status=resolved", None).await;
+        assert_eq!(v["count"], 1, "{v}");
         // history: filed, resolved, archived
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}/history"), None).await;
         assert_eq!(v["versions"].as_array().unwrap().len(), 3);
@@ -1497,8 +1525,10 @@ mod api_tests {
         // gone from the tree: a second DELETE has nothing to remove
         let (st, _) = call(&app, "DELETE", &format!("/knowledge/{key}"), None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
-        // still part of the record: listed, found by default search, readable
+        // still part of the record: listed with --all, found by default search
         let (_, v) = call(&app, "GET", "/incidents", None).await;
+        assert_eq!(v["count"], 0, "archived hidden from the default listing: {v}");
+        let (_, v) = call(&app, "GET", "/incidents?all=true", None).await;
         assert_eq!(v["count"], 1);
         assert_eq!(v["incidents"][0]["archived"], true);
         let (_, v) = call(&app, "GET", "/search?q=consumer&kind=incident", None).await;
@@ -1561,12 +1591,14 @@ mod api_tests {
         assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
         assert!(v["error"].as_str().unwrap().contains("resolution"));
 
-        // done: closed, archived, still listed and searchable
+        // done: closed, archived — out of the default listing, kept in --all
         let (st, v) = call(&app, "POST", &format!("/tasks/{key}/resolve"),
             Some(json!({"resolution": "Retention raised to 72h with a 2G disk budget."}))).await;
         assert_eq!(st, StatusCode::OK, "{v}");
         assert_eq!(v["archived"], true, "{v}");
         let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 0, "archived hidden by default: {v}");
+        let (_, v) = call(&app, "GET", "/tasks?all=true", None).await;
         assert_eq!(v["count"], 1);
         assert_eq!(v["tasks"][0]["status"], "done");
         assert_eq!(v["tasks"][0]["archived"], true);
@@ -1580,14 +1612,14 @@ mod api_tests {
         assert_eq!(v["count"], 1, "{v}");
         assert_eq!(v["hits"][0]["is_head"], true);
 
-        // dropped needs a reason too, and ranks below done in the listing
+        // dropped needs a reason too, and ranks below done in the --all listing
         call(&app, "POST", "/tasks", Some(json!({
             "key": "task-try-foo", "title": "Try foo", "body": "x",
         }))).await;
         let (_, v) = call(&app, "POST", "/tasks/task-try-foo/resolve",
             Some(json!({"status": "dropped", "resolution": "Obsolete after the bar rewrite."}))).await;
         assert_eq!(v["archived"], true, "{v}");
-        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        let (_, v) = call(&app, "GET", "/tasks?all=true", None).await;
         assert_eq!(v["count"], 2);
         assert_eq!(v["tasks"][0]["status"], "done");
         assert_eq!(v["tasks"][1]["status"], "dropped");
@@ -1637,6 +1669,9 @@ mod api_tests {
         assert_eq!(v["hits"][0]["key"], "older", "relevance favours the denser match");
         let (_, v) = call(&app, "GET", "/search?q=shared&sort=recent", None).await;
         assert_eq!(v["hits"][0]["key"], "newer", "recent sort puts the latest first");
+        // an empty query is a listing, and listings read newest first
+        let (_, v) = call(&app, "GET", "/search?q=&sort=", None).await;
+        assert_eq!(v["hits"][0]["key"], "newer", "empty q defaults to recent: {v}");
     }
 
     // reindex is idempotent: N runs — same numbers
