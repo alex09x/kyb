@@ -19,7 +19,9 @@ jobs:
       - run: cargo test --locked
 
   e2e-macos:
-    runs-on: macos-latest
+    runs-on: macos-14
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
