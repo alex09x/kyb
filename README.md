@@ -17,7 +17,7 @@ truth that survives between sessions and across machines.
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
-[![made by big](https://img.shields.io/badge/made_by-big-00b3c4?labelColor=1a1d24)](#)
+[![made by big](https://img.shields.io/badge/made_by-big-00b3c4?labelColor=1a1d24)](mailto:big@prod.codes)
 
 <br/>
 
