@@ -1,6 +1,6 @@
 services:
   kyb:
-    image: ghcr.io/dip-labs/kyb:latest
+    image: ghcr.io/alex09x/kyb:latest
     container_name: kyb
     restart: unless-stopped
     # Run as the host uid, or the canon under ./data ends up owned by root
