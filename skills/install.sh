@@ -57,16 +57,19 @@ agent on every machine, and it is reached through the `kyb` CLI.
 - **Write back what you learn.** Found nothing, or only a thin entry while you now understand
   the architecture? Enrich the base: `kyb add --key <slug> --title "..." [--tags a,b]` with the
   body on stdin. Updating is the same command with the same key.
-- **Write entries in English** (keys, titles, bodies, tags) and translate Russian questions into
-  English terms before querying — search is lexical, so a bilingual base splits in two and
-  half of it goes silently missing.
+- **Entries keep one canonical language (English)**; ask in any language — hybrid search
+  bridges the query side, but a base written in two languages fragments and half of it goes
+  silently missing.
 - Only verified facts (read the code, saw the config, ran the command). Never secrets in the
   body — pointers in `--refs` instead.
 - Old versions stay searchable: `kyb query "..." --history` tells you what moved where.
 - **Incident reports.** Something broke or degraded — file it: `kyb incident --key inc-<date>-<slug>
   --title "..." --service <svc> --severity low|medium|high|critical [--knowledge key1,key2]` with
-  what happened / impact / workaround on stdin. Before infra work check `kyb incidents --status open`.
-  Close with the outcome: `kyb resolve <key> <<< "what fixed it"` — a resolution is required.
+  what happened / impact / workaround on stdin. Before infra work check `kyb incidents`.
+  Close with the outcome: `kyb resolve <key> <<< "what fixed it"` — a resolution is required;
+  closing archives the report (still searchable, `kyb incidents --all`).
+- **Tasks and ideas** — short actionable notes: `kyb task --key task-<slug> --title "..."`
+  (body on stdin), list open ones with `kyb tasks`, close with `kyb done <key> <<< "outcome"`.
 - Full manual — data model, response fields, naming conventions: {manual}
 {end}"""
 p = pathlib.Path(path)
