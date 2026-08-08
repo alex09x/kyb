@@ -3,6 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -19,7 +20,7 @@ jobs:
 
   docker:
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,8 +42,8 @@ jobs:
           provenance: false
           platforms: linux/amd64
           tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
@@ -51,7 +52,7 @@ jobs:
       # the image must not just build — it must boot and answer healthz
       - name: smoke test image
         run: |
-          docker run -d --name kyb -p 9310:9310 ghcr.io/${{ github.repository }}:${{ github.sha }}
+          docker run -d --name kyb -p 9310:9310 ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           for i in $(seq 1 30); do
             curl -sf localhost:9310/healthz && exit 0
             sleep 0.5
