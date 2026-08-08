@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KYB — Shared Memory for AI Agent Fleets | kyb-memory.com</title>
+  <meta name="description" content="A git-backed, searchable knowledge base and incident tracker for AI agent fleets. Fast hybrid search, zero-secret leaks, and multi-agent skill integration.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090b10;
+      --bg-card: rgba(18, 22, 33, 0.7);
+      --bg-card-hover: rgba(26, 32, 48, 0.85);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(0, 242, 254, 0.3);
+      --primary: #00f2fe;
+      --primary-glow: rgba(0, 242, 254, 0.15);
+      --secondary: #4facfe;
+      --accent-purple: #7f00ff;
+      --accent-pink: #e100ff;
+      --text: #f0f4f8;
+      --text-muted: #8a99ad;
+      --text-dim: #5a697b;
+      --green: #10b981;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --font-sans: 'Inter', system-ui, sans-serif;
+      --font-heading: 'Outfit', sans-serif;
+      --font-mono: 'Fira Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(0, 242, 254, 0.07) 0%, transparent 40%),
+        radial-gradient(circle at 85% 65%, rgba(127, 0, 255, 0.07) 0%, transparent 45%);
+    }
+
+    /* Grid overlay */
+    .grid-bg {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-size: 50px 50px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 2rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-family: var(--font-heading);
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .logo-badge {
+      background: linear-gradient(135deg, var(--primary), var(--accent-purple));
+      color: #090b10;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.95rem;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover {
+      color: var(--primary);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      color: #090b10;
+      font-weight: 700;
+      font-size: 0.95rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: all 0.25s ease;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 20px var(--primary-glow);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 25px rgba(0, 242, 254, 0.3);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 6rem 0 4rem;
+      text-align: center;
+    }
+
+    .hero-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(0, 242, 254, 0.08);
+      border: 1px solid rgba(0, 242, 254, 0.2);
+      padding: 0.4rem 1rem;
+      border-radius: 50px;
+      font-size: 0.85rem;
+      color: var(--primary);
+      margin-bottom: 2rem;
+      font-weight: 600;
+    }
+
+    .hero-title {
+      font-family: var(--font-heading);
+      font-size: 3.8rem;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 1.5rem;
+      letter-spacing: -1px;
+    }
+
+    .hero-title span {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--accent-pink) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-subtitle {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 760px;
+      margin: 0 auto 2.5rem;
+      font-weight: 400;
+    }
+
+    .hero-cta {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 4rem;
+    }
+
+    /* Interactive Terminal Demo */
+    .terminal-container {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      max-width: 900px;
+      margin: 0 auto 6rem;
+      text-align: left;
+    }
+
+    .terminal-header {
+      background: #161b22;
+      padding: 0.8rem 1.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .dot-red { background: #ff5f56; }
+    .dot-yellow { background: #ffbd2e; }
+    .dot-green { background: #27c93f; }
+
+    .terminal-title {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .terminal-body {
+      padding: 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: #c9d1d9;
+      min-height: 280px;
+    }
+
+    .term-line {
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .term-prompt {
+      color: var(--primary);
+      user-select: none;
+    }
+
+    .term-cmd {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .term-out {
+      color: var(--text-muted);
+      margin-left: 1.2rem;
+      white-space: pre-wrap;
+    }
+
+    .term-out-highlight {
+      color: var(--green);
+    }
+
+    .term-out-key {
+      color: var(--secondary);
+    }
+
+    /* Features Grid */
+    .features {
+      padding: 4rem 0 6rem;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .section-title {
+      font-family: var(--font-heading);
+      font-size: 2.5rem;
+      font-weight: 800;
+      margin-bottom: 1rem;
+    }
+
+    .section-subtitle {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 2rem;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+    }
+
+    .card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-accent);
+      transform: translateY(-4px);
+    }
+
+    .card-icon {
+      width: 52px;
+      height: 52px;
+      background: rgba(0, 242, 254, 0.1);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+      font-size: 1.6rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card-title {
+      font-family: var(--font-heading);
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-desc {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    /* Quickstart / Code Section */
+    .quickstart {
+      padding: 4rem 0 6rem;
+    }
+
+    .code-box {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+    }
+
+    .code-text {
+      color: #e6edf3;
+    }
+
+    .code-text span {
+      color: var(--primary);
+    }
+
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: var(--font-sans);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 3rem 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .made-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-weight: 500;
+      font-size: 0.85rem;
+    }
+
+    .made-badge strong {
+      color: var(--primary);
+    }
+
+    @media (max-width: 768px) {
+      .hero-title { font-size: 2.5rem; }
+      .hero-subtitle { font-size: 1rem; }
+      .hero-cta { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="grid-bg"></div>
+
+  <div class="container">
+    <header>
+      <a href="#" class="logo">
+        <span class="logo-badge">KYB</span>
+        kyb-memory.com
+      </a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#quickstart">Quickstart</a></li>
+        <li><a href="#api">HTTP API</a></li>
+        <li><a href="https://github.com/alex09x/kyb" target="_blank">GitHub</a></li>
+      </ul>
+      <a href="https://github.com/alex09x/kyb" target="_blank" class="btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        Star on GitHub
+      </a>
+    </header>
+
+    <section class="hero">
+      <div class="hero-pill">⚡ Git-Backed Shared Memory for AI Agent Fleets</div>
+      <h1 class="hero-title">The shared memory your AI agent fleet <span>keeps forgetting</span> it needs.</h1>
+      <p class="hero-subtitle">
+        KYB is a high-speed BM25 hybrid search engine and incident tracker written in Rust. It preserves operational truth, host maps, topology, and post-mortems across AI agent sessions.
+      </p>
+      <div class="hero-cta">
+        <a href="#quickstart" class="btn">Deploy in 60 Seconds</a>
+        <a href="https://github.com/alex09x/kyb" target="_blank" class="btn btn-secondary">Explore GitHub Repo</a>
+      </div>
+
+      <!-- Interactive Terminal Simulator -->
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <div class="dot dot-red"></div>
+            <div class="dot dot-yellow"></div>
+            <div class="dot dot-green"></div>
+          </div>
+          <div class="terminal-title">bash — kyb query & incident tracking</div>
+        </div>
+        <div class="terminal-body" id="term-body">
+          <div class="term-line">
+            <span class="term-prompt">agent@fleet:~$</span>
+            <span class="term-cmd">kyb query "which servers run clickhouse?"</span>
+          </div>
+          <div class="term-out">
+<span class="term-out-highlight">✓ Match 1 (score 0.867)</span>: <span class="term-out-key">landing-rs-live-health</span>
+  "landing_server7 on ram8 applies init map and writes ClickHouse landing2 data"
+
+<span class="term-out-highlight">✓ Match 2 (score 0.836)</span>: <span class="term-out-key">ch-proxy-primary-unavailable</span>
+  "Primary ch_proxy on ram7 targets local ClickHouse tester-1 database container"
+          </div>
+          <br>
+          <div class="term-line">
+            <span class="term-prompt">agent@fleet:~$</span>
+            <span class="term-cmd">kyb incident --key inc-2026-08-06-tester-ga --severity critical</span>
+          </div>
+          <div class="term-out">
+<span class="term-out-highlight">✓ Incident Recorded</span>: key=<span class="term-out-key">inc-2026-08-06-tester-ga</span> (severity=critical)
+  "tester_job GA migrates unevaluated genomes, collapses islands"
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="section-header">
+        <h2 class="section-title">Built for Autonomous Agent Operations</h2>
+        <p class="section-subtitle">Prevent hallucinated infrastructure topologies and lost incident history.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3 class="card-title">Hybrid BM25 Search (~6ms)</h3>
+          <p class="card-desc">Sub-10ms lexical and semantic search over inverted indices. Agents get exact hostnames, ports, and configuration anchors instantly.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📜</div>
+          <h3 class="card-title">Git-Backed Version History</h3>
+          <p class="card-desc">Every knowledge addition, incident, and resolution is backed by Git commits. Complete audit trail of system decisions across sessions.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🛡️</div>
+          <h3 class="card-title">Zero Secret Leak Guard</h3>
+          <p class="card-desc">Automatic regex credential scanner blocks passwords, API tokens, and SSH keys from entering the knowledge base. Only safe pointers allowed.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🤖</div>
+          <h3 class="card-title">Multi-Agent Skill Injector</h3>
+          <p class="card-desc">One-line installer configures skills and system prompt rules across Claude Code, Codex CLI, and Antigravity (AGY) automatically.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🚨</div>
+          <h3 class="card-title">Structured Incident Tracking</h3>
+          <p class="card-desc">Mandatory resolution workflows. Require agents to record symptoms, root causes, workarounds, and resolution proofs before closing incidents.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🐳</div>
+          <h3 class="card-title">Zero-Dependency Docker Deploy</h3>
+          <p class="card-desc">Packaged into a lightweight Docker image ready to deploy on any server in seconds with persistent JSON/Markdown storage.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="quickstart" id="quickstart">
+      <div class="section-header">
+        <h2 class="section-title">Quickstart in 60 Seconds</h2>
+        <p class="section-subtitle">Run the server and equip your agent fleet.</p>
+      </div>
+
+      <div style="max-width: 800px; margin: 0 auto;">
+        <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 600;">1. Start the KYB Docker Server:</p>
+        <div class="code-box">
+          <div class="code-text"><span>docker</span> run -d --name kyb -p 9310:9310 --restart always ghcr.io/alex09x/kyb:latest</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('docker run -d --name kyb -p 9310:9310 --restart always ghcr.io/alex09x/kyb:latest')">Copy</button>
+        </div>
+
+        <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 600; margin-top: 2rem;">2. Inject KYB Skill into Agent Fleet (Claude Code, Codex, Antigravity):</p>
+        <div class="code-box">
+          <div class="code-text"><span>KYB_SERVER</span>="http://your-server-ip:9310" ./skills/install.sh</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('KYB_SERVER=\&quot;http://your-server-ip:9310\&quot; ./skills/install.sh')">Copy</button>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div>© 2026 KYB Project. Released under MIT License.</div>
+      <div class="made-badge">
+        <span style="color: var(--text-dim);">made by</span> <strong>big</strong>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
