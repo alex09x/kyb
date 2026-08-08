@@ -832,7 +832,7 @@ mod tests {
         let index = SearchIndex::open_or_create(idxd.path()).unwrap();
         let mut w = index.writer().unwrap();
         for i in 0..6 {
-            let out = store.upsert(entry(&format!("burst-{i}"), "t", "same body"), "2026-07-22").unwrap();
+            let out = store.upsert(entry(&format!("burst-{i}"), "t", "same body"), &format!("2026-07-22T00:00:0{i}Z")).unwrap();
             let c = match out {
                 crate::store::UpsertOutcome::Created(c) => c,
                 _ => panic!(),
