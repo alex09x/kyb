@@ -632,7 +632,7 @@ mod tests {
     #[case("password policy: minimum 12 chars")]
     #[case("plain text about nats and streams")]
     #[case("xoxb- truncated is harmless")]
-    #[case("[[task-prod-code-landing-rs-symbol-references-coordinate-base]]")]
+    #[case("[[task-web-app-symbol-references-coordinate-base]]")]
     fn secrets_not_flagged(#[case] s: &str) {
         assert!(find_secret(s).is_none(), "false positive on: {s}");
     }

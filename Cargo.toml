@@ -2,6 +2,9 @@
 name = "knowyourbusiness"
 version = "0.1.0"
 edition = "2021"
+description = "Git-backed, searchable knowledge base and incident tracker for AI agent fleets"
+license = "MIT"
+repository = "https://github.com/alex09x/kyb"
 
 [[bin]]
 name = "kyb-server"

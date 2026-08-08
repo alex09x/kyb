@@ -482,20 +482,20 @@
             <span class="term-cmd">kyb query "which servers run clickhouse?"</span>
           </div>
           <div class="term-out">
-<span class="term-out-highlight">✓ Match 1 (score 0.867)</span>: <span class="term-out-key">landing-rs-live-health</span>
-  "landing_server7 on ram8 applies init map and writes ClickHouse landing2 data"
+<span class="term-out-highlight">✓ Match 1 (score 0.867)</span>: <span class="term-out-key">orders-api-architecture</span>
+  "orders_api on host-a is the single write path into ClickHouse (gRPC :9000)"
 
-<span class="term-out-highlight">✓ Match 2 (score 0.836)</span>: <span class="term-out-key">ch-proxy-primary-unavailable</span>
-  "Primary ch_proxy on ram7 targets local ClickHouse tester-1 database container"
+<span class="term-out-highlight">✓ Match 2 (score 0.836)</span>: <span class="term-out-key">host-a-services</span>
+  "host-a runs orders_api and web_app next to the local ClickHouse container"
           </div>
           <br>
           <div class="term-line">
             <span class="term-prompt">agent@fleet:~$</span>
-            <span class="term-cmd">kyb incident --key inc-2026-08-06-tester-ga --severity critical</span>
+            <span class="term-cmd">kyb incident --key inc-2026-08-06-orders-api-oom --severity critical</span>
           </div>
           <div class="term-out">
-<span class="term-out-highlight">✓ Incident Recorded</span>: key=<span class="term-out-key">inc-2026-08-06-tester-ga</span> (severity=critical)
-  "tester_job GA migrates unevaluated genomes, collapses islands"
+<span class="term-out-highlight">✓ Incident Recorded</span>: key=<span class="term-out-key">inc-2026-08-06-orders-api-oom</span> (severity=critical)
+  "orders_api OOM loop: the write buffer grows until the container restarts"
           </div>
         </div>
       </div>
@@ -555,14 +555,14 @@
       <div style="max-width: 800px; margin: 0 auto;">
         <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 600;">1. Start the KYB Docker Server:</p>
         <div class="code-box">
-          <div class="code-text"><span>docker</span> run -d --name kyb -p 9310:9310 --restart always ghcr.io/alex09x/kyb:latest</div>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('docker run -d --name kyb -p 9310:9310 --restart always ghcr.io/alex09x/kyb:latest')">Copy</button>
+          <div class="code-text"><span>docker</span> run -d --name kyb -p 9310:9310 -v "$PWD/data:/data" --restart always ghcr.io/alex09x/kyb:latest</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('docker run -d --name kyb -p 9310:9310 -v &quot;$PWD/data:/data&quot; --restart always ghcr.io/alex09x/kyb:latest')">Copy</button>
         </div>
 
         <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 600; margin-top: 2rem;">2. Inject KYB Skill into Agent Fleet (Claude Code, Codex, Antigravity):</p>
         <div class="code-box">
-          <div class="code-text"><span>KYB_SERVER</span>="http://your-server-ip:9310" ./skills/install.sh</div>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('KYB_SERVER=\&quot;http://your-server-ip:9310\&quot; ./skills/install.sh')">Copy</button>
+          <div class="code-text"><span>KYB_SERVER</span>=your-server-ip ./skills/install.sh</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('KYB_SERVER=your-server-ip ./skills/install.sh')">Copy</button>
         </div>
       </div>
     </section>

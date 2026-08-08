@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The full KYB deploy: push -> CI -> booster -> skill+CLI to every agent machine.
+# The full KYB deploy: push -> CI -> server -> skill+CLI to every agent machine.
 # This is what "deploy" means for this project. Idempotent — safe to rerun.
 #
 #   scripts/deploy.sh            # everything
@@ -8,12 +8,12 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Machine-specific config lives OUTSIDE the repo: scripts/fleet.local.sh
-# (gitignored) must define BOOSTER="user@host" and FLEET=("user@host" ...).
+# (gitignored) must define SERVER="user@host" and FLEET=("user@host" ...).
 if [ -f "$REPO/scripts/fleet.local.sh" ]; then
   # shellcheck source=/dev/null
   . "$REPO/scripts/fleet.local.sh"
 else
-  echo "deploy: scripts/fleet.local.sh not found — define BOOSTER and FLEET there" >&2
+  echo "deploy: scripts/fleet.local.sh not found — define SERVER and FLEET there" >&2
   exit 1
 fi
 
@@ -40,10 +40,10 @@ if [ "${1:-}" != "--skills" ]; then
   gh run watch "$run_id" --exit-status --interval 20 >/dev/null
   echo "CI green (run $run_id)"
 
-  step "booster: pull + restart"
-  ssh -o ConnectTimeout=10 -o BatchMode=yes "$BOOSTER" \
+  step "server: pull + restart"
+  ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" \
     'cd ~/kyb && docker compose pull -q && docker compose up -d'
-  KYB_URL="http://${BOOSTER#*@}:9310"
+  KYB_URL="http://${SERVER#*@}:9310"
   for _ in $(seq 1 40); do
     curl -sf -m 3 "$KYB_URL/healthz" >/dev/null && break
     sleep 1
@@ -52,7 +52,7 @@ if [ "${1:-}" != "--skills" ]; then
 fi
 
 # the CLI's server address comes from the fleet config, never from the repo
-KYB_SERVER="${BOOSTER#*@}"
+KYB_SERVER="${SERVER#*@}"
 
 step "skills + CLI: this machine"
 KYB_SERVER="$KYB_SERVER" bash "$REPO/skills/install.sh"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kyb — CLI for Know Your Business: our shared infrastructure knowledge base.
-# The service runs in docker on booster; the data is shared by every agent and machine.
+# The service runs in docker on the shared server; every agent and machine sees the same data.
 set -euo pipefail
 
 # Server address, in priority order: env KYB_HOST/KYB_ADDR -> the host file
@@ -23,7 +23,7 @@ ensure_up() {
   echo "kyb: $ADDR is not responding, starting the container..." >&2
   ssh -o ConnectTimeout=5 -o BatchMode=yes "$KYB_HOST" \
       'cd ~/kyb && docker compose up -d' >/dev/null 2>&1 \
-    || die "cannot reach $KYB_HOST (is tailscale up? is the server alive?)"
+    || die "cannot reach $KYB_HOST (network up? server alive?)"
   for _ in $(seq 1 40); do
     curl -sf -m 2 "$BASE/healthz" >/dev/null 2>&1 && return 0
     sleep 0.5

@@ -88,4 +88,4 @@ inject "$HOME/.gemini/GEMINI.md" "~/.gemini/config/skills/kyb/SKILL.md"
 echo
 "$HOME/.local/bin/kyb" health >/dev/null 2>&1 \
   && echo "kyb is responding — ready" \
-  || echo "warning: kyb health did not answer (is booster reachable?)"
+  || echo "warning: kyb health did not answer (is the server reachable?)"

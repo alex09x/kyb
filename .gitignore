@@ -7,6 +7,6 @@ audit.jsonl
 model/
 # internal, never in the public repo
 PLAN.md
-.codehaus/
 scripts/fleet.local.sh
 .prod/
+.idea/
