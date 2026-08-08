@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Search quality harness: Russian questions against an English base, with the
-# entry a human would expect. Reports top-1 and top-3 hit rate so a change to
-# the model, the analyzer or the fusion weights can be judged by measurement
-# instead of by a hunch.
+# Search quality harness: paraphrase questions that deliberately share few or
+# no tokens with the entries they should land on, paired with the keys a human
+# would expect. Reports top-1 / top-3 hit rate, so a change to the model, the
+# analyzer or the fusion weights is judged by measurement instead of a hunch.
+#
+# The cases below are examples — replace them with real queries against your
+# own base. Queries in any language work: the vector side is multilingual.
 #
 #   scripts/eval-search.sh [addr] [--lexical]
 #   scripts/eval-search.sh 127.0.0.1:9310            # hybrid (default)
@@ -15,22 +18,21 @@ EXTRA=""
 [ "$MODE" = "--lexical" ] && EXTRA="&semantic=false"
 
 # query | acceptable keys (any one counts as a hit)
-# Illustrative example set — swap these for real queries and keys from your own base.
 CASES=(
-  "почему сборка падает на линковке|onnx-runtime-glibc"
-  "где живёт монга|orders-api-architecture,host-a-services"
-  "какие сигналы отслеживает демон|web-app-daemon-watch,web-app-architecture"
-  "как деплоим web app|web-app-deploy"
-  "что за сервер booster|booster-server"
-  "как обновить образ на сервере|booster-deploy,kyb-architecture,kyb-agents-install"
-  "чем мы храним знания|kyb-architecture,kyb-conventions"
-  "как искать по старым версиям|kyb-architecture,kyb-conventions"
-  "аномалии в сообщениях|web-app-daemon-watch,web-app-architecture"
-  "правила именования ключей|kyb-conventions"
-  "куда ставится скилл|kyb-agents-install"
-  "поиск по судебным делам|case-search-deploy"
-  "нат стримы|nats-streams"
-  "как реплицируются данные между хостами|host-a-services"
+  "why does the build fail at link time|onnx-runtime-glibc"
+  "which database holds the documents|orders-api-architecture,host-a-services"
+  "which signals does the daemon watch|web-app-daemon-watch,web-app-architecture"
+  "how do we ship the web app|web-app-deploy"
+  "what kind of server is booster|booster-server"
+  "how to roll a new image to the server|booster-deploy,kyb-architecture,kyb-agents-install"
+  "where do we keep our knowledge|kyb-architecture,kyb-conventions"
+  "digging up old versions of entries|kyb-architecture,kyb-conventions"
+  "anomalies in incoming messages|web-app-daemon-watch,web-app-architecture"
+  "naming rules for keys|kyb-conventions"
+  "where does the agent skill get installed|kyb-agents-install"
+  "full text search over court cases|case-search-deploy"
+  "message bus streams|nats-streams"
+  "how is data replicated between hosts|host-a-services"
 )
 
 enc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
@@ -50,7 +52,7 @@ for case in "${CASES[@]}"; do
       case " $hits " in *" $w "*) top3=$((top3 + 1)); mark="top3"; break;; esac
     done
   fi
-  printf "%-6s %-38s -> %s\n" "$mark" "$q" "${hits:-<пусто>}"
+  printf "%-6s %-38s -> %s\n" "$mark" "$q" "${hits:-<none>}"
 done
 echo "---"
 echo "top1: $top1/$total   top3: $top3/$total   ($ADDR ${MODE:-hybrid})"

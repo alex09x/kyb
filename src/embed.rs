@@ -1,9 +1,10 @@
 //! Semantic search with a small multilingual embedding model
 //! (multilingual-e5-small, int8 ONNX) served locally through ONNX Runtime.
 //!
-//! Lexical search cannot bridge synonyms or languages: the base is written in
-//! English, the questions often are not, and «монга» shares no token with
-//! "MongoDB". Reranking a lexical top-K with vectors is a common pattern;
+//! Lexical search cannot bridge synonyms or languages: the base keeps one
+//! canonical language, the questions often arrive in another, and a colloquial
+//! name for a database shares no token with the entry that documents it.
+//! Reranking a lexical top-K with vectors is a common pattern;
 //! here the vectors also *retrieve*, because a question with no lexical anchor at all
 //! gives BM25 nothing to rank — an empty result set cannot be reordered into a
 //! good one. Both lists are then fused by reciprocal rank.
