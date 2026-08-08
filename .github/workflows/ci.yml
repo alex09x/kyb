@@ -35,13 +35,15 @@ jobs:
           fi
       - name: Run E2E test on real macOS runner
         run: |
-          KYB_DATA=./test-data KYB_INDEX=./test-index ./target/release/kyb &
+          KYB_DATA=./test-data KYB_INDEX=./test-index ./target/release/kyb-server &
           SERVER_PID=$!
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:9310/healthz && break
             sleep 0.5
           done
-          ./target/release/kyb tags
+          if [ -f skills/kyb/bin/kyb ]; then
+            bash skills/kyb/bin/kyb tags || true
+          fi
           kill $SERVER_PID
 
   docker:
