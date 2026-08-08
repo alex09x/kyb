@@ -18,8 +18,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
 
+  e2e-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build macOS binary
+        run: cargo build --release
+      - name: Verify Homebrew formula
+        run: |
+          if [ -f Formula/kyb.rb ]; then
+            brew audit --strict Formula/kyb.rb || true
+          fi
+      - name: Run E2E test on real macOS runner
+        run: |
+          KYB_DATA=./test-data KYB_INDEX=./test-index ./target/release/kyb &
+          SERVER_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9310/healthz && break
+            sleep 0.5
+          done
+          ./target/release/kyb tags
+          kill $SERVER_PID
+
   docker:
-    needs: test
+    needs: [test, e2e-macos]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
