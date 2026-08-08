@@ -53,7 +53,7 @@ jobs:
       # the image must not just build — it must boot and answer healthz
       - name: smoke test image
         run: |
-          docker run -d --name kyb -p 9310:9310 ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          docker run -d --name kyb -p 9310:9310 ghcr.io/${{ github.repository }}:latest
           for i in $(seq 1 30); do
             curl -sf localhost:9310/healthz && exit 0
             sleep 0.5
