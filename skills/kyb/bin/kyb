@@ -26,6 +26,7 @@ kyb_curl() {
 }
 
 usage() {
+  local status="${1:-1}"
   cat >&2 <<'EOF'
 kyb — Know Your Business (our infrastructure knowledge base)
   kyb query "text" [--tag a,b] [--history] [--recent] [--limit N]
@@ -63,12 +64,15 @@ tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
 Closing an incident or a task archives it: the file leaves the canon, the
 report stays searchable (kyb query) and readable (kyb get) forever.
 EOF
-  exit 1
+  exit "$status"
 }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift || true
 
 case "$cmd" in
+  --help|-h)
+    usage 0
+    ;;
   query|q)
     text="${1:-}"; [ $# -gt 0 ] && shift || true
     tag=""; history="false"; limit="10"; sort=""; kind=""; status=""; service=""
