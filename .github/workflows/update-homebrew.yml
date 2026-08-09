@@ -1,0 +1,111 @@
+name: update-homebrew-formula
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sync, for example v0.1.2"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    if: github.event_name == 'release' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      TAP_REPO: alex09x/homebrew-apps
+      KYB_REPOSITORY: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+    steps:
+      - name: Checkout kyb
+        uses: actions/checkout@v4
+
+      - name: Validate release tag and tap credentials
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Unsupported release tag: $RELEASE_TAG"
+            exit 1
+          }
+          test -n "${GH_TOKEN:-}" || {
+            echo "HOMEBREW_TAP_TOKEN is not configured"
+            exit 1
+          }
+
+      - name: Check out Homebrew tap
+        run: |
+          set -euo pipefail
+          gh repo clone "$TAP_REPO" tap
+
+      - name: Update formula version, source URL, and checksum
+        run: |
+          set -euo pipefail
+          source_url="https://github.com/${KYB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          source_sha256="$(curl --fail --location --retry 3 --max-time 60 "$source_url" | sha256sum | awk '{print $1}')"
+          export SOURCE_URL="$source_url" SOURCE_SHA256="$source_sha256"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          formula = Path("tap/Formula/kyb.rb")
+          text = formula.read_text()
+          source_url = os.environ["SOURCE_URL"]
+          source_sha256 = os.environ["SOURCE_SHA256"]
+
+          text, replaced = re.subn(
+              r'^  url "[^"]+"\n',
+              f'  url "{source_url}"\n',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if replaced != 1:
+              raise SystemExit("Formula/kyb.rb must contain exactly one stable url")
+
+          sha_line = f'  sha256 "{source_sha256}"\n'
+          if re.search(r'^  sha256 "[^"]+"\n', text, flags=re.MULTILINE):
+              text = re.sub(r'^  sha256 "[^"]+"\n', sha_line, text, count=1, flags=re.MULTILINE)
+          else:
+              url_line = f'  url "{source_url}"\n'
+              text = text.replace(url_line, url_line + sha_line, 1)
+
+          formula.write_text(text)
+          print(f"Updated {formula} to {source_url} ({source_sha256})")
+          PY
+
+      - name: Validate formula syntax
+        run: ruby -c tap/Formula/kyb.rb
+
+      - name: Open pull request in Homebrew tap
+        run: |
+          set -euo pipefail
+          branch="automation/kyb-${RELEASE_TAG}"
+          if [ "$(gh pr list --repo "$TAP_REPO" --head "$branch" --state open --json number --jq 'length')" -gt 0 ]; then
+            echo "An open formula update PR already exists for ${RELEASE_TAG}"
+            exit 0
+          fi
+
+          git -C tap config user.name "github-actions[bot]"
+          git -C tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C tap checkout -b "$branch"
+          git -C tap add Formula/kyb.rb
+          if git -C tap diff --cached --quiet; then
+            echo "Formula already matches ${RELEASE_TAG}; no PR needed"
+            exit 0
+          fi
+          git -C tap commit -m "kyb ${RELEASE_TAG}"
+          git -C tap push --set-upstream origin "$branch"
+          gh pr create \
+            --repo "$TAP_REPO" \
+            --head "$branch" \
+            --base main \
+            --title "kyb ${RELEASE_TAG}" \
+            --body "Update Formula/kyb.rb to the kyb ${RELEASE_TAG} source archive and checksum."
