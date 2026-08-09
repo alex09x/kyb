@@ -13,8 +13,10 @@ set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# A Homebrew post-install step runs from a different working tree than a normal checkout of this repo.
+cli_bin="${KYB_INSTALL_BINARY:-$SRC/kyb/bin/kyb}"
 install -d "$HOME/.local/bin"
-install -m 755 "$SRC/kyb/bin/kyb" "$HOME/.local/bin/kyb"
+install -m 755 "$cli_bin" "$HOME/.local/bin/kyb"
 echo "✓ CLI      ~/.local/bin/kyb"
 
 # The server address is deployment-specific and never lives in this repo:
@@ -81,8 +83,11 @@ PY
   echo "✓ POINTER  $file"
 }
 
+# shellcheck disable=SC2088
 inject "$HOME/.claude/CLAUDE.md" "~/.claude/skills/kyb/SKILL.md"
+# shellcheck disable=SC2088
 inject "$HOME/.codex/AGENTS.md"  "~/.codex/skills/kyb/SKILL.md"
+# shellcheck disable=SC2088
 inject "$HOME/.gemini/GEMINI.md" "~/.gemini/config/skills/kyb/SKILL.md"
 
 echo
