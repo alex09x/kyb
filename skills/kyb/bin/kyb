@@ -30,7 +30,8 @@ usage() {
   cat >&2 <<'EOF'
 kyb — Know Your Business (our infrastructure knowledge base)
   kyb query "text" [--tag a,b] [--history] [--recent] [--limit N]
-            [--kind knowledge|incident] [--status S] [--service X]
+            [--kind knowledge|incident|task] [--status S] [--service X]
+            [--priority P] [--assignee A] [--parent task-<slug>]
   kyb tags                                          (which topics the base covers)
   kyb add --key <slug> --title "..." [--tags a,b] [--refs r1,r2]   (body on stdin)
   kyb get <key> [--at <sha>]
@@ -56,9 +57,16 @@ incident reports (key must start with inc-, e.g. inc-2026-07-22-orders-api-oom):
 tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
   kyb task --key task-<slug> --title "..." [--status open|in_progress|blocked|done|dropped]
            [--priority low|medium|high|critical] [--blocked-reason "what it waits on"]
+           [--assignee <label>] [--parent task-<slug>]
            [--knowledge key1,key2] [--resolution "..."] [--tags a,b] [--refs r1,r2]   (body on stdin)
            (--blocked-reason only with --status blocked; done/dropped close and archive)
-  kyb tasks [--status S] [--priority P] [--open-followups] [--all] [--limit N]
+  kyb task-status <key> --status open|in_progress|blocked
+           [--assignee <label>] [--parent task-<slug>] [--blocked-reason "what it waits on"]
+           (partial update: title, body, tags, priority and links stay as stored —
+            nothing to resend. Leaving blocked clears the reason; --assignee "" hands
+            the task back. Closing is `kyb done`, not this.)
+  kyb tasks [--status S] [--priority P] [--assignee A] [--parent task-<slug>]
+           [--open-followups] [--all] [--limit N]
            (live tasks only — open, in_progress, blocked — freshest on top;
             --all adds archived closed ones)
   kyb done <key> [--status dropped] [--resolution "what came of it"]
@@ -79,6 +87,7 @@ case "$cmd" in
   query|q)
     text="${1:-}"; [ $# -gt 0 ] && shift || true
     tag=""; history="false"; limit="10"; sort=""; kind=""; status=""; service=""
+    priority=""; assignee=""; parent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --tag|--tags) tag="$2"; shift 2 ;;
@@ -88,10 +97,13 @@ case "$cmd" in
         --kind) kind="$2"; shift 2 ;;
         --status) status="$2"; shift 2 ;;
         --service) service="$2"; shift 2 ;;
+        --priority) priority="$2"; shift 2 ;;
+        --assignee) assignee="$2"; shift 2 ;;
+        --parent|--parent-task) parent="$2"; shift 2 ;;
         *) die "query: unknown flag $1" ;;
       esac
     done
-    kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")" | pretty
+    kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")" | pretty
     ;;
   tags)
     kyb_curl "$BASE/tags" | pretty
@@ -228,7 +240,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     ;;
   task)
     key=""; title=""; status="open"; priority=""; blocked_reason=""
-    knowledge=""; resolution=""; tags=""; refs=""
+    assignee=""; parent=""; knowledge=""; resolution=""; tags=""; refs=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --key) key="$2"; shift 2 ;;
@@ -236,6 +248,8 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
         --status) status="$2"; shift 2 ;;
         --priority) priority="$2"; shift 2 ;;
         --blocked-reason) blocked_reason="$2"; shift 2 ;;
+        --assignee) assignee="$2"; shift 2 ;;
+        --parent|--parent-task) parent="$2"; shift 2 ;;
         --knowledge) knowledge="$2"; shift 2 ;;
         --resolution) resolution="$2"; shift 2 ;;
         --tags) tags="$2"; shift 2 ;;
@@ -245,31 +259,64 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     done
     [ -n "$key" ] && [ -n "$title" ] || die "task: --key and --title are required (body comes from stdin)"
     body="$(cat)"
-    payload="$(BODY="$body" RESOLUTION="$resolution" BLOCKED_REASON="$blocked_reason" python3 -c '
+    payload="$(BODY="$body" RESOLUTION="$resolution" BLOCKED_REASON="$blocked_reason" ASSIGNEE="$assignee" python3 -c '
 import json, os, sys
-key, title, status, priority, knowledge, tags, refs = sys.argv[1:8]
+key, title, status, priority, parent, knowledge, tags, refs = sys.argv[1:9]
 split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
 print(json.dumps({
     "key": key, "title": title, "body": os.environ["BODY"], "status": status,
     "priority": priority, "blocked_reason": os.environ["BLOCKED_REASON"],
+    "assignee": os.environ["ASSIGNEE"], "parent_task": parent,
     "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
     "tags": split(tags), "refs": split(refs),
-}))' "$key" "$title" "$status" "$priority" "$knowledge" "$tags" "$refs")"
+}))' "$key" "$title" "$status" "$priority" "$parent" "$knowledge" "$tags" "$refs")"
     kyb_curl -X POST "$BASE/tasks" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
+  task-status)
+    key="${1:-}"; [ -n "$key" ] || usage; shift || true
+    status=""; assignee=""; parent=""; blocked_reason=""
+    assignee_set=""; parent_set=""; reason_set=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --assignee) assignee="$2"; assignee_set="1"; shift 2 ;;
+        --parent|--parent-task) parent="$2"; parent_set="1"; shift 2 ;;
+        --blocked-reason) blocked_reason="$2"; reason_set="1"; shift 2 ;;
+        *) die "task-status: unknown flag $1" ;;
+      esac
+    done
+    [ -n "$status" ] || die "task-status: --status open|in_progress|blocked is required (close with: kyb done $key)"
+    # only the flags actually passed go into the payload: everything else the
+    # task already says — title, body, tags, priority, links — stays as stored
+    payload="$(STATUS="$status" ASSIGNEE="$assignee" ASSIGNEE_SET="$assignee_set" \
+      PARENT="$parent" PARENT_SET="$parent_set" \
+      REASON="$blocked_reason" REASON_SET="$reason_set" python3 -c '
+import json, os
+p = {"status": os.environ["STATUS"]}
+if os.environ["ASSIGNEE_SET"]:
+    p["assignee"] = os.environ["ASSIGNEE"]
+if os.environ["PARENT_SET"]:
+    p["parent_task"] = os.environ["PARENT"]
+if os.environ["REASON_SET"]:
+    p["blocked_reason"] = os.environ["REASON"]
+print(json.dumps(p))')"
+    kyb_curl -X POST "$BASE/tasks/$key/transition" -H 'content-type: application/json' -d "$payload" | pretty
+    ;;
   tasks)
-    status=""; priority=""; followups=""; all=""; limit="50"
+    status=""; priority=""; assignee=""; parent=""; followups=""; all=""; limit="50"
     while [ $# -gt 0 ]; do
       case "$1" in
         --status) status="$2"; shift 2 ;;
         --priority) priority="$2"; shift 2 ;;
+        --assignee) assignee="$2"; shift 2 ;;
+        --parent|--parent-task) parent="$2"; shift 2 ;;
         --open-followups) followups="open"; shift ;;
         --all) all="true"; shift ;;
         --limit) limit="$2"; shift 2 ;;
         *) die "tasks: unknown flag $1" ;;
       esac
     done
-    kyb_curl "$BASE/tasks?status=$(urlenc "$status")&priority=$(urlenc "$priority")&followups=$followups&all=$all&limit=$limit" | pretty
+    kyb_curl "$BASE/tasks?status=$(urlenc "$status")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")&followups=$followups&all=$all&limit=$limit" | pretty
     ;;
   done)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true

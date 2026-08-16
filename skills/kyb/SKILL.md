@@ -1,6 +1,6 @@
 ---
 name: kyb
-description: Our internal infrastructure knowledge base — servers, services, architecture, who calls whom, deploys, ports, configs, decisions and house rules — plus incident reports and tasks. Search it before reasoning about our infra (kyb query), write back what you learn (kyb add, upsert by key), read entries in full (kyb get), walk the git history (kyb history, --history). File incident reports when something breaks (kyb incident), check what is broken right now (kyb incidents), close with an outcome (kyb resolve). Keep short actionable notes and ideas as tasks (kyb task, kyb tasks, kyb done). Triggers, in any language: "remember this", "what do we know about X", "where does X run", "how do we deploy", "what is broken", "incident", "postmortem", "task", "idea", "kyb".
+description: Our internal infrastructure knowledge base — servers, services, architecture, who calls whom, deploys, ports, configs, decisions and house rules — plus incident reports and tasks. Search it before reasoning about our infra (kyb query), write back what you learn (kyb add, upsert by key), read entries in full (kyb get), walk the git history (kyb history, --history). File incident reports when something breaks (kyb incident), check what is broken right now (kyb incidents), close with an outcome (kyb resolve). Keep short actionable notes and ideas as tasks (kyb task, kyb tasks, kyb done); claim, block and relate them as you work (kyb task-status --status in_progress --assignee, --parent). Triggers, in any language: "remember this", "what do we know about X", "where does X run", "how do we deploy", "what is broken", "incident", "postmortem", "task", "idea", "kyb".
 ---
 
 # kyb — Know Your Business: our infrastructure knowledge base
@@ -12,8 +12,9 @@ infra: **ask the base first**, and **write back everything you learned** while w
 
 **Where:** one shared HTTP service in docker (port 9310) — every agent on every machine sees
 the same base. The CLI **`kyb`** is on PATH; it finds the server via `KYB_HOST`/`KYB_ADDR` env
-or `~/.config/kyb/host` (written by the installer) and restarts the container over ssh when it
-is down. Every response is JSON. The canon is a git repo on the server: one md file per entry
+or `~/.config/kyb/host` (written by the installer) and acts only as an HTTP client. If the
+server is unavailable it reports the address and stops; it never opens SSH or attempts remote
+repair. Every response is JSON. The canon is a git repo on the server: one md file per entry
 (`knowledge/`, `incidents/`, `tasks/` by kind), one commit per change, **commit sha = version
 id** — nothing is ever lost.
 
@@ -56,7 +57,7 @@ uncertainty explicitly ("not verified: probably X") instead of stating it flatly
 
 ## 2. What is worth writing down
 
-What a new agent would otherwise rediscover by reading the whole repo and ssh-ing around:
+What a new agent would otherwise rediscover by reading the whole repo and inspecting hosts:
 
 - **Architecture and topology** — what each service is, which host, which ports.
 - **Who calls whom, how data flows** — protocols, directions, what breaks downstream.
@@ -292,18 +293,49 @@ Short retention loses evidence during incidents.
 - [ ] measure current log volume first
 EOF
 
-kyb task --key task-raise-log-retention --title "..." --status in_progress <<< "body"   # picked it up
-kyb task --key task-swap-disk --title "Swap the failing disk" --status blocked \
-         --priority critical --blocked-reason "waiting on the replacement disk" <<< "body"
+kyb task-status task-raise-log-retention --status in_progress --assignee agent-a   # picked it up
+kyb task-status task-swap-disk --status blocked --blocked-reason "waiting on the replacement disk"
 
 kyb tasks                          # LIVE tasks (open + in_progress + blocked), freshest on top
 kyb tasks --priority critical      # exact rank filter
 kyb tasks --status blocked         # what is stuck, and on what
+kyb tasks --assignee agent-a       # what one owner is holding
+kyb tasks --parent task-migrate-logs   # the children of one task
 kyb tasks --all                    # + archived (done/dropped), at the bottom
 kyb tasks --open-followups         # loose ends inside tasks, archived included
 kyb done task-raise-log-retention <<< "Raised to 72h with a 2G disk budget."
 kyb done task-try-foo --status dropped <<< "Obsolete after the rewrite."
 ```
+
+### Agent workflow — mandatory
+
+A shared task list only works if it says who is doing what **right now**. Whenever you touch a
+task from this base:
+
+| Moment | Do exactly this |
+|---|---|
+| **You pick a task up** | `kyb task-status <key> --status in_progress --assignee <your label>` — *before* you start, so no second agent picks up the same work |
+| **You get stuck** | `kyb task-status <key> --status blocked --blocked-reason "<what it waits on>"` |
+| **You get unstuck** | `kyb task-status <key> --status in_progress` — the stale reason clears itself |
+| **You hand it back** | `kyb task-status <key> --status open --assignee ""` |
+| **You finish it** | `kyb done <key> <<< "what came of it"` — **never** `task-status`: closing demands an outcome |
+| **You split work off** | file the child with `--parent <parent-key>`, so the tree shows what belongs to what |
+
+`kyb task-status` is a **partial** update: it sends the status and nothing else. Title, body,
+tags, priority, `--knowledge` links and refs stay exactly as stored — you never have to fetch,
+re-paraphrase or resend the task you are claiming (which is how bodies get silently truncated).
+Rewriting the task itself is still `kyb task` with the same key.
+
+**The assignee label**: short, stable and reused across sessions (`agent-a`, `codex-cli`,
+`ops-rotation`, or your organization's ordinary responsible-person/team label). It must answer
+"who owns this work?" without embedding an email, host name, ephemeral session id, filesystem
+path or other sensitive identifier. The base is shared and version-controlled forever;
+secret-looking values are rejected (400).
+
+**Every update is git-versioned.** A re-assignment overwrites nothing: `kyb history <key>` lists
+every version and `kyb get <key> --at <sha>` replays the entry as it stood at that commit — who
+held it, in which status, with which reason. "Who had this before me, and where did they stop"
+is always answerable.
 
 **Lifecycle `open → in_progress → blocked → done | dropped`.** Only `done` and `dropped` are
 terminal: they **require a resolution** — what came of it, or why it was dropped ("dropped:
@@ -315,10 +347,13 @@ still counted by `kyb health` (`open_tasks` = all three live statuses).
 |---|---|
 | `--priority` | optional rank: `low` `medium` `high` `critical`. Empty = unranked, and it stays unranked — nothing infers one. Exact filter: `kyb tasks --priority high` (the HTTP API takes the same `?priority=` on `/search`). |
 | `--blocked-reason` | optional: what the task waits on. **Only with `--status blocked`** — setting it on any other status is rejected (400), and moving off `blocked` clears it, so a task never advertises a block it is no longer in. |
+| `--assignee` | optional: who holds it now — a short public label (≤80 chars, single line, no secrets). Empty = unclaimed, and it stays unclaimed; nothing infers an owner. Exact filter: `kyb tasks --assignee agent-a` (`?assignee=` on `/tasks` and `/search`). |
+| `--parent` | optional: the `task-` key this one hangs under; empty = top-level. Must be a valid `task-` key and cannot create a parent cycle (400). A parent that does not exist **yet** is allowed — a child may be filed first — and comes back as `unknown_parent` in the reply. Exact filter: `kyb tasks --parent <key>`. |
 
 Updating is the same `kyb task` with the same key (wholesale replace — resend `--priority`
-and `--tags` or they are wiped). Follow-ups from a resolved incident that deserve their own
-life → file them as tasks linked via `--knowledge`.
+and `--tags` or they are wiped); moving a task between live statuses is `kyb task-status`
+(partial, resends nothing). Follow-ups from a resolved incident that deserve their own life →
+file them as tasks linked via `--knowledge`.
 
 ---
 
@@ -346,18 +381,21 @@ kyb health         # {"ok","entries","open_incidents","open_tasks","index_docs",
 7. Something vanished or moved → don't guess, dig history (`--history`, `--at`).
 8. **Broke something / found it broken → file an incident** (§7), link `--knowledge`, close
    with a real resolution, fold the lesson back into knowledge.
+9. **Working a task → claim it first** (`--status in_progress --assignee <label>`), block it
+   with a reason when it stalls, close it with `kyb done`, and hang child work off
+   `--parent` (§8). An unclaimed in-flight task is two agents doing the same work twice.
 
 ---
 
 ## 11. When something breaks
 
-- Not responding → the CLI already self-heals over ssh; manually:
-  `ssh $KYB_HOST 'cd ~/kyb && docker compose up -d; docker logs kyb | tail'`.
+- Not responding → the CLI is a pure HTTP client: it reports the configured address and stops.
+  Diagnose or restart the server through that deployment's own operator runbook; the public
+  client never opens SSH or attempts remote repair.
 - Index drifted from hand-edited canon files → `kyb reindex`.
-- The canon is a plain git repo on the server:
-  `ssh $KYB_HOST 'git -C ~/kyb/data/kyb-data log --oneline'`; `git show <sha>` for one change.
-- Upgrade to a new image:
-  `gh auth token | ssh $KYB_HOST 'docker login ghcr.io -u <github-username> --password-stdin'`,
-  then `ssh $KYB_HOST 'cd ~/kyb && docker compose pull && docker compose up -d'`.
+- Inspect canon history through `kyb history <key>` and `kyb get <key> --at <sha>`; do not
+  bypass the service by guessing a deployment's filesystem layout.
+- Upgrade or restart only through that deployment's documented operator workflow. The public
+  skill deliberately contains no host-specific remote commands or credential plumbing.
 - The skill is installed from one source — `skills/install.sh` in the kyb repo. Edit there and
   reinstall; never patch the agents' copies by hand.

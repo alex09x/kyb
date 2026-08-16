@@ -23,6 +23,9 @@ pub const TASK_TERMINAL_STATUSES: [&str; 2] = ["done", "dropped"];
 /// default and stays the default — nothing infers one.
 pub const PRIORITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 pub const STATUS_BLOCKED: &str = "blocked";
+/// Task-only, optional: who holds the task right now. A short label, not an
+/// identity system — bounded so a whole prose paragraph cannot squat in it.
+pub const ASSIGNEE_MAX_LEN: usize = 80;
 
 fn default_kind() -> String {
     KIND_KNOWLEDGE.to_string()
@@ -60,6 +63,10 @@ struct Meta {
     priority: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     blocked_reason: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    assignee: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    parent_task: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     knowledge: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -102,6 +109,15 @@ pub struct Entry {
     /// status=blocked; a leftover reason on any other status is a lie about the
     /// state, so it is rejected on write and cleared on a transition.
     pub blocked_reason: String,
+    /// Task-only, optional: who holds the task right now — a short, stable,
+    /// non-secret label ("agent-a", "ops-rotation"). Empty means unclaimed;
+    /// nothing infers an owner. Every change is a new git version, so the
+    /// history reconstructs who held it when.
+    pub assignee: String,
+    /// Task-only, optional: the `task-` key this task hangs under. Empty means
+    /// top-level. A dangling parent is allowed (a child may be filed before its
+    /// parent), self-parenting is not.
+    pub parent_task: String,
     /// Keys of the knowledge entries this incident is tied to.
     pub knowledge: Vec<String>,
     /// How the incident ended: what fixed it, or the accepted outcome.
@@ -146,6 +162,8 @@ impl Entry {
             status: meta.status,
             priority: meta.priority,
             blocked_reason: meta.blocked_reason,
+            assignee: meta.assignee,
+            parent_task: meta.parent_task,
             knowledge: meta.knowledge,
             resolution: meta.resolution,
             detection: meta.detection,
@@ -172,6 +190,8 @@ impl Entry {
             status: self.status.clone(),
             priority: self.priority.clone(),
             blocked_reason: self.blocked_reason.clone(),
+            assignee: self.assignee.clone(),
+            parent_task: self.parent_task.clone(),
             knowledge: self.knowledge.clone(),
             resolution: self.resolution.clone(),
             detection: self.detection.clone(),
@@ -200,6 +220,8 @@ impl Entry {
             && self.status == other.status
             && self.priority == other.priority
             && self.blocked_reason == other.blocked_reason
+            && self.assignee == other.assignee
+            && self.parent_task == other.parent_task
             && self.knowledge == other.knowledge
             && self.resolution == other.resolution
             && self.detection == other.detection
@@ -279,6 +301,36 @@ impl Entry {
                 if self.is_closed() && self.resolution.trim().is_empty() {
                     bail!("closing a task needs a resolution: what came of it, or why it was dropped");
                 }
+                // an owner label, not a paragraph and not a second body: one
+                // line, bounded, and never a place to park a credential
+                if !self.assignee.is_empty() {
+                    if self.assignee.trim().is_empty() {
+                        bail!("assignee is blank — leave it out to mark the task unclaimed");
+                    }
+                    if self.assignee.chars().count() > ASSIGNEE_MAX_LEN {
+                        bail!(
+                            "assignee must be at most {ASSIGNEE_MAX_LEN} chars — it is a short owner label, not a note"
+                        );
+                    }
+                    if self.assignee.contains(&['\n', '\r'][..]) {
+                        bail!("assignee must be a single line");
+                    }
+                }
+                if !self.parent_task.is_empty() {
+                    // a parent that is not a task key would point the tree at a
+                    // knowledge entry or an incident, which is not a parent at all
+                    if !is_valid_key(&self.parent_task)
+                        || !self.parent_task.starts_with(TASK_PREFIX)
+                    {
+                        bail!(
+                            "parent_task must be empty or a valid task key starting with '{TASK_PREFIX}' (got '{}')",
+                            self.parent_task
+                        );
+                    }
+                    if self.parent_task == self.key {
+                        bail!("a task cannot be its own parent ('{}')", self.key);
+                    }
+                }
                 for k in &self.knowledge {
                     if !is_valid_key(k) {
                         bail!("knowledge link '{k}' is not a valid key slug");
@@ -289,6 +341,9 @@ impl Entry {
                 }
                 if let Some(hit) = find_secret(&self.blocked_reason) {
                     bail!("blocked_reason looks like a secret ({hit}…) — store secrets as pointers in refs");
+                }
+                if let Some(hit) = find_secret(&self.assignee) {
+                    bail!("assignee looks like a secret ({hit}…) — use a stable public label");
                 }
             }
             KIND_INCIDENT => {
@@ -330,14 +385,21 @@ impl Entry {
                 "kind must be '{KIND_KNOWLEDGE}', '{KIND_INCIDENT}' or '{KIND_TASK}', got '{other}'"
             ),
         }
-        // priority and blocked_reason are the task lane only: an incident is
-        // ranked by severity, a knowledge entry is not ranked at all
+        // priority, blocked_reason, assignee and parent_task are the task lane
+        // only: an incident is ranked by severity and owned by whoever is on
+        // call, a knowledge entry is a fact and has no owner at all
         if !self.is_task() {
             if !self.priority.trim().is_empty() {
                 bail!("priority is a task-only field (got '{}' on kind '{}')", self.priority, self.kind);
             }
             if !self.blocked_reason.trim().is_empty() {
                 bail!("blocked_reason is a task-only field (kind '{}')", self.kind);
+            }
+            if !self.assignee.trim().is_empty() {
+                bail!("assignee is a task-only field (kind '{}')", self.kind);
+            }
+            if !self.parent_task.trim().is_empty() {
+                bail!("parent_task is a task-only field (kind '{}')", self.kind);
             }
         }
         if let Some(hit) = find_secret(&self.body) {
@@ -364,6 +426,8 @@ impl Default for Entry {
             status: String::new(),
             priority: String::new(),
             blocked_reason: String::new(),
+            assignee: String::new(),
+            parent_task: String::new(),
             knowledge: vec![],
             resolution: String::new(),
             detection: String::new(),
@@ -630,8 +694,12 @@ mod tests {
     #[rstest]
     #[case::knowledge_priority(entry(), |e: &mut Entry| e.priority = "high".into())]
     #[case::knowledge_blocked_reason(entry(), |e: &mut Entry| e.blocked_reason = "waiting".into())]
+    #[case::knowledge_assignee(entry(), |e: &mut Entry| e.assignee = "agent-a".into())]
+    #[case::knowledge_parent(entry(), |e: &mut Entry| e.parent_task = "task-parent".into())]
     #[case::incident_priority(incident(), |e: &mut Entry| e.priority = "high".into())]
     #[case::incident_blocked_reason(incident(), |e: &mut Entry| e.blocked_reason = "waiting".into())]
+    #[case::incident_assignee(incident(), |e: &mut Entry| e.assignee = "agent-a".into())]
+    #[case::incident_parent(incident(), |e: &mut Entry| e.parent_task = "task-parent".into())]
     fn task_only_fields_rejected_elsewhere(#[case] mut e: Entry, #[case] mutate: fn(&mut Entry)) {
         assert!(e.validate().is_ok(), "baseline must be valid: {e:?}");
         mutate(&mut e);
@@ -737,20 +805,108 @@ mod tests {
         assert!(!e.same_content(&other));
     }
 
-    // an unranked, unblocked task writes no new frontmatter at all — files from
-    // before the feature parse identically
+    // --- task ownership: an optional, bounded, non-secret label ---
+    #[rstest]
+    #[case::unclaimed("", true)]
+    #[case::label("agent-a", true)]
+    #[case::rotation("ops-rotation", true)]
+    #[case::spaces_inside("release duty", true)]
+    #[case::blank("   ", false)]
+    #[case::multiline("agent-a\nagent-b", false)]
+    #[case::carriage_return("agent-a\ragent-b", false)]
+    #[case::too_long("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false)]
+    #[case::secret("token: ghp_abcdefghijklmnopqrstuvwxyz123456", false)]
+    fn task_assignee_validation(#[case] assignee: &str, #[case] ok: bool) {
+        let mut e = task();
+        e.assignee = assignee.into();
+        assert_eq!(e.validate().is_ok(), ok, "assignee '{assignee}'");
+    }
+
+    #[test]
+    fn assignee_length_boundary() {
+        let mut e = task();
+        e.assignee = "a".repeat(ASSIGNEE_MAX_LEN);
+        assert!(e.validate().is_ok(), "exactly the limit is fine");
+        e.assignee = "a".repeat(ASSIGNEE_MAX_LEN + 1);
+        assert!(e.validate().is_err(), "one over the limit is not");
+    }
+
+    // --- parent_task: empty or a real task key, never itself ---
+    #[rstest]
+    #[case::top_level("", true)]
+    #[case::task_key("task-migrate-logs", true)]
+    // a forward reference is legal: a child may be filed before its parent
+    #[case::dangling_parent("task-not-written-yet", true)]
+    #[case::knowledge_key("nats-streams", false)]
+    #[case::incident_key("inc-2026-08-15-oom", false)]
+    #[case::not_a_slug("task-Bad Key", false)]
+    #[case::traversal("../task-x", false)]
+    #[case::bare_prefix("task-", false)]
+    #[case::blank("  ", false)]
+    fn task_parent_validation(#[case] parent: &str, #[case] ok: bool) {
+        let mut e = task();
+        e.parent_task = parent.into();
+        assert_eq!(e.validate().is_ok(), ok, "parent_task '{parent}'");
+    }
+
+    // a task that parents itself is a cycle of one — the smallest broken tree
+    #[test]
+    fn self_parenting_rejected() {
+        let mut e = task();
+        e.parent_task = e.key.clone();
+        let err = e.validate().unwrap_err().to_string();
+        assert!(err.contains("own parent"), "{err}");
+    }
+
+    // ownership and the parent link survive markdown and count as content
+    #[test]
+    fn task_assignee_parent_roundtrip() {
+        let mut e = task();
+        e.status = "in_progress".into();
+        e.assignee = "agent-a".into();
+        e.parent_task = "task-migrate-logs".into();
+        assert!(e.validate().is_ok());
+        let md = e.to_markdown();
+        assert!(md.contains("assignee: agent-a"), "{md}");
+        assert!(md.contains("parent_task: task-migrate-logs"), "{md}");
+        let back = Entry::from_markdown(&md).unwrap();
+        assert_eq!(back, e);
+
+        // both are content: changing either is a new version, not a no-op
+        let mut other = back.clone();
+        other.assignee = "agent-b".into();
+        assert!(!e.same_content(&other));
+        let mut other = back.clone();
+        other.parent_task = "task-other-parent".into();
+        assert!(!e.same_content(&other));
+        let mut other = back.clone();
+        other.assignee.clear();
+        assert!(!e.same_content(&other), "handing a task back is a change too");
+        // and the date still is not
+        let mut same = back.clone();
+        same.updated_at = "2020-01-01".into();
+        assert!(e.same_content(&same));
+    }
+
+    // an unranked, unblocked, unclaimed task writes no new frontmatter at all —
+    // files from before the feature parse identically
     #[test]
     fn task_frontmatter_stays_clean_without_new_fields() {
         let md = task().to_markdown();
-        for f in ["priority:", "blocked_reason:"] {
+        for f in ["priority:", "blocked_reason:", "assignee:", "parent_task:"] {
             assert!(!md.contains(f), "unexpected '{f}' in:\n{md}");
         }
         let legacy = "---\nkey: task-old\ntitle: An old task\nkind: task\nstatus: open\n---\n\nbody\n";
         let e = Entry::from_markdown(legacy).unwrap();
         assert_eq!(e.priority, "");
         assert_eq!(e.blocked_reason, "");
+        assert_eq!(e.assignee, "");
+        assert_eq!(e.parent_task, "");
         assert!(e.validate().is_ok());
         assert!(e.is_live_task());
+        // and a task written by this version reads back unchanged after a
+        // round-trip through the legacy-shaped parser
+        assert_eq!(Entry::from_markdown(&e.to_markdown()).unwrap(), e);
     }
 
     #[test]

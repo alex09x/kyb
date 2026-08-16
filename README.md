@@ -13,7 +13,7 @@ truth that survives between sessions and across machines.
 <br/>
 
 [![license](https://img.shields.io/badge/license-MIT-00b3c4?labelColor=1a1d24)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-270_passing-2ea043?labelColor=1a1d24)](#stack--tests)
+[![tests](https://img.shields.io/badge/tests-315_passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
@@ -113,8 +113,21 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
 - **`blocked_reason`** — optional, what the task waits on. It belongs to `status: blocked`
   only: setting it on any other status is rejected, and moving off `blocked` clears it, so a
   task never reports a block it is no longer in.
+- **`assignee`** — optional, who holds the task right now: a short public label (≤80 chars,
+  single line, secret-scanned like every other field). Empty means unclaimed and stays
+  unclaimed. Exact filter on `GET /tasks` and `/search`.
+- **`parent_task`** — optional, the `task-` key this one hangs under; empty means top-level.
+  Must be a valid `task-` key and cannot create a parent cycle. A parent that does not exist
+  *yet* is allowed — a child can be filed before its parent — and is reported back as
+  `unknown_parent`.
+- **Partial transitions** — `POST /tasks/{key}/transition` (`kyb task-status`) moves a task
+  between the live statuses and optionally changes its owner or parent **without resending
+  title, body, tags, priority or links**. Leaving `blocked` clears the reason; the terminal
+  statuses are refused with a pointer to `kyb done`, because closing demands an outcome.
 
-Closing archives the task; `kyb tasks` and the search keep the full record.
+Closing archives the task; `kyb tasks` and the search keep the full record. Every write is a
+commit, so `kyb history <key>` + `kyb get <key> --at <sha>` reconstruct who held a task, in
+which status, at any point in time.
 
 ---
 
@@ -163,10 +176,12 @@ kyb incidents [--status X] [--service X] [--open-followups] [--all]   # live by 
 kyb resolve inc-2026-07-22-orders-api-oom <<< "what fixed it"   # resolution is mandatory; closing archives
 
 kyb task --key task-raise-log-retention --title "..." [--tags idea] \
-         [--priority high] [--status in_progress] <<< "body"
+         [--priority high] [--status in_progress] [--assignee agent-a] <<< "body"
 kyb task --key task-swap-disk --title "..." --status blocked \
-         --blocked-reason "waiting on the replacement disk" <<< "body"
-kyb tasks [--status X] [--priority P] [--open-followups] [--all]   # live by default, --all adds archived
+         --blocked-reason "waiting on the replacement disk" [--parent task-migrate-logs] <<< "body"
+kyb task-status task-raise-log-retention --status in_progress --assignee agent-a   # partial: nothing resent
+kyb task-status task-swap-disk --status blocked --blocked-reason "waiting on the disk"
+kyb tasks [--status X] [--priority P] [--assignee A] [--parent K] [--open-followups] [--all]
 kyb done task-raise-log-retention <<< "what came of it"         # or --status dropped + why
 ```
 
@@ -204,10 +219,11 @@ something breaks and fold the lesson back into knowledge after resolving.
 | `POST` | `/incidents` | upsert a report; reply carries `unknown_knowledge` for dangling links and `hints` for missing structure. `status:resolved` requires `resolution` and archives |
 | `GET` | `/incidents` | `?status=&service=&followups=open&all=true&limit=` — live reports by default, open first, freshest on top; `all=true`, an explicit `status=` or `followups=open` include archived ones |
 | `POST` | `/incidents/{key}/resolve` | `{resolution, status?=resolved}` — flips status, records the outcome, stamps the timeline, archives on close |
-| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, priority?, blocked_reason?, knowledge?, resolution?, tags?, refs?}`; `status` is `open\|in_progress\|blocked\|done\|dropped`, `priority` is `""\|low\|medium\|high\|critical`, `blocked_reason` requires `status:blocked` (400 otherwise); the terminal statuses require `resolution` and archive |
-| `GET` | `/tasks` | `?status=&priority=&followups=open&all=true&limit=` — live tasks (`open`, `in_progress`, `blocked`) by default, freshest on top; same archive rules as `/incidents` |
+| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, priority?, blocked_reason?, assignee?, parent_task?, knowledge?, resolution?, tags?, refs?}`; `status` is `open\|in_progress\|blocked\|done\|dropped`, `priority` is `""\|low\|medium\|high\|critical`, `blocked_reason` requires `status:blocked` (400 otherwise), `parent_task` must be `""` or another `task-` key and cannot create a cycle; the terminal statuses require `resolution` and archive |
+| `GET` | `/tasks` | `?status=&priority=&assignee=&parent_task=&followups=open&all=true&limit=` — live tasks (`open`, `in_progress`, `blocked`) by default, freshest on top; same archive rules as `/incidents` |
+| `POST` | `/tasks/{key}/transition` | partial update: `{status, assignee?, parent_task?, blocked_reason?}` — `status` is a **live** one (`open\|in_progress\|blocked`); omitted fields keep their stored value, leaving `blocked` clears `blocked_reason`, and a terminal status is refused with a pointer to `/tasks/{key}/resolve` |
 | `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — flips status, records the outcome; a non-`blocked` status clears `blocked_reason`; `done`/`dropped` archive |
-| `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=&priority=` → ranked hits with full bodies; an empty `q` lists newest first |
+| `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=&priority=&assignee=&parent_task=` → ranked hits with full bodies; an empty `q` lists newest first |
 | `GET` | `/tags` | which topics the base covers, most used first |
 | `DELETE` | `/knowledge/{key}` | knowledge: retract (drops from the default search); incident/task: archive (stays searchable) |
 | `POST` | `/reindex` | full index rebuild from git |
@@ -239,7 +255,7 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 270 cases
+cargo test        # 315 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.

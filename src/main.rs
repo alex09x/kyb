@@ -13,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tantivy::IndexWriter;
@@ -100,6 +101,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/incidents/{key}/resolve", post(resolve_incident))
         .route("/tasks", post(upsert_task).get(list_tasks))
         .route("/tasks/{key}/resolve", post(resolve_task))
+        .route("/tasks/{key}/transition", post(transition_task))
         .route("/search", get(search))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
@@ -142,6 +144,9 @@ async fn commit_entry(st: &Arc<AppState>, entry: model::Entry, extra: Value) -> 
         return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
     }
     let mut w = st.writer.lock().await;
+    if let Err(e) = validate_task_parent_chain(st, &entry) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
+    }
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let (c, action) = match st.store.upsert(entry, &today) {
         Err(e) => return err500(e),
@@ -414,6 +419,45 @@ async fn resolve_task(State(st): St, Path(key): Path<String>, Json(r): Json<Reso
     close_entry(&st, key, true, r).await
 }
 
+/// A parent link may point forward — a child can be filed before the task it
+/// hangs under — so a missing parent is reported back, never refused. An
+/// archived (closed) parent counts as known: it is still part of the record.
+fn unknown_parent(st: &AppState, entry: &model::Entry) -> Option<String> {
+    let parent = entry.parent_task.trim();
+    if parent.is_empty() || !model::is_valid_key(parent) {
+        return None;
+    }
+    stored_version(st, parent).is_none().then(|| parent.to_string())
+}
+
+/// Keep task relationships a tree/forest, not merely a set of individually
+/// valid edges. This runs while the global write lock is held, so two
+/// concurrent updates cannot each observe the other edge as absent and commit
+/// a cycle together. A missing parent remains a valid forward reference.
+fn validate_task_parent_chain(st: &AppState, entry: &model::Entry) -> Result<()> {
+    if !entry.is_task() || entry.parent_task.is_empty() {
+        return Ok(());
+    }
+    let mut cursor = entry.parent_task.clone();
+    let mut seen = HashSet::new();
+    while !cursor.is_empty() {
+        if cursor == entry.key {
+            anyhow::bail!(
+                "parent_task would create a cycle containing '{}'",
+                entry.key
+            );
+        }
+        if !seen.insert(cursor.clone()) {
+            anyhow::bail!("parent_task points into an existing task cycle at '{cursor}'");
+        }
+        let Some(parent) = stored_version(st, &cursor) else {
+            break;
+        };
+        cursor = parent.parent_task;
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct TaskReq {
     key: String,
@@ -427,6 +471,12 @@ struct TaskReq {
     /// What the task waits on; only valid together with status=blocked.
     #[serde(default)]
     blocked_reason: String,
+    /// Who holds the task: a short, stable, non-secret label. Empty = unclaimed.
+    #[serde(default)]
+    assignee: String,
+    /// The `task-` key this task hangs under; empty = top-level.
+    #[serde(default)]
+    parent_task: String,
     /// Keys of knowledge entries this task concerns.
     #[serde(default)]
     knowledge: Vec<String>,
@@ -447,6 +497,8 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
         status: r.status,
         priority: r.priority,
         blocked_reason: r.blocked_reason,
+        assignee: r.assignee.trim().to_string(),
+        parent_task: r.parent_task.trim().to_string(),
         knowledge: r.knowledge,
         resolution: r.resolution,
         tags: r.tags,
@@ -469,11 +521,14 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
             unknown.push(k.clone());
         }
     }
-    let extra = if unknown.is_empty() {
-        Value::Null
-    } else {
-        json!({"unknown_knowledge": unknown})
-    };
+    let mut extra = serde_json::Map::new();
+    if !unknown.is_empty() {
+        extra.insert("unknown_knowledge".into(), json!(unknown));
+    }
+    if let Some(parent) = unknown_parent(&st, &entry) {
+        extra.insert("unknown_parent".into(), json!(parent));
+    }
+    let extra = if extra.is_empty() { Value::Null } else { Value::Object(extra) };
     let closed = entry.is_closed();
     let key = entry.key.clone();
     let mut reply = commit_entry(&st, entry, extra).await;
@@ -483,12 +538,91 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
     reply
 }
 
+/// A partial task update: move the task between the LIVE statuses and, when the
+/// request says so, change who holds it or what it hangs under. Everything the
+/// request does not mention — title, body, tags, priority, knowledge, refs —
+/// stays exactly as stored, so claiming a task never means resending (or
+/// paraphrasing, or losing) the task being claimed.
+#[derive(Deserialize)]
+struct TransitionReq {
+    status: String,
+    /// Present = set it ("" hands the task back to nobody); absent = keep stored.
+    assignee: Option<String>,
+    /// Present = set it ("" detaches the task); absent = keep stored.
+    parent_task: Option<String>,
+    /// Only meaningful with status=blocked; leaving blocked always clears it.
+    blocked_reason: Option<String>,
+}
+
+/// Closing stays a separate act on purpose: `done`/`dropped` demand an outcome,
+/// which is what POST /tasks/{key}/resolve (`kyb done`) is for.
+async fn transition_task(
+    State(st): St,
+    Path(key): Path<String>,
+    Json(r): Json<TransitionReq>,
+) -> Reply {
+    if let Some(resp) = bad_key(&key) {
+        return resp;
+    }
+    let status = r.status.trim().to_string();
+    if model::TASK_TERMINAL_STATUSES.contains(&status.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!(
+                "'{status}' closes a task and needs an outcome — use `kyb done {key}` (POST /tasks/{key}/resolve) with a resolution; a transition only moves between {}",
+                model::TASK_LIVE_STATUSES.join("|")
+            )})),
+        );
+    }
+    if !model::TASK_LIVE_STATUSES.contains(&status.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!(
+                "status must be one of: {}", model::TASK_LIVE_STATUSES.join("|")
+            )})),
+        );
+    }
+    // an archived task can be picked back up: the stored version comes from
+    // history and the write recreates the file
+    let Some(mut e) = stored_version(&st, &key) else {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})));
+    };
+    if !e.is_task() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": format!("'{key}' is not a task")})));
+    }
+    e.status = status;
+    if let Some(assignee) = r.assignee {
+        e.assignee = assignee.trim().to_string();
+    }
+    if let Some(parent) = r.parent_task {
+        e.parent_task = parent.trim().to_string();
+    }
+    // a reason survives only inside the block it describes
+    if e.status == model::STATUS_BLOCKED {
+        if let Some(reason) = r.blocked_reason {
+            e.blocked_reason = reason;
+        }
+    } else {
+        e.blocked_reason.clear();
+    }
+    let mut extra = serde_json::Map::new();
+    extra.insert("status".into(), json!(e.status));
+    extra.insert("assignee".into(), json!(e.assignee));
+    if let Some(parent) = unknown_parent(&st, &e) {
+        extra.insert("unknown_parent".into(), json!(parent));
+    }
+    commit_entry(&st, e, Value::Object(extra)).await
+}
+
 #[derive(Deserialize)]
 struct IncidentsQ {
     status: Option<String>,
     service: Option<String>,
     /// Exact task priority; incidents carry none, so it never matches there.
     priority: Option<String>,
+    /// Exact task ownership filters — same story: task-only fields.
+    assignee: Option<String>,
+    parent_task: Option<String>,
     /// followups=open keeps only reports with unfinished `- [ ]` items —
     /// the loose ends a session can pick up (archived included).
     followups: Option<String>,
@@ -519,6 +653,8 @@ fn list_kind(
     let status = q.status.as_deref().filter(|s| !s.trim().is_empty());
     let service = q.service.as_deref().filter(|s| !s.trim().is_empty());
     let priority = q.priority.as_deref().filter(|s| !s.trim().is_empty());
+    let assignee = q.assignee.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let parent = q.parent_task.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let only_open_followups = q.followups.as_deref() == Some("open");
     let all = matches!(q.all.as_deref(), Some("true" | "1" | "yes"));
     let opts = index::SearchOpts {
@@ -527,6 +663,8 @@ fn list_kind(
         status: status.map(String::from),
         service: service.map(String::from),
         priority: priority.map(String::from),
+        assignee: assignee.map(String::from),
+        parent_task: parent.map(String::from),
         ..Default::default()
     };
     let mut hits = match st.index.search("", &opts) {
@@ -599,6 +737,7 @@ async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
             json!({
                 "key": h.key, "title": h.title, "status": h.status,
                 "priority": h.priority, "blocked_reason": h.blocked_reason,
+                "assignee": h.assignee, "parent_task": h.parent_task,
                 "knowledge": h.knowledge, "resolution": h.resolution,
                 "resolved_at": h.resolved_at,
                 "open_followups": open_followups_of(&h.body),
@@ -642,6 +781,8 @@ fn entry_json(e: &model::Entry, archived: bool) -> Value {
     if e.is_task() {
         obj.insert("priority".into(), json!(e.priority));
         obj.insert("blocked_reason".into(), json!(e.blocked_reason));
+        obj.insert("assignee".into(), json!(e.assignee));
+        obj.insert("parent_task".into(), json!(e.parent_task));
     }
     if e.is_incident() || e.is_task() {
         obj.insert("status".into(), json!(e.status));
@@ -712,8 +853,10 @@ struct SearchQ {
     /// incident filters (exact terms)
     status: Option<String>,
     service: Option<String>,
-    /// task filter (exact term)
+    /// task filters (exact terms)
     priority: Option<String>,
+    assignee: Option<String>,
+    parent_task: Option<String>,
 }
 
 async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
@@ -744,6 +887,8 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
         status: norm(&p.status),
         service: norm(&p.service),
         priority: norm(&p.priority),
+        assignee: norm(&p.assignee),
+        parent_task: norm(&p.parent_task),
     };
     let mut hits = match st.index.search(q, &opts) {
         Err(e) => return err500(e),
@@ -800,6 +945,8 @@ async fn hybrid(
                         && opts.kind.as_deref().is_none_or(|k| h.kind == k)
                         && opts.status.as_deref().is_none_or(|s| h.status == s)
                         && opts.priority.as_deref().is_none_or(|p| h.priority == p)
+                        && opts.assignee.as_deref().is_none_or(|a| h.assignee == a)
+                        && opts.parent_task.as_deref().is_none_or(|p| h.parent_task == p)
                         && opts
                             .service
                             .as_deref()
@@ -1771,6 +1918,304 @@ mod api_tests {
         assert_eq!(v["blocked_reason"], "", "{v}");
     }
 
+    // ownership and the parent link: create -> GET -> listing -> search
+    #[tokio::test]
+    async fn task_ownership_and_parent_flow() {
+        let (app, _data, _idx) = app_with_tmp();
+
+        // an umbrella task, claimed under a stable public label
+        let parent = "task-migrate-logs";
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": parent, "title": "Migrate the log pipeline", "body": "The umbrella task.",
+            "status": "in_progress", "priority": "high", "assignee": "agent-a",
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert!(v.get("unknown_parent").is_none(), "a top-level task has no parent: {v}");
+
+        // a child hangs under it
+        let child = "task-migrate-logs-step-one";
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": child, "title": "Step one: measure the volume", "body": "x",
+            "assignee": "agent-b", "parent_task": parent,
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert!(v.get("unknown_parent").is_none(), "the parent exists: {v}");
+
+        // a forward reference is reported, not refused — the parent may be
+        // filed after the child
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-orphan", "title": "Filed before its parent", "body": "x",
+            "parent_task": "task-not-written-yet",
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["unknown_parent"], "task-not-written-yet");
+
+        // GET carries both fields; an unclaimed task carries them empty
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{child}"), None).await;
+        assert_eq!(v["assignee"], "agent-b");
+        assert_eq!(v["parent_task"], parent);
+        let (_, v) = call(&app, "GET", "/knowledge/task-orphan", None).await;
+        assert_eq!(v["assignee"], "", "{v}");
+        assert_eq!(v["parent_task"], "task-not-written-yet");
+
+        // the listing filters exactly
+        let (_, v) = call(&app, "GET", "/tasks?assignee=agent-a", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["tasks"][0]["key"], parent);
+        assert_eq!(v["tasks"][0]["assignee"], "agent-a");
+        let (_, v) = call(&app, "GET", &format!("/tasks?parent_task={parent}"), None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["tasks"][0]["key"], child);
+        assert_eq!(v["tasks"][0]["parent_task"], parent);
+        let (_, v) = call(&app, "GET", "/tasks?assignee=agent-nobody", None).await;
+        assert_eq!(v["count"], 0);
+        // empty params (what the CLI sends) are "no filter", not "match nothing"
+        let (_, v) = call(&app, "GET", "/tasks?assignee=&parent_task=&limit=50", None).await;
+        assert_eq!(v["count"], 3, "{v}");
+
+        // and search takes the same exact filters
+        let (_, v) = call(&app, "GET", "/search?q=&kind=task&assignee=agent-b", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["hits"][0]["key"], child);
+        assert_eq!(v["hits"][0]["assignee"], "agent-b");
+        assert_eq!(v["hits"][0]["parent_task"], parent);
+        let (_, v) =
+            call(&app, "GET", &format!("/search?q=&kind=task&parent_task={parent}"), None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        let (_, v) = call(&app, "GET", "/search?q=&kind=task&assignee=&parent_task=", None).await;
+        assert_eq!(v["count"], 3, "{v}");
+
+        // an archived parent is still a known parent: the record outlives the file
+        call(&app, "POST", &format!("/tasks/{parent}/resolve"),
+            Some(json!({"resolution": "Pipeline migrated."}))).await;
+        let (_, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-migrate-logs-step-two", "title": "Step two", "body": "x",
+            "parent_task": parent,
+        }))).await;
+        assert!(v.get("unknown_parent").is_none(), "an archived parent still exists: {v}");
+    }
+
+    // the partial transition: move a task without resending what it says
+    #[tokio::test]
+    async fn task_transition_partial_updates() {
+        let (app, _data, _idx) = app_with_tmp();
+        let key = "task-raise-log-retention";
+        call(&app, "POST", "/tasks", Some(json!({
+            "key": key, "title": "Raise container log retention to 72h",
+            "body": "Short retention loses evidence.\n\n- [ ] measure log volume first\n",
+            "priority": "high", "tags": ["observability"],
+            "knowledge": ["web-app-architecture"], "refs": ["see the compose file on the log host"],
+        }))).await;
+
+        // pick it up: status plus an owner label, nothing else resent
+        let (st, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "in_progress", "assignee": "agent-a"}))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["changed"], true);
+        assert_eq!(v["action"], "updated");
+        assert_eq!(v["status"], "in_progress");
+        assert_eq!(v["assignee"], "agent-a");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["status"], "in_progress");
+        assert_eq!(v["assignee"], "agent-a");
+        assert_eq!(v["title"], "Raise container log retention to 72h", "title kept: {v}");
+        assert_eq!(v["priority"], "high", "omitted metadata survives: {v}");
+        assert_eq!(v["tags"], json!(["observability"]));
+        assert_eq!(v["refs"], json!(["see the compose file on the log host"]));
+        assert_eq!(v["knowledge"], json!(["web-app-architecture"]));
+        assert!(v["body"].as_str().unwrap().contains("measure log volume"), "body kept: {v}");
+        assert_eq!(v["open_followups"], 1);
+        assert!(v.get("archived").is_none(), "a live transition never archives: {v}");
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 1, "still work in flight: {v}");
+
+        // block it: the reason lands, everything else stays
+        let (_, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "blocked", "blocked_reason": "waiting on the disk budget approval"}))).await;
+        assert_eq!(v["status"], "blocked", "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["blocked_reason"], "waiting on the disk budget approval");
+        assert_eq!(v["assignee"], "agent-a", "an omitted assignee is kept: {v}");
+        assert_eq!(v["priority"], "high");
+
+        // leaving blocked clears the reason even though the request never named it
+        let (_, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "in_progress"}))).await;
+        assert_eq!(v["changed"], true, "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["blocked_reason"], "", "stale reason dropped: {v}");
+        assert_eq!(v["status"], "in_progress");
+
+        // hand it back: an explicit empty assignee unclaims it
+        let (_, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "open", "assignee": ""}))).await;
+        assert_eq!(v["assignee"], "", "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["assignee"], "");
+        assert_eq!(v["status"], "open");
+
+        // relate it to a parent without touching anything else
+        let (_, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "in_progress", "parent_task": "task-migrate-logs"}))).await;
+        assert_eq!(v["unknown_parent"], "task-migrate-logs", "forward reference reported: {v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["parent_task"], "task-migrate-logs");
+        assert_eq!(v["priority"], "high", "{v}");
+
+        // every transition is a git version: history + get --at reconstruct who
+        // held the task, and in which status, at any point
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}/history"), None).await;
+        let versions = v["versions"].as_array().unwrap().clone();
+        assert_eq!(versions.len(), 6, "create + 5 transitions: {versions:?}");
+        let claimed = versions[versions.len() - 2]["sha"].as_str().unwrap().to_string();
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}?at={claimed}"), None).await;
+        assert_eq!(v["assignee"], "agent-a", "the earlier owner is reconstructable: {v}");
+        assert_eq!(v["status"], "in_progress");
+
+        // closing still goes through resolve, and the record keeps the owner
+        let (_, v) = call(&app, "POST", &format!("/tasks/{key}/resolve"),
+            Some(json!({"resolution": "Raised to 72h with a 2G disk budget."}))).await;
+        assert_eq!(v["archived"], true, "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["status"], "done");
+        assert_eq!(v["parent_task"], "task-migrate-logs", "{v}");
+
+        // an archived task can be picked back up: the file returns
+        let (_, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "in_progress", "assignee": "agent-b"}))).await;
+        assert_eq!(v["action"], "created", "reopening recreates the file: {v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert!(v.get("archived").is_none(), "back in the canon: {v}");
+        assert_eq!(v["assignee"], "agent-b");
+    }
+
+    // Parent links form a chain, never a ring — for both wholesale writes and
+    // partial transitions, including cycles longer than self-parenting.
+    #[tokio::test]
+    async fn task_parent_cycles_rejected() {
+        let (app, _data, _idx) = app_with_tmp();
+        for (key, parent) in [
+            ("task-project", ""),
+            ("task-project-step-one", "task-project"),
+            ("task-project-step-two", "task-project-step-one"),
+        ] {
+            let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+                "key": key, "title": key, "body": "x", "parent_task": parent,
+            }))).await;
+            assert_eq!(st, StatusCode::OK, "{v}");
+        }
+
+        // project -> step two -> step one -> project would be a three-node cycle
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-project", "title": "task-project", "body": "x",
+            "parent_task": "task-project-step-two",
+        }))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("cycle"), "{v}");
+
+        let (st, v) = call(&app, "POST", "/tasks/task-project/transition", Some(json!({
+            "status": "in_progress", "parent_task": "task-project-step-two",
+        }))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("cycle"), "{v}");
+
+        // Neither rejected write changed the root.
+        let (_, v) = call(&app, "GET", "/knowledge/task-project", None).await;
+        assert_eq!(v["status"], "open", "{v}");
+        assert_eq!(v["parent_task"], "", "{v}");
+    }
+
+    // the transition endpoint is not a closing endpoint, and not a way past
+    // validation either
+    #[tokio::test]
+    async fn task_transition_rejections() {
+        let (app, _data, _idx) = app_with_tmp();
+        let key = "task-swap-disk";
+        call(&app, "POST", "/tasks", Some(json!({
+            "key": key, "title": "Swap the failing disk", "body": "x", "priority": "critical",
+        }))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("plain-note", "a fact"))).await;
+
+        // the terminal statuses need an outcome — and say where to give one
+        for status in ["done", "dropped"] {
+            let (st, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+                Some(json!({"status": status}))).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{status}: {v}");
+            let err = v["error"].as_str().unwrap();
+            assert!(err.contains("kyb done"), "{status}: {err}");
+            assert!(err.contains("/resolve"), "{status}: {err}");
+        }
+
+        let bad = [
+            json!({"status": "wip"}),
+            json!({"status": ""}),
+            json!({"status": "mitigated"}),
+            json!({"status": "in_progress", "assignee": "token: ghp_abcdefghijklmnopqrstuvwxyz123456"}),
+            json!({"status": "in_progress", "assignee": "x".repeat(model::ASSIGNEE_MAX_LEN + 1)}),
+            json!({"status": "in_progress", "parent_task": "not-a-task-key"}),
+            json!({"status": "in_progress", "parent_task": "inc-2026-08-15-oom"}),
+        ];
+        for payload in bad {
+            let (st, v) =
+                call(&app, "POST", &format!("/tasks/{key}/transition"), Some(payload.clone())).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "payload {payload}: {v}");
+        }
+        // a task cannot hang under itself — the smallest broken tree
+        let (st, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "in_progress", "parent_task": key}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "self-parenting: {v}");
+        assert!(v["error"].as_str().unwrap().contains("own parent"), "{v}");
+
+        // wrong kind, missing key, garbage key
+        let (st, v) = call(&app, "POST", "/tasks/plain-note/transition",
+            Some(json!({"status": "in_progress"}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("not a task"), "{v}");
+        let (st, _) = call(&app, "POST", "/tasks/task-nope/transition",
+            Some(json!({"status": "in_progress"}))).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = call(&app, "POST", "/tasks/Bad%20Key/transition",
+            Some(json!({"status": "in_progress"}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = call(&app, "POST", &format!("/tasks/{key}/transition"), Some(json!({}))).await;
+        assert!(st.is_client_error(), "status is required");
+
+        // through all of that the task never moved
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["status"], "open", "{v}");
+        assert_eq!(v["assignee"], "");
+        assert_eq!(v["parent_task"], "");
+        assert_eq!(v["priority"], "critical");
+    }
+
+    // tasks written before this feature carry neither field and keep working:
+    // they list, they filter, and they can be claimed with one transition
+    #[tokio::test]
+    async fn legacy_task_without_ownership_still_works() {
+        let (app, _data, _idx) = app_with_tmp();
+        let key = "task-old-note";
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": key, "title": "An old note", "body": "written before ownership existed",
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["assignee"], "", "{v}");
+        assert_eq!(v["parent_task"], "");
+        assert_eq!(v["status"], "open");
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["tasks"][0]["assignee"], "");
+        assert_eq!(v["tasks"][0]["parent_task"], "");
+
+        // claiming it needs neither the title nor the body
+        let (st, v) = call(&app, "POST", &format!("/tasks/{key}/transition"),
+            Some(json!({"status": "in_progress", "assignee": "agent-a"}))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["assignee"], "agent-a");
+        assert!(v["body"].as_str().unwrap().contains("before ownership"), "{v}");
+    }
+
     // --- task payload validation: the new fields ---
     #[rstest]
     #[case::priority_high(json!({"key": "task-a", "title": "t", "body": "x", "priority": "high"}), 200)]
@@ -1788,6 +2233,16 @@ mod api_tests {
     #[case::secret_in_reason(json!({"key": "task-a", "title": "t", "body": "x", "status": "blocked", "blocked_reason": "password: super123secret"}), 400)]
     #[case::in_progress_needs_no_resolution(json!({"key": "task-a", "title": "t", "body": "x", "status": "in_progress"}), 200)]
     #[case::done_still_needs_resolution(json!({"key": "task-a", "title": "t", "body": "x", "status": "done"}), 400)]
+    #[case::assignee_absent(json!({"key": "task-a", "title": "t", "body": "x"}), 200)]
+    #[case::assignee_label(json!({"key": "task-a", "title": "t", "body": "x", "assignee": "agent-a"}), 200)]
+    #[case::assignee_blank_is_unclaimed(json!({"key": "task-a", "title": "t", "body": "x", "assignee": "   "}), 200)]
+    #[case::assignee_secret(json!({"key": "task-a", "title": "t", "body": "x", "assignee": "password: super123secret"}), 400)]
+    #[case::parent_absent(json!({"key": "task-a", "title": "t", "body": "x"}), 200)]
+    #[case::parent_task_key(json!({"key": "task-a", "title": "t", "body": "x", "parent_task": "task-parent"}), 200)]
+    #[case::parent_not_a_task(json!({"key": "task-a", "title": "t", "body": "x", "parent_task": "nats-streams"}), 400)]
+    #[case::parent_malformed(json!({"key": "task-a", "title": "t", "body": "x", "parent_task": "task-Bad Key"}), 400)]
+    #[case::parent_traversal(json!({"key": "task-a", "title": "t", "body": "x", "parent_task": "../task-x"}), 400)]
+    #[case::parent_self(json!({"key": "task-a", "title": "t", "body": "x", "parent_task": "task-a"}), 400)]
     #[tokio::test]
     async fn task_validation_matrix(#[case] payload: Value, #[case] expect: u16) {
         let (app, _data, _idx) = app_with_tmp();
@@ -1798,7 +2253,11 @@ mod api_tests {
     // the task-only fields must not leak onto the other kinds
     #[rstest]
     #[case::knowledge_priority("/knowledge", json!({"key": "k", "title": "t", "body": "x", "priority": "high"}))]
+    #[case::knowledge_assignee("/knowledge", json!({"key": "k", "title": "t", "body": "x", "assignee": "agent-a"}))]
+    #[case::knowledge_parent("/knowledge", json!({"key": "k", "title": "t", "body": "x", "parent_task": "task-x"}))]
     #[case::incident_priority("/incidents", json!({"key": "inc-a", "title": "t", "body": "x", "service": "s", "severity": "low", "priority": "high"}))]
+    #[case::incident_assignee("/incidents", json!({"key": "inc-a", "title": "t", "body": "x", "service": "s", "severity": "low", "assignee": "agent-a"}))]
+    #[case::incident_parent("/incidents", json!({"key": "inc-a", "title": "t", "body": "x", "service": "s", "severity": "low", "parent_task": "task-x"}))]
     #[tokio::test]
     async fn task_only_fields_ignored_on_other_kinds(#[case] path: &str, #[case] payload: Value) {
         let (app, _data, _idx) = app_with_tmp();
@@ -1810,6 +2269,8 @@ mod api_tests {
         let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
         assert!(v.get("priority").is_none(), "priority is task-only: {v}");
         assert!(v.get("blocked_reason").is_none(), "blocked_reason is task-only: {v}");
+        assert!(v.get("assignee").is_none(), "assignee is task-only: {v}");
+        assert!(v.get("parent_task").is_none(), "parent_task is task-only: {v}");
     }
 
     #[tokio::test]

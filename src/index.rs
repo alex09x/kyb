@@ -39,6 +39,10 @@ pub struct Fields {
     /// Task priority as an exact term — same shape as status/severity, so the
     /// `?priority=` filter is one more clause in the same BooleanQuery.
     priority: Field,
+    /// Task ownership as exact terms: "what is agent-a holding" and "what hangs
+    /// under this task" are filters, not free-text questions.
+    assignee: Field,
+    parent_task: Field,
     hosts: Field,
     knowledge: Field,
     /// Stored only: what a blocked task waits on rides on the hit; it is state,
@@ -96,6 +100,10 @@ pub struct Hit {
     pub priority: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub blocked_reason: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub assignee: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub parent_task: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub knowledge: Vec<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -131,6 +139,8 @@ pub struct SearchOpts {
     pub status: Option<String>,
     pub service: Option<String>,
     pub priority: Option<String>,
+    pub assignee: Option<String>,
+    pub parent_task: Option<String>,
 }
 
 fn text_opts() -> TextOptions {
@@ -155,6 +165,8 @@ fn build_schema() -> Schema {
     sb.add_text_field("status", STRING | STORED);
     sb.add_text_field("severity", STRING | STORED);
     sb.add_text_field("priority", STRING | STORED);
+    sb.add_text_field("assignee", STRING | STORED);
+    sb.add_text_field("parent_task", STRING | STORED);
     sb.add_text_field("hosts", STRING | STORED);
     sb.add_text_field("knowledge", STRING | STORED);
     sb.add_text_field("blocked_reason", TextOptions::default().set_stored());
@@ -224,6 +236,8 @@ impl SearchIndex {
             status: f("status"),
             severity: f("severity"),
             priority: f("priority"),
+            assignee: f("assignee"),
+            parent_task: f("parent_task"),
             hosts: f("hosts"),
             knowledge: f("knowledge"),
             blocked_reason: f("blocked_reason"),
@@ -283,6 +297,12 @@ impl SearchIndex {
         }
         if !e.blocked_reason.is_empty() {
             d.add_text(self.fields.blocked_reason, &e.blocked_reason);
+        }
+        if !e.assignee.is_empty() {
+            d.add_text(self.fields.assignee, &e.assignee);
+        }
+        if !e.parent_task.is_empty() {
+            d.add_text(self.fields.parent_task, &e.parent_task);
         }
         for h in &e.hosts {
             d.add_text(self.fields.hosts, h.to_lowercase());
@@ -457,6 +477,9 @@ impl SearchIndex {
             (self.fields.status, opts.status.as_deref(), false),
             (self.fields.service, opts.service.as_deref(), true),
             (self.fields.priority, opts.priority.as_deref(), false),
+            // an assignee label is stored verbatim, so the filter matches it verbatim
+            (self.fields.assignee, opts.assignee.as_deref(), false),
+            (self.fields.parent_task, opts.parent_task.as_deref(), false),
         ];
         for (field, value, fold) in exact {
             let Some(v) = value.filter(|v| !v.is_empty()) else { continue };
@@ -517,6 +540,8 @@ impl SearchIndex {
             status: text(self.fields.status),
             priority: text(self.fields.priority),
             blocked_reason: text(self.fields.blocked_reason),
+            assignee: text(self.fields.assignee),
+            parent_task: text(self.fields.parent_task),
             knowledge: multi(self.fields.knowledge),
             resolution: text(self.fields.resolution),
             detection: text(self.fields.detection),
@@ -744,6 +769,59 @@ mod tests {
         let h = &by(Some("blocked"), None)[0];
         assert_eq!(h.blocked_reason, "waiting on the host-a disk upgrade");
         assert!(h.priority.is_empty(), "unranked stays unranked");
+    }
+
+    // assignee and parent_task are exact filters of the same shape, and both
+    // ride back on the hit
+    #[test]
+    fn task_assignee_and_parent_filters() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        let mut parent = make_task("task-migrate-logs", "in_progress", "high");
+        parent.assignee = "agent-a".into();
+        store.upsert(parent, "2026-08-15").unwrap();
+        let mut child = make_task("task-migrate-logs-step-one", "in_progress", "");
+        child.assignee = "agent-a".into();
+        child.parent_task = "task-migrate-logs".into();
+        store.upsert(child, "2026-08-15").unwrap();
+        let mut other = make_task("task-swap-disk", "open", "");
+        other.assignee = "agent-b".into();
+        other.parent_task = "task-migrate-logs".into();
+        store.upsert(other, "2026-08-15").unwrap();
+        store.upsert(make_task("task-unclaimed", "open", ""), "2026-08-15").unwrap();
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        let by = |assignee: Option<&str>, parent: Option<&str>| {
+            index
+                .search("", &SearchOpts {
+                    limit: 10,
+                    kind: Some("task".into()),
+                    assignee: assignee.map(String::from),
+                    parent_task: parent.map(String::from),
+                    ..Default::default()
+                })
+                .unwrap()
+        };
+        assert_eq!(by(None, None).len(), 4, "no filter sees every task");
+        assert_eq!(by(Some("agent-a"), None).len(), 2, "what one owner holds");
+        assert_eq!(by(Some("agent-b"), None).len(), 1);
+        assert_eq!(by(Some("Agent-A"), None).len(), 0, "the label matches verbatim");
+        assert_eq!(by(None, Some("task-migrate-logs")).len(), 2, "the children of one parent");
+        assert_eq!(by(Some("agent-a"), Some("task-migrate-logs")).len(), 1, "filters combine");
+        assert_eq!(by(None, Some("task-nothing-hangs-here")).len(), 0);
+
+        let h = &by(Some("agent-a"), Some("task-migrate-logs"))[0];
+        assert_eq!(h.key, "task-migrate-logs-step-one");
+        assert_eq!(h.assignee, "agent-a");
+        assert_eq!(h.parent_task, "task-migrate-logs");
+        // an unclaimed top-level task carries neither
+        let all = by(None, None);
+        let h = all.iter().find(|h| h.key == "task-unclaimed").unwrap();
+        assert!(h.assignee.is_empty());
+        assert!(h.parent_task.is_empty());
     }
 
     // the two deletion semantics: archived closed entries stay in the default

@@ -504,8 +504,17 @@
           </div>
           <div class="term-out">
 <span class="term-out-highlight">✓ 2 live tasks</span> (open · in_progress · blocked)
-  <span class="term-out-key">task-swap-failing-disk</span>   status=blocked      "waiting on the replacement disk"
-  <span class="term-out-key">task-raise-log-retention</span> status=in_progress  "72h retention, 2G disk budget"
+  <span class="term-out-key">task-swap-failing-disk</span>   status=blocked      assignee=agent-b  "waiting on the replacement disk"
+  <span class="term-out-key">task-raise-log-retention</span> status=in_progress  assignee=agent-a  "72h retention, 2G disk budget"
+          </div>
+          <br>
+          <div class="term-line">
+            <span class="term-prompt">agent@fleet:~$</span>
+            <span class="term-cmd">kyb task-status task-raise-log-retention --status blocked --blocked-reason "waiting on the disk budget"</span>
+          </div>
+          <div class="term-out">
+<span class="term-out-highlight">✓ Task moved</span>: <span class="term-out-key">task-raise-log-retention</span> status=blocked assignee=agent-a (changed=true)
+  title, body, tags and priority untouched — a transition resends nothing
           </div>
         </div>
       </div>
@@ -552,6 +561,12 @@
           <div class="card-icon">✅</div>
           <h3 class="card-title">Task Board for Agents</h3>
           <p class="card-desc">Short actionable notes with an optional priority (low → critical) and a real lifecycle: open, in_progress, blocked (with the reason it waits on), done, dropped. Only done and dropped close and archive — everything still in flight stays listed and counted.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🪪</div>
+          <h3 class="card-title">Claimable, Relatable Tasks</h3>
+          <p class="card-desc">An optional assignee label says who holds a task right now, and parent_task hangs child work under the task it belongs to. One partial transition claims, blocks or hands back a task without resending its title, body, tags or priority — and every change is a git commit, so history replays who held what, in which status, at any point.</p>
         </div>
 
         <div class="card">
