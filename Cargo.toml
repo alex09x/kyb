@@ -1,6 +1,6 @@
 [package]
 name = "knowyourbusiness"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
 description = "Git-backed, searchable knowledge base and incident tracker for AI agent fleets"
 license = "MIT"

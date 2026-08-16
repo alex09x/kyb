@@ -1,0 +1,71 @@
+# Source of truth for Formula/kyb.rb in the alex09x/homebrew-apps tap.
+#
+# ARTIFACT CONTRACT
+#   This formula installs the prebuilt release asset produced by
+#   scripts/package-macos-arm64.sh — it never builds from source, so it declares
+#   no "rust" dependency and never invokes cargo. The archive holds a single
+#   top-level directory with bin/kyb, bin/kyb-server, the complete skills/ tree
+#   (including skills/install.sh), LICENSE, README.md and MANIFEST.txt; the
+#   install block below depends on exactly those paths.
+#
+#   One supported platform: aarch64-apple-darwin. Intel macOS is unsupported.
+#
+# RENDERING
+#   .github/workflows/update-homebrew.yml substitutes the KYB_URL, KYB_SHA256 and
+#   KYB_VERSION placeholders below (each written between doubled at-signs) with
+#   the exact release asset URL, its SHA-256 and the tag without its leading "v".
+#   It then checks that no placeholder survived and that `ruby -c` accepts the
+#   result. Edit this template, never the rendered formula in the tap.
+class Kyb < Formula
+  desc "Shared memory and incident tracker for AI agent fleet"
+  homepage "https://github.com/alex09x/kyb"
+  url "@@KYB_URL@@"
+  sha256 "@@KYB_SHA256@@"
+  version "@@KYB_VERSION@@"
+  license "MIT"
+
+  # Apple Silicon only, by design: the release ships one aarch64-apple-darwin
+  # asset and there is no source build path to fall back to on Intel.
+  depends_on arch: :arm64
+  depends_on :macos
+
+  def install
+    bin.install "bin/kyb-server"
+    bin.install "bin/kyb"
+    pkgshare.install "skills"
+    pkgshare.install "MANIFEST.txt"
+    doc.install "README.md"
+    prefix.install "LICENSE"
+
+    service_wrapper = libexec/"kyb-service"
+    service_wrapper.write <<~SH
+      #!/bin/bash
+      set -euo pipefail
+      for agent_dir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/config/skills"; do
+        /bin/mkdir -p "$agent_dir"
+      done
+      KYB_INSTALL_BINARY="#{opt_bin}/kyb" /bin/bash "#{pkgshare}/skills/install.sh"
+      exec "#{opt_bin}/kyb-server"
+    SH
+    service_wrapper.chmod(0755)
+  end
+
+  post_install_steps do
+    mkdir_p "kyb/data", base: :var
+    mkdir_p "kyb/index", base: :var
+    mkdir_p "log", base: :var
+  end
+
+  service do
+    run [opt_libexec/"kyb-service"]
+    keep_alive true
+    working_dir var/"kyb"
+    log_path var/"log/kyb.log"
+    error_log_path var/"log/kyb.log"
+    environment_variables KYB_DATA: var/"kyb/data", KYB_INDEX: var/"kyb/index", KYB_ADDR: "127.0.0.1:9310"
+  end
+
+  test do
+    assert_match "kyb", shell_output("#{bin}/kyb --help")
+  end
+end

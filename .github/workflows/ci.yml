@@ -7,7 +7,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions: write-all
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -45,6 +46,109 @@ jobs:
             bash skills/kyb/bin/kyb tags || true
           fi
           kill $SERVER_PID
+
+  # Tag builds only. Branch and PR runs are untouched by this job.
+  #
+  # ARTIFACT CONTRACT
+  #   The release has exactly one supported platform, aarch64-apple-darwin
+  #   (Apple Silicon); Intel is unsupported. A v* tag ships exactly one asset,
+  #   kyb-${TAG}-aarch64-apple-darwin.tar.gz, whose layout is defined and
+  #   verified by scripts/package-macos-arm64.sh and consumed by
+  #   packaging/homebrew/kyb.rb.in.
+  #
+  # RACE AVOIDANCE
+  #   update-homebrew-formula triggers on `release: published` and immediately
+  #   wants the asset. GitHub does not emit that event for drafts, so a new
+  #   release is created as a draft, the asset is uploaded, and only then is the
+  #   release published — a consumer can never observe a published release
+  #   without its asset. Re-runs reuse an existing release and re-upload with
+  #   --clobber instead of re-drafting it, so an already published release is
+  #   never briefly withdrawn. update-homebrew-formula still polls for the asset,
+  #   because a manual workflow_dispatch can fire while an upload is in flight.
+  release-macos-arm64:
+    needs: [test, e2e-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Assert Apple Silicon runner
+        run: |
+          set -euo pipefail
+          kernel="$(uname -s)"
+          arch="$(uname -m)"
+          echo "runner: $kernel $arch"
+          [ "$kernel" = "Darwin" ] || { echo "expected a macOS runner, got $kernel"; exit 1; }
+          [ "$arch" = "arm64" ] || { echo "expected an arm64 runner, got $arch"; exit 1; }
+
+      - name: Build release binaries
+        run: cargo build --release --locked
+
+      - name: Assert binary architecture
+        run: |
+          set -euo pipefail
+          file target/release/kyb-server
+          lipo -archs target/release/kyb-server | tr ' ' '\n' | grep -qx arm64
+
+      - name: Smoke test server and CLI
+        run: |
+          set -euo pipefail
+          export KYB_DATA="${RUNNER_TEMP}/kyb-data" KYB_INDEX="${RUNNER_TEMP}/kyb-index"
+          ./target/release/kyb-server &
+          server_pid=$!
+          healthy=0
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:9310/healthz >/dev/null; then healthy=1; break; fi
+            sleep 0.5
+          done
+          if [ "$healthy" -ne 1 ]; then
+            kill "$server_pid" || true
+            echo "kyb-server did not answer /healthz"
+            exit 1
+          fi
+          KYB_HOST=127.0.0.1 bash skills/kyb/bin/kyb health
+          KYB_HOST=127.0.0.1 bash skills/kyb/bin/kyb tags
+          kill "$server_pid"
+
+      - name: Package Apple Silicon release archive
+        id: package
+        run: ./scripts/package-macos-arm64.sh "$RELEASE_TAG" dist
+
+      - name: Create the GitHub Release as a draft when it does not exist yet
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $RELEASE_TAG already exists; reusing it"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "kyb $RELEASE_TAG" \
+              --notes "kyb $RELEASE_TAG for aarch64-apple-darwin (Apple Silicon). Intel macOS is not supported."
+          fi
+
+      - name: Upload the release asset
+        env:
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          test -f "$ARCHIVE"
+          gh release upload "$RELEASE_TAG" "$ARCHIVE" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Publish the release
+        run: |
+          set -euo pipefail
+          # No-op when the release is already published; otherwise this is the
+          # draft -> published transition that starts update-homebrew-formula.
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
   docker:
     needs: [test, e2e-macos]

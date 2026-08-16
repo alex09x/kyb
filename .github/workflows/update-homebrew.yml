@@ -1,5 +1,26 @@
 name: update-homebrew-formula
 
+# Renders packaging/homebrew/kyb.rb.in — the single source of truth for the tap
+# formula — against the published Apple Silicon release asset and opens an
+# idempotent PR in the tap.
+#
+# ARTIFACT CONTRACT
+#   The release ships exactly one asset for the one supported platform:
+#     kyb-${TAG}-aarch64-apple-darwin.tar.gz
+#   The formula installs that prebuilt archive, so nothing here builds from
+#   source: no rust dependency, no cargo, no Intel fallback.
+#
+# RACE AVOIDANCE
+#   ci.yml uploads the asset to a draft release and publishes only afterwards,
+#   so the `release: published` event can never arrive before the asset exists.
+#   A manual workflow_dispatch has no such guarantee, and asset availability on
+#   the GitHub CDN can lag the API by a few seconds, so the wait step below polls
+#   the release until the exact asset name is listed and only then downloads it.
+#   Every sha256 is computed from the downloaded bytes, never guessed.
+#
+# Credentials live only in the GH_TOKEN env var; no step echoes it and no step
+# enables shell tracing.
+
 on:
   release:
     types: [published]
@@ -38,74 +59,117 @@ jobs:
             echo "HOMEBREW_TAP_TOKEN is not configured"
             exit 1
           }
+          test -f packaging/homebrew/kyb.rb.in || {
+            echo "packaging/homebrew/kyb.rb.in is missing"
+            exit 1
+          }
+          echo "ASSET_NAME=kyb-${RELEASE_TAG}-aarch64-apple-darwin.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Wait for the Apple Silicon release asset
+        run: |
+          set -euo pipefail
+          # Poll rather than assume: a manual dispatch can start while ci.yml is
+          # still uploading, and the asset must exist before its sha256 means anything.
+          for attempt in $(seq 1 40); do
+            if gh release view "$RELEASE_TAG" --repo "$KYB_REPOSITORY" --json assets \
+                 --jq '.assets[].name' 2>/dev/null | grep -Fxq "$ASSET_NAME"; then
+              echo "$ASSET_NAME is published on $RELEASE_TAG"
+              exit 0
+            fi
+            echo "attempt ${attempt}/40: $ASSET_NAME not available yet"
+            sleep 15
+          done
+          echo "Timed out waiting for $ASSET_NAME on release $RELEASE_TAG"
+          exit 1
+
+      - name: Download the release asset and compute its SHA-256
+        run: |
+          set -euo pipefail
+          rm -rf asset
+          gh release download "$RELEASE_TAG" \
+            --repo "$KYB_REPOSITORY" \
+            --pattern "$ASSET_NAME" \
+            --dir asset \
+            --clobber
+          asset_sha256="$(sha256sum "asset/$ASSET_NAME" | awk '{print $1}')"
+          {
+            echo "ASSET_URL=https://github.com/${KYB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+            echo "ASSET_SHA256=${asset_sha256}"
+            echo "KYB_VERSION=${RELEASE_TAG#v}"
+          } >> "$GITHUB_ENV"
+          echo "sha256(${ASSET_NAME}) = ${asset_sha256}"
 
       - name: Check out Homebrew tap
         run: |
           set -euo pipefail
+          rm -rf tap
           gh repo clone "$TAP_REPO" tap
+          default_branch="$(gh repo view "$TAP_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')"
+          # Re-runs must converge on one commit, not stack onto a stale branch.
+          git -C tap checkout -B "automation/kyb-${RELEASE_TAG}" "origin/${default_branch}"
+          echo "TAP_DEFAULT_BRANCH=${default_branch}" >> "$GITHUB_ENV"
 
-      - name: Update formula version, source URL, and checksum
+      - name: Render formula from packaging/homebrew/kyb.rb.in
         run: |
           set -euo pipefail
-          source_url="https://github.com/${KYB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-          source_sha256="$(curl --fail --location --retry 3 --max-time 60 "$source_url" | sha256sum | awk '{print $1}')"
-          export SOURCE_URL="$source_url" SOURCE_SHA256="$source_sha256"
+          mkdir -p tap/Formula
           python3 - <<'PY'
           import os
           import re
           from pathlib import Path
 
+          template = Path("packaging/homebrew/kyb.rb.in").read_text()
+          substitutions = {
+              "KYB_URL": os.environ["ASSET_URL"],
+              "KYB_SHA256": os.environ["ASSET_SHA256"],
+              "KYB_VERSION": os.environ["KYB_VERSION"],
+          }
+          for key, value in substitutions.items():
+              marker = f"@@{key}@@"
+              if marker not in template:
+                  raise SystemExit(f"template placeholder {marker} is missing")
+              template = template.replace(marker, value)
+
+          leftover = re.findall(r"@@[A-Z0-9_]+@@", template)
+          if leftover:
+              raise SystemExit(f"unrendered placeholders in formula: {sorted(set(leftover))}")
+
           formula = Path("tap/Formula/kyb.rb")
-          text = formula.read_text()
-          source_url = os.environ["SOURCE_URL"]
-          source_sha256 = os.environ["SOURCE_SHA256"]
-
-          text, replaced = re.subn(
-              r'^  url "[^"]+"\n',
-              f'  url "{source_url}"\n',
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
-          if replaced != 1:
-              raise SystemExit("Formula/kyb.rb must contain exactly one stable url")
-
-          sha_line = f'  sha256 "{source_sha256}"\n'
-          if re.search(r'^  sha256 "[^"]+"\n', text, flags=re.MULTILINE):
-              text = re.sub(r'^  sha256 "[^"]+"\n', sha_line, text, count=1, flags=re.MULTILINE)
-          else:
-              url_line = f'  url "{source_url}"\n'
-              text = text.replace(url_line, url_line + sha_line, 1)
-
-          formula.write_text(text)
-          print(f"Updated {formula} to {source_url} ({source_sha256})")
+          formula.write_text(template)
+          print(f"Rendered {formula} for {os.environ['KYB_VERSION']}")
           PY
 
       - name: Validate formula syntax
-        run: ruby -c tap/Formula/kyb.rb
+        run: |
+          set -euo pipefail
+          ruby -c tap/Formula/kyb.rb
+          grep -Fq "$ASSET_URL" tap/Formula/kyb.rb
+          grep -Fq "$ASSET_SHA256" tap/Formula/kyb.rb
 
-      - name: Open pull request in Homebrew tap
+      - name: Open or update the pull request in the Homebrew tap
         run: |
           set -euo pipefail
           branch="automation/kyb-${RELEASE_TAG}"
-          if [ "$(gh pr list --repo "$TAP_REPO" --head "$branch" --state open --json number --jq 'length')" -gt 0 ]; then
-            echo "An open formula update PR already exists for ${RELEASE_TAG}"
-            exit 0
-          fi
 
           git -C tap config user.name "github-actions[bot]"
           git -C tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C tap checkout -b "$branch"
           git -C tap add Formula/kyb.rb
           if git -C tap diff --cached --quiet; then
-            echo "Formula already matches ${RELEASE_TAG}; no PR needed"
+            echo "Formula already matches ${RELEASE_TAG}; nothing to open"
             exit 0
           fi
           git -C tap commit -m "kyb ${RELEASE_TAG}"
-          git -C tap push --set-upstream origin "$branch"
+          # Idempotent: the branch is rebuilt from the tap default branch on every
+          # run, so re-running a tag refreshes the existing PR instead of stacking.
+          git -C tap push --force-with-lease --set-upstream origin "$branch"
+
+          if [ "$(gh pr list --repo "$TAP_REPO" --head "$branch" --state open --json number --jq 'length')" -gt 0 ]; then
+            echo "Refreshed the open formula update PR for ${RELEASE_TAG}"
+            exit 0
+          fi
           gh pr create \
             --repo "$TAP_REPO" \
             --head "$branch" \
-            --base main \
+            --base "$TAP_DEFAULT_BRANCH" \
             --title "kyb ${RELEASE_TAG}" \
-            --body "Update Formula/kyb.rb to the kyb ${RELEASE_TAG} source archive and checksum."
+            --body "Point Formula/kyb.rb at the prebuilt kyb ${RELEASE_TAG} asset for aarch64-apple-darwin (Apple Silicon only, no cargo build)."
