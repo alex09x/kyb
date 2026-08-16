@@ -137,6 +137,9 @@ which status, at any point in time.
 # docker — data (git canon + index) lives in ./data
 docker compose up -d
 
+# remote private-network clients: bind one exact interface, never every NIC
+KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
+
 # or natively — reindexes from git on start, listens on 127.0.0.1:9310
 cargo run --release
 ```
@@ -149,6 +152,7 @@ cargo run --release
 | `KYB_DATA` | `./kyb-data` | git canon directory |
 | `KYB_INDEX` | `./index` | Tantivy cache (safe to delete) |
 | `KYB_ADDR` | `127.0.0.1:9310` | **no auth by design** — run on a private network |
+| `KYB_PUBLISH_ADDR` | `127.0.0.1` | Docker Compose host interface; set one exact private IP for remote clients |
 | `KYB_MODEL` | *(unset)* | dir with `model.onnx` + `tokenizer.json`; absent = lexical-only |
 | `KYB_AUDIT` | `audit.jsonl` | JSONL request log |
 

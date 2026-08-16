@@ -20,6 +20,8 @@ jobs:
           ruby-version: '3.3'
       - name: Validate and install agent skill
         run: bash scripts/test-skill-install.sh
+      - name: Verify safe Docker Compose bind
+        run: bash scripts/test-compose-bind.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked

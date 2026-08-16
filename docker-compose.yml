@@ -7,6 +7,8 @@ services:
     # and can't be read/edited by hand (and git-as-truth is the whole point).
     user: "1000:1000"
     ports:
-      - "9310:9310" # internal network only; do not expose publicly (no auth)
+      # Safe by default: the API has no application auth. Operators that need
+      # remote private-network clients must opt into one exact interface IP.
+      - "${KYB_PUBLISH_ADDR:-127.0.0.1}:9310:9310"
     volumes:
       - ./data:/data # ./data/kyb-data — git canon, ./data/index — Tantivy
