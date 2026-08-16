@@ -137,21 +137,64 @@ struct UpsertReq {
     refs: Vec<String>,
 }
 
-/// Shared tail of both upsert routes: validate, commit to git, update the
-/// index and the vector side. `extra` lets a route add response fields.
-async fn commit_entry(st: &Arc<AppState>, entry: model::Entry, extra: Value) -> Reply {
-    if let Err(e) = entry.validate() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
-    }
+/// What a route hands to [`locked_write`]: the entry to commit plus the extra
+/// response fields it wants, or the reply that refuses the write outright.
+type Built = Result<(model::Entry, Value), Reply>;
+
+/// The whole read–modify–write of one entry inside a single critical section.
+///
+/// `build` runs with the global writer lock ALREADY held, so every stored
+/// version it reads is still the current one when the commit lands: two
+/// partial updates to the same key can no longer both read the same version
+/// and silently overwrite each other. A terminal entry is archived in the same
+/// section, so no concurrent reopen can slip between the closing commit and
+/// the archival and lose its freshly recreated file to it.
+///
+/// Only the vector refresh happens after the lock is dropped — it touches
+/// neither git nor the index, and a stale vector is never a lost write.
+async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built) -> Reply {
     let mut w = st.writer.lock().await;
+    let (entry, extra) = match build(st.as_ref()) {
+        Ok(built) => built,
+        Err(reply) => return reply,
+    };
+    let closed = entry.is_closed();
+    let key = entry.key.clone();
+    let (mut reply, committed) = commit_locked(st, &mut w, entry, extra);
+    if closed {
+        archive_locked(st, &mut w, &key, &mut reply);
+    }
+    drop(w);
+    if let (Some(sem), Some(e)) = (st.semantic.as_ref(), committed) {
+        if let Err(err) = sem.upsert(&e.key, &embed_text(&e)).await {
+            eprintln!("kyb: embedding not updated for {}: {err:#}", e.key);
+        }
+    }
+    reply
+}
+
+/// Shared tail of every write route: validate, commit to git, update the
+/// index — all under the caller's writer lock, which the `&mut IndexWriter`
+/// proves is held. `extra` lets a route add response fields. Returns the entry
+/// that actually landed (None when nothing was committed) so the caller can
+/// refresh the vector side once the lock is gone.
+fn commit_locked(
+    st: &AppState,
+    w: &mut IndexWriter,
+    entry: model::Entry,
+    extra: Value,
+) -> (Reply, Option<model::Entry>) {
+    if let Err(e) = entry.validate() {
+        return ((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))), None);
+    }
     if let Err(e) = validate_task_parent_chain(st, &entry) {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})));
+        return ((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))), None);
     }
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let (c, action) = match st.store.upsert(entry, &today) {
-        Err(e) => return err500(e),
+        Err(e) => return (err500(e), None),
         Ok(store::UpsertOutcome::Unchanged(entry)) => {
-            return (StatusCode::OK, Json(json!({"key": entry.key, "changed": false})));
+            return ((StatusCode::OK, Json(json!({"key": entry.key, "changed": false}))), None);
         }
         Ok(store::UpsertOutcome::Created(c)) => (c, "created"),
         Ok(store::UpsertOutcome::Updated(c)) => (c, "updated"),
@@ -159,34 +202,36 @@ async fn commit_entry(st: &Arc<AppState>, entry: model::Entry, extra: Value) -> 
     // git is already the truth; a broken index heals via /reindex
     if let Err(e) = st
         .index
-        .upsert_head(&mut w, &c.entry, &c.sha, c.committed_at)
-        .and_then(|_| st.index.commit_and_reload(&mut w))
+        .upsert_head(w, &c.entry, &c.sha, c.committed_at)
+        .and_then(|_| st.index.commit_and_reload(w))
     {
-        return err500(e.context("git committed but the index was not updated — run POST /reindex"));
-    }
-    drop(w);
-    if let Some(sem) = st.semantic.as_ref() {
-        if let Err(e) = sem.upsert(&c.entry.key, &embed_text(&c.entry)).await {
-            eprintln!("kyb: embedding not updated for {}: {e:#}", c.entry.key);
-        }
+        return (
+            err500(e.context("git committed but the index was not updated — run POST /reindex")),
+            None,
+        );
     }
     let mut resp = json!({"key": c.entry.key, "sha": c.sha, "changed": true, "action": action});
     if let (Some(obj), Some(add)) = (resp.as_object_mut(), extra.as_object()) {
         obj.extend(add.clone());
     }
-    (StatusCode::OK, Json(resp))
+    ((StatusCode::OK, Json(resp)), Some(c.entry))
 }
 
 async fn upsert(State(st): St, Json(r): Json<UpsertReq>) -> Reply {
-    let entry = model::Entry {
-        key: r.key,
-        title: r.title,
-        tags: r.tags,
-        refs: r.refs,
-        body: r.body,
-        ..Default::default()
-    };
-    commit_entry(&st, entry, Value::Null).await
+    locked_write(&st, move |_| {
+        Ok((
+            model::Entry {
+                key: r.key,
+                title: r.title,
+                tags: r.tags,
+                refs: r.refs,
+                body: r.body,
+                ..Default::default()
+            },
+            Value::Null,
+        ))
+    })
+    .await
 }
 
 fn default_status() -> String {
@@ -270,64 +315,61 @@ fn stamp_timeline(st: &AppState, entry: &mut model::Entry) {
 }
 
 async fn upsert_incident(State(st): St, Json(r): Json<IncidentReq>) -> Reply {
-    let mut entry = model::Entry {
-        key: r.key,
-        title: r.title,
-        kind: model::KIND_INCIDENT.into(),
-        service: r.service,
-        hosts: r.hosts,
-        severity: r.severity,
-        status: r.status,
-        knowledge: r.knowledge,
-        resolution: r.resolution,
-        detection: r.detection,
-        affected: r.affected,
-        started_at: r.started_at,
-        detected_at: r.detected_at,
-        tags: r.tags,
-        refs: r.refs,
-        body: r.body,
-        ..Default::default()
-    };
-    stamp_timeline(&st, &mut entry);
-    // linking to a missing entry is allowed (write the knowledge later),
-    // but the writer should know the link is dangling right now
-    let mut unknown = vec![];
-    for k in &entry.knowledge {
-        if model::is_valid_key(k) && !matches!(st.store.get(k), Ok(Some(_))) {
-            unknown.push(k.clone());
+    locked_write(&st, move |st| {
+        let mut entry = model::Entry {
+            key: r.key,
+            title: r.title,
+            kind: model::KIND_INCIDENT.into(),
+            service: r.service,
+            hosts: r.hosts,
+            severity: r.severity,
+            status: r.status,
+            knowledge: r.knowledge,
+            resolution: r.resolution,
+            detection: r.detection,
+            affected: r.affected,
+            started_at: r.started_at,
+            detected_at: r.detected_at,
+            tags: r.tags,
+            refs: r.refs,
+            body: r.body,
+            ..Default::default()
+        };
+        stamp_timeline(st, &mut entry);
+        // linking to a missing entry is allowed (write the knowledge later),
+        // but the writer should know the link is dangling right now
+        let mut unknown = vec![];
+        for k in &entry.knowledge {
+            if model::is_valid_key(k) && !matches!(st.store.get(k), Ok(Some(_))) {
+                unknown.push(k.clone());
+            }
         }
-    }
-    // Structure is a convention, not a gate: a report missing its actionable
-    // parts is accepted but told exactly what a complete one carries.
-    let mut hints = vec![];
-    if entry.detection.trim().is_empty() {
-        hints.push("no detection: add an executable 'is it still happening?' check with the expected healthy result (--detection)");
-    }
-    if entry.affected.is_empty() {
-        hints.push("no affected windows: if data or a period got poisoned, record {scope,from,to} in --affected so backtests can exclude it programmatically");
-    }
-    if !entry.body.contains("- [ ]") && !entry.body.contains("- [x]") {
-        hints.push("no follow-ups: track loose ends in the body as '- [ ]' checklist items so they are not lost");
-    }
-    if !entry.body.to_lowercase().contains("root cause") {
-        hints.push("no 'Root cause' section: state it and mark the confidence — verified | suspected | unknown");
-    }
-    let mut extra = serde_json::Map::new();
-    if !unknown.is_empty() {
-        extra.insert("unknown_knowledge".into(), json!(unknown));
-    }
-    if !hints.is_empty() {
-        extra.insert("hints".into(), json!(hints));
-    }
-    let extra = if extra.is_empty() { Value::Null } else { Value::Object(extra) };
-    let closed = entry.is_closed();
-    let key = entry.key.clone();
-    let mut reply = commit_entry(&st, entry, extra).await;
-    if closed {
-        archive_closed(&st, &key, &mut reply).await;
-    }
-    reply
+        // Structure is a convention, not a gate: a report missing its actionable
+        // parts is accepted but told exactly what a complete one carries.
+        let mut hints = vec![];
+        if entry.detection.trim().is_empty() {
+            hints.push("no detection: add an executable 'is it still happening?' check with the expected healthy result (--detection)");
+        }
+        if entry.affected.is_empty() {
+            hints.push("no affected windows: if data or a period got poisoned, record {scope,from,to} in --affected so backtests can exclude it programmatically");
+        }
+        if !entry.body.contains("- [ ]") && !entry.body.contains("- [x]") {
+            hints.push("no follow-ups: track loose ends in the body as '- [ ]' checklist items so they are not lost");
+        }
+        if !entry.body.to_lowercase().contains("root cause") {
+            hints.push("no 'Root cause' section: state it and mark the confidence — verified | suspected | unknown");
+        }
+        let mut extra = serde_json::Map::new();
+        if !unknown.is_empty() {
+            extra.insert("unknown_knowledge".into(), json!(unknown));
+        }
+        if !hints.is_empty() {
+            extra.insert("hints".into(), json!(hints));
+        }
+        let extra = if extra.is_empty() { Value::Null } else { Value::Object(extra) };
+        Ok((entry, extra))
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -343,11 +385,15 @@ struct ResolveReq {
 /// Archive a closed entry: the file leaves the working tree, the latest
 /// version (already committed with the final status) stays in the default
 /// search. The live index doc and the vector are intentionally kept.
-async fn archive_closed(st: &Arc<AppState>, key: &str, reply: &mut Reply) {
+///
+/// Runs inside the closing write's critical section — the `&mut IndexWriter`
+/// is the proof the writer lock is held — because a terminal commit and its
+/// archival must not be separable: a reopen landing in between would have its
+/// recreated file deleted by this archive.
+fn archive_locked(st: &AppState, _w: &mut IndexWriter, key: &str, reply: &mut Reply) {
     if reply.0 != StatusCode::OK {
         return;
     }
-    let _w = st.writer.lock().await; // serialize git ops with other writers
     match st.store.archive(key) {
         Err(e) => eprintln!("kyb: archive failed for {key}: {e:#}"),
         Ok(None) => {} // already archived
@@ -363,48 +409,56 @@ async fn archive_closed(st: &Arc<AppState>, key: &str, reply: &mut Reply) {
 /// Close the loop on an incident or a task without resending the whole entry:
 /// flip the status, record how it ended; every other field stays as stored.
 /// A closing status also archives the entry.
+///
+/// The stored version is read under the global writer lock and stays under it
+/// through the commit and the archival, so a close can neither overwrite a
+/// concurrent update it never saw nor archive an entry someone just reopened.
 async fn close_entry(st: &Arc<AppState>, key: String, want_task: bool, r: ResolveReq) -> Reply {
     if let Some(resp) = bad_key(&key) {
         return resp;
     }
-    // archived entries can still be closed again (amended resolution) or
-    // parked back to a non-closing status, which reopens the file
-    let Some(mut e) = stored_version(&st, &key) else {
-        return (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})));
-    };
-    if want_task != e.is_task() || (!want_task && !e.is_incident()) {
-        let what = if want_task { "a task" } else { "an incident report" };
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": format!("'{key}' is not {what}")})));
-    }
-    let default_close = if want_task { "done" } else { "resolved" };
-    e.status = r.status.unwrap_or_else(|| default_close.to_string());
-    // the stored reason describes the block the task is leaving; carrying it
-    // into another status would commit a state that contradicts itself
-    if e.status != model::STATUS_BLOCKED {
-        e.blocked_reason.clear();
-    }
-    // an empty resolution keeps whatever was recorded before, so closing
-    // twice never wipes the outcome
-    if !r.resolution.trim().is_empty() {
-        e.resolution = r.resolution;
-    }
-    stamp_timeline(&st, &mut e);
-    // loose ends do not block a close, but they must not go silent either
-    let open = e.open_followups();
-    let closed = e.is_closed();
-    let extra = if open > 0 && closed {
-        json!({
-            "open_followups": open,
-            "warning": format!("{open} unfinished follow-up(s) (`- [ ]`) remain in the body — reassign or finish them"),
-        })
-    } else {
-        Value::Null
-    };
-    let mut reply = commit_entry(st, e, extra).await;
-    if closed {
-        archive_closed(st, &key, &mut reply).await;
-    }
-    reply
+    locked_write(st, move |st| {
+        // archived entries can still be closed again (amended resolution) or
+        // parked back to a non-closing status, which reopens the file
+        let Some(mut e) = stored_version(st, &key) else {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("no entry '{key}'")})),
+            ));
+        };
+        if want_task != e.is_task() || (!want_task && !e.is_incident()) {
+            let what = if want_task { "a task" } else { "an incident report" };
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("'{key}' is not {what}")})),
+            ));
+        }
+        let default_close = if want_task { "done" } else { "resolved" };
+        e.status = r.status.unwrap_or_else(|| default_close.to_string());
+        // the stored reason describes the block the task is leaving; carrying it
+        // into another status would commit a state that contradicts itself
+        if e.status != model::STATUS_BLOCKED {
+            e.blocked_reason.clear();
+        }
+        // an empty resolution keeps whatever was recorded before, so closing
+        // twice never wipes the outcome
+        if !r.resolution.trim().is_empty() {
+            e.resolution = r.resolution;
+        }
+        stamp_timeline(st, &mut e);
+        // loose ends do not block a close, but they must not go silent either
+        let open = e.open_followups();
+        let extra = if open > 0 && e.is_closed() {
+            json!({
+                "open_followups": open,
+                "warning": format!("{open} unfinished follow-up(s) (`- [ ]`) remain in the body — reassign or finish them"),
+            })
+        } else {
+            Value::Null
+        };
+        Ok((e, extra))
+    })
+    .await
 }
 
 async fn resolve_incident(
@@ -490,52 +544,49 @@ struct TaskReq {
 }
 
 async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
-    let mut entry = model::Entry {
-        key: r.key,
-        title: r.title,
-        kind: model::KIND_TASK.into(),
-        status: r.status,
-        priority: r.priority,
-        blocked_reason: r.blocked_reason,
-        assignee: r.assignee.trim().to_string(),
-        parent_task: r.parent_task.trim().to_string(),
-        knowledge: r.knowledge,
-        resolution: r.resolution,
-        tags: r.tags,
-        refs: r.refs,
-        body: r.body,
-        ..Default::default()
-    };
-    // tasks carry one server stamp: when they were closed
-    if entry.is_closed() && entry.resolved_at.trim().is_empty() {
-        if let Ok(Some(old)) = st.store.get(&entry.key) {
-            entry.resolved_at = old.resolved_at;
+    locked_write(&st, move |st| {
+        let mut entry = model::Entry {
+            key: r.key,
+            title: r.title,
+            kind: model::KIND_TASK.into(),
+            status: r.status,
+            priority: r.priority,
+            blocked_reason: r.blocked_reason,
+            assignee: r.assignee.trim().to_string(),
+            parent_task: r.parent_task.trim().to_string(),
+            knowledge: r.knowledge,
+            resolution: r.resolution,
+            tags: r.tags,
+            refs: r.refs,
+            body: r.body,
+            ..Default::default()
+        };
+        // tasks carry one server stamp: when they were closed
+        if entry.is_closed() && entry.resolved_at.trim().is_empty() {
+            if let Ok(Some(old)) = st.store.get(&entry.key) {
+                entry.resolved_at = old.resolved_at;
+            }
+            if entry.resolved_at.trim().is_empty() {
+                entry.resolved_at = now_utc();
+            }
         }
-        if entry.resolved_at.trim().is_empty() {
-            entry.resolved_at = now_utc();
+        let mut unknown = vec![];
+        for k in &entry.knowledge {
+            if model::is_valid_key(k) && !matches!(st.store.get(k), Ok(Some(_))) {
+                unknown.push(k.clone());
+            }
         }
-    }
-    let mut unknown = vec![];
-    for k in &entry.knowledge {
-        if model::is_valid_key(k) && !matches!(st.store.get(k), Ok(Some(_))) {
-            unknown.push(k.clone());
+        let mut extra = serde_json::Map::new();
+        if !unknown.is_empty() {
+            extra.insert("unknown_knowledge".into(), json!(unknown));
         }
-    }
-    let mut extra = serde_json::Map::new();
-    if !unknown.is_empty() {
-        extra.insert("unknown_knowledge".into(), json!(unknown));
-    }
-    if let Some(parent) = unknown_parent(&st, &entry) {
-        extra.insert("unknown_parent".into(), json!(parent));
-    }
-    let extra = if extra.is_empty() { Value::Null } else { Value::Object(extra) };
-    let closed = entry.is_closed();
-    let key = entry.key.clone();
-    let mut reply = commit_entry(&st, entry, extra).await;
-    if closed {
-        archive_closed(&st, &key, &mut reply).await;
-    }
-    reply
+        if let Some(parent) = unknown_parent(st, &entry) {
+            extra.insert("unknown_parent".into(), json!(parent));
+        }
+        let extra = if extra.is_empty() { Value::Null } else { Value::Object(extra) };
+        Ok((entry, extra))
+    })
+    .await
 }
 
 /// A partial task update: move the task between the LIVE statuses and, when the
@@ -582,36 +633,48 @@ async fn transition_task(
             )})),
         );
     }
-    // an archived task can be picked back up: the stored version comes from
-    // history and the write recreates the file
-    let Some(mut e) = stored_version(&st, &key) else {
-        return (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})));
-    };
-    if !e.is_task() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": format!("'{key}' is not a task")})));
-    }
-    e.status = status;
-    if let Some(assignee) = r.assignee {
-        e.assignee = assignee.trim().to_string();
-    }
-    if let Some(parent) = r.parent_task {
-        e.parent_task = parent.trim().to_string();
-    }
-    // a reason survives only inside the block it describes
-    if e.status == model::STATUS_BLOCKED {
-        if let Some(reason) = r.blocked_reason {
-            e.blocked_reason = reason;
+    // The stored version is read with the writer lock already held and the
+    // commit lands before it is released: two transitions on one key are a
+    // strict sequence, so the second sees the first instead of overwriting it.
+    locked_write(&st, move |st| {
+        // an archived task can be picked back up: the stored version comes from
+        // history and the write recreates the file
+        let Some(mut e) = stored_version(st, &key) else {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("no entry '{key}'")})),
+            ));
+        };
+        if !e.is_task() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("'{key}' is not a task")})),
+            ));
         }
-    } else {
-        e.blocked_reason.clear();
-    }
-    let mut extra = serde_json::Map::new();
-    extra.insert("status".into(), json!(e.status));
-    extra.insert("assignee".into(), json!(e.assignee));
-    if let Some(parent) = unknown_parent(&st, &e) {
-        extra.insert("unknown_parent".into(), json!(parent));
-    }
-    commit_entry(&st, e, Value::Object(extra)).await
+        e.status = status;
+        if let Some(assignee) = r.assignee {
+            e.assignee = assignee.trim().to_string();
+        }
+        if let Some(parent) = r.parent_task {
+            e.parent_task = parent.trim().to_string();
+        }
+        // a reason survives only inside the block it describes
+        if e.status == model::STATUS_BLOCKED {
+            if let Some(reason) = r.blocked_reason {
+                e.blocked_reason = reason;
+            }
+        } else {
+            e.blocked_reason.clear();
+        }
+        let mut extra = serde_json::Map::new();
+        extra.insert("status".into(), json!(e.status));
+        extra.insert("assignee".into(), json!(e.assignee));
+        if let Some(parent) = unknown_parent(st, &e) {
+            extra.insert("unknown_parent".into(), json!(parent));
+        }
+        Ok((e, Value::Object(extra)))
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1102,7 +1165,9 @@ mod api_tests {
         json!({"key": key, "title": "NATS стримы", "body": body, "tags": ["nats"]})
     }
 
-    fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
+    /// Same app, plus the state behind it — the interleaving tests need the
+    /// writer mutex itself to hold requests at a chosen point.
+    fn app_with_state() -> (Router, Arc<AppState>, tempfile::TempDir, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();
         let idx = tempfile::tempdir().unwrap();
         let cfg = config::Config {
@@ -1113,7 +1178,13 @@ mod api_tests {
             model_dir: idx.path().join("no-model"),
             addr: String::new(),
         };
-        (build_app(build_state(&cfg).unwrap()), data, idx)
+        let state = build_state(&cfg).unwrap();
+        (build_app(state.clone()), state, data, idx)
+    }
+
+    fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
+        let (app, _state, data, idx) = app_with_state();
+        (app, data, idx)
     }
 
     #[tokio::test]
@@ -2362,5 +2433,187 @@ mod api_tests {
         let (_, v) = call(&app, "POST", "/reindex", None).await;
         assert_eq!(v["head_docs"], 10);
         assert_eq!(v["history_docs"], 10);
+    }
+
+    // --- same-key interleavings, replayed exactly ---
+    //
+    // These do not stress the server and hope: the test holds the global writer
+    // lock, parks the competing requests on it one after another, and then lets
+    // them go. The order is the queue order, so every run reproduces the same
+    // interleaving — the one that used to lose a write.
+
+    /// Park a POST on the writer lock the test is holding.
+    ///
+    /// The test runtime is single-threaded and the request has no other
+    /// suspension point on its way to that lock, so by the time the spawned
+    /// task has signalled and the scheduler has drained, it is queued on the
+    /// mutex — behind whoever was parked before it — with nothing read yet.
+    async fn park_on_writer_lock(
+        app: &Router,
+        uri: String,
+        body: Value,
+    ) -> tokio::task::JoinHandle<(StatusCode, Value)> {
+        let app = app.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = started.send(());
+            call(&app, "POST", &uri, Some(body)).await
+        });
+        ready.await.expect("the request task must start");
+        // drain anything already runnable, so the request is parked on the lock
+        // before the caller queues the next one behind it
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        task
+    }
+
+    fn open_task(key: &str) -> Value {
+        json!({
+            "key": key, "title": "Rotate the internal TLS certificates",
+            "body": "They expire in a week.\n\n- [ ] schedule the restart window\n",
+            "priority": "high", "tags": ["security"],
+        })
+    }
+
+    // Two partial transitions on ONE key: the second must build on the version
+    // the first committed, not on the one it replaced.
+    #[tokio::test]
+    async fn concurrent_transitions_keep_the_earlier_update() {
+        let (app, state, _data, _idx) = app_with_state();
+        let key = "task-rotate-tls-certs";
+        let (st, v) = call(&app, "POST", "/tasks", Some(open_task(key))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+
+        let guard = state.writer.lock().await;
+        let claim = park_on_writer_lock(
+            &app,
+            format!("/tasks/{key}/transition"),
+            json!({"status": "in_progress", "assignee": "agent-a"}),
+        )
+        .await;
+        let block = park_on_writer_lock(
+            &app,
+            format!("/tasks/{key}/transition"),
+            json!({"status": "blocked", "blocked_reason": "waiting on the CA"}),
+        )
+        .await;
+        drop(guard); // the claim parked first, so the claim runs first
+
+        let (st, claimed) = claim.await.unwrap();
+        assert_eq!(st, StatusCode::OK, "{claimed}");
+        let (st, blocked) = block.await.unwrap();
+        assert_eq!(st, StatusCode::OK, "{blocked}");
+        assert_eq!(claimed["assignee"], "agent-a");
+        assert_eq!(blocked["status"], "blocked");
+        assert_eq!(
+            blocked["assignee"], "agent-a",
+            "the second transition read the first one's commit: {blocked}"
+        );
+
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["blocked_reason"], "waiting on the CA");
+        assert_eq!(v["assignee"], "agent-a", "the claim was not overwritten: {v}");
+        assert_eq!(v["priority"], "high", "untouched metadata survives: {v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}/history"), None).await;
+        assert_eq!(
+            v["versions"].as_array().unwrap().len(),
+            3,
+            "create plus both transitions, none dropped: {v}"
+        );
+    }
+
+    // A close archives the entry it committed — never one that has been
+    // reopened behind its back.
+    #[tokio::test]
+    async fn a_close_cannot_archive_a_task_reopened_behind_it() {
+        let (app, state, _data, _idx) = app_with_state();
+        let key = "task-rotate-tls-certs";
+        call(&app, "POST", "/tasks", Some(open_task(key))).await;
+
+        let guard = state.writer.lock().await;
+        let close = park_on_writer_lock(
+            &app,
+            format!("/tasks/{key}/resolve"),
+            json!({"resolution": "Rotated by hand; automation filed separately."}),
+        )
+        .await;
+        let reopen = park_on_writer_lock(
+            &app,
+            format!("/tasks/{key}/transition"),
+            json!({"status": "in_progress", "assignee": "agent-b"}),
+        )
+        .await;
+        drop(guard); // close first, reopen second
+
+        let (st, closed) = close.await.unwrap();
+        assert_eq!(st, StatusCode::OK, "{closed}");
+        assert_eq!(closed["archived"], true, "the close archived what it closed: {closed}");
+        let (st, reopened) = reopen.await.unwrap();
+        assert_eq!(st, StatusCode::OK, "{reopened}");
+        assert_eq!(reopened["status"], "in_progress");
+
+        // the reopen came after the archival and stays: a live task must never
+        // be left with its file deleted under it
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["status"], "in_progress");
+        assert_eq!(v["assignee"], "agent-b");
+        assert!(v.get("archived").is_none(), "the reopened task is back in the canon: {v}");
+        assert!(
+            v["resolution"].as_str().unwrap().contains("Rotated by hand"),
+            "the recorded outcome survives the reopen: {v}"
+        );
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 1, "work in flight is still counted: {v}");
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 1, "and it still lists: {v}");
+        assert_eq!(v["tasks"][0]["archived"], false);
+    }
+
+    // The mirror image: the reopen wins the lock first, so the close must carry
+    // what the reopen wrote instead of the version it read before it.
+    #[tokio::test]
+    async fn a_close_after_a_reopen_carries_the_reopened_state() {
+        let (app, state, _data, _idx) = app_with_state();
+        let key = "task-rotate-tls-certs";
+        call(&app, "POST", "/tasks", Some(open_task(key))).await;
+
+        let guard = state.writer.lock().await;
+        let reopen = park_on_writer_lock(
+            &app,
+            format!("/tasks/{key}/transition"),
+            json!({"status": "in_progress", "assignee": "agent-b"}),
+        )
+        .await;
+        let close = park_on_writer_lock(
+            &app,
+            format!("/tasks/{key}/resolve"),
+            json!({"resolution": "Rotated by hand; automation filed separately."}),
+        )
+        .await;
+        drop(guard); // reopen first, close second
+
+        let (st, reopened) = reopen.await.unwrap();
+        assert_eq!(st, StatusCode::OK, "{reopened}");
+        let (st, closed) = close.await.unwrap();
+        assert_eq!(st, StatusCode::OK, "{closed}");
+        assert_eq!(closed["archived"], true, "{closed}");
+
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["status"], "done");
+        assert_eq!(v["archived"], true, "a closed task leaves the tree: {v}");
+        assert_eq!(
+            v["assignee"], "agent-b",
+            "the close committed the claim it never resent: {v}"
+        );
+        assert!(v["resolution"].as_str().unwrap().contains("Rotated by hand"), "{v}");
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 0, "{v}");
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 0, "closed tasks leave the live listing: {v}");
+        let (_, v) = call(&app, "GET", "/tasks?all=true", None).await;
+        assert_eq!(v["count"], 1, "and stay in the record: {v}");
+        assert_eq!(v["tasks"][0]["assignee"], "agent-b");
     }
 }
