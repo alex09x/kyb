@@ -22,6 +22,8 @@ jobs:
         run: bash scripts/test-skill-install.sh
       - name: Verify safe Docker Compose bind
         run: bash scripts/test-compose-bind.sh
+      - name: Check deployment script syntax
+        run: bash -n scripts/deploy.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked

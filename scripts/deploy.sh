@@ -40,9 +40,24 @@ if [ "${1:-}" != "--skills" ]; then
   gh run watch "$run_id" --exit-status --interval 20 >/dev/null
   echo "CI green (run $run_id)"
 
-  step "server: pull + restart"
-  ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" \
-    'cd ~/kyb && docker compose pull -q && docker compose up -d'
+  step "server: install compose + pull + restart"
+  short_sha=${sha:0:7}
+  scp -q -o ConnectTimeout=10 -o BatchMode=yes \
+    "$REPO/docker-compose.yml" "$SERVER:~/kyb/docker-compose.yml.new"
+  ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" bash -s -- "$short_sha" <<'REMOTE'
+set -euo pipefail
+short_sha=$1
+cd "$HOME/kyb"
+trap 'rm -f docker-compose.yml.new' EXIT
+docker compose -f docker-compose.yml.new config -q
+if [ -f docker-compose.yml ]; then
+  cp -p docker-compose.yml "docker-compose.yml.rollback-pre-$short_sha"
+fi
+mv docker-compose.yml.new docker-compose.yml
+trap - EXIT
+docker compose pull -q
+docker compose up -d
+REMOTE
   KYB_URL="http://${SERVER#*@}:9310"
   for _ in $(seq 1 40); do
     curl -sf -m 3 "$KYB_URL/healthz" >/dev/null && break
