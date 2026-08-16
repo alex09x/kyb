@@ -373,6 +373,11 @@ async fn close_entry(st: &Arc<AppState>, key: String, want_task: bool, r: Resolv
     }
     let default_close = if want_task { "done" } else { "resolved" };
     e.status = r.status.unwrap_or_else(|| default_close.to_string());
+    // the stored reason describes the block the task is leaving; carrying it
+    // into another status would commit a state that contradicts itself
+    if e.status != model::STATUS_BLOCKED {
+        e.blocked_reason.clear();
+    }
     // an empty resolution keeps whatever was recorded before, so closing
     // twice never wipes the outcome
     if !r.resolution.trim().is_empty() {
@@ -416,6 +421,12 @@ struct TaskReq {
     body: String,
     #[serde(default = "default_status")]
     status: String,
+    /// Optional ranking: "" | low | medium | high | critical.
+    #[serde(default)]
+    priority: String,
+    /// What the task waits on; only valid together with status=blocked.
+    #[serde(default)]
+    blocked_reason: String,
     /// Keys of knowledge entries this task concerns.
     #[serde(default)]
     knowledge: Vec<String>,
@@ -434,6 +445,8 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
         title: r.title,
         kind: model::KIND_TASK.into(),
         status: r.status,
+        priority: r.priority,
+        blocked_reason: r.blocked_reason,
         knowledge: r.knowledge,
         resolution: r.resolution,
         tags: r.tags,
@@ -474,6 +487,8 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
 struct IncidentsQ {
     status: Option<String>,
     service: Option<String>,
+    /// Exact task priority; incidents carry none, so it never matches there.
+    priority: Option<String>,
     /// followups=open keeps only reports with unfinished `- [ ]` items —
     /// the loose ends a session can pick up (archived included).
     followups: Option<String>,
@@ -503,6 +518,7 @@ fn list_kind(
     // an empty ?status= from the CLI is "no filter", not "match nothing"
     let status = q.status.as_deref().filter(|s| !s.trim().is_empty());
     let service = q.service.as_deref().filter(|s| !s.trim().is_empty());
+    let priority = q.priority.as_deref().filter(|s| !s.trim().is_empty());
     let only_open_followups = q.followups.as_deref() == Some("open");
     let all = matches!(q.all.as_deref(), Some("true" | "1" | "yes"));
     let opts = index::SearchOpts {
@@ -510,6 +526,7 @@ fn list_kind(
         kind: Some(kind.to_string()),
         status: status.map(String::from),
         service: service.map(String::from),
+        priority: priority.map(String::from),
         ..Default::default()
     };
     let mut hits = match st.index.search("", &opts) {
@@ -581,6 +598,7 @@ async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
         .map(|(h, archived)| {
             json!({
                 "key": h.key, "title": h.title, "status": h.status,
+                "priority": h.priority, "blocked_reason": h.blocked_reason,
                 "knowledge": h.knowledge, "resolution": h.resolution,
                 "resolved_at": h.resolved_at,
                 "open_followups": open_followups_of(&h.body),
@@ -620,6 +638,10 @@ fn entry_json(e: &model::Entry, archived: bool) -> Value {
         obj.insert("started_at".into(), json!(e.started_at));
         obj.insert("detected_at".into(), json!(e.detected_at));
         obj.insert("mitigated_at".into(), json!(e.mitigated_at));
+    }
+    if e.is_task() {
+        obj.insert("priority".into(), json!(e.priority));
+        obj.insert("blocked_reason".into(), json!(e.blocked_reason));
     }
     if e.is_incident() || e.is_task() {
         obj.insert("status".into(), json!(e.status));
@@ -690,6 +712,8 @@ struct SearchQ {
     /// incident filters (exact terms)
     status: Option<String>,
     service: Option<String>,
+    /// task filter (exact term)
+    priority: Option<String>,
 }
 
 async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
@@ -719,6 +743,7 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
         kind: norm(&p.kind),
         status: norm(&p.status),
         service: norm(&p.service),
+        priority: norm(&p.priority),
     };
     let mut hits = match st.index.search(q, &opts) {
         Err(e) => return err500(e),
@@ -774,6 +799,7 @@ async fn hybrid(
                         .all(|t| h.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
                         && opts.kind.as_deref().is_none_or(|k| h.kind == k)
                         && opts.status.as_deref().is_none_or(|s| h.status == s)
+                        && opts.priority.as_deref().is_none_or(|p| h.priority == p)
                         && opts
                             .service
                             .as_deref()
@@ -881,7 +907,8 @@ async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
     let open_incidents =
         heads.iter().filter(|e| e.is_incident() && e.status == "open").count();
-    let open_tasks = heads.iter().filter(|e| e.is_task() && e.status == "open").count();
+    // every live status counts: a blocked task is still work waiting on someone
+    let open_tasks = heads.iter().filter(|e| e.is_live_task()).count();
     let index_docs = st.index.reader.searcher().num_docs();
     let last = st.store.head_info().ok().flatten();
     (
@@ -1629,6 +1656,160 @@ mod api_tests {
             Some(json!({"resolution": "x"}))).await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
         assert!(v["error"].as_str().unwrap().contains("not an incident"));
+    }
+
+    // priority + the widened lifecycle: create, filter, transition, archive
+    #[tokio::test]
+    async fn task_priority_and_status_flow() {
+        let (app, _data, _idx) = app_with_tmp();
+
+        // priority rides through create -> GET -> listing -> search
+        let key = "task-raise-log-retention";
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": key, "title": "Raise container log retention to 72h",
+            "body": "Short retention loses evidence.", "priority": "high",
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert_eq!(v["priority"], "high");
+        assert_eq!(v["blocked_reason"], "");
+        assert_eq!(v["status"], "open");
+
+        // an unranked task is the default and stays empty, never guessed
+        call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-try-foo", "title": "Try foo", "body": "an idea",
+        }))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/task-try-foo", None).await;
+        assert_eq!(v["priority"], "", "{v}");
+
+        // a second ranked task, plus one that is in flight
+        call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-swap-disk", "title": "Swap the failing disk", "body": "x",
+            "priority": "critical", "status": "in_progress",
+        }))).await;
+
+        // the exact priority filter on the listing
+        let (_, v) = call(&app, "GET", "/tasks?priority=high", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["tasks"][0]["key"], key);
+        assert_eq!(v["tasks"][0]["priority"], "high");
+        let (_, v) = call(&app, "GET", "/tasks?priority=low", None).await;
+        assert_eq!(v["count"], 0);
+        // an empty ?priority= (what the CLI sends) is "no filter"
+        let (_, v) = call(&app, "GET", "/tasks?status=&priority=&limit=50", None).await;
+        assert_eq!(v["count"], 3, "{v}");
+        // it combines with the status filter
+        let (_, v) = call(&app, "GET", "/tasks?status=in_progress&priority=critical", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["tasks"][0]["key"], "task-swap-disk");
+        // and search takes the same exact filter
+        let (_, v) = call(&app, "GET", "/search?q=&kind=task&priority=critical", None).await;
+        assert_eq!(v["count"], 1, "{v}");
+        assert_eq!(v["hits"][0]["key"], "task-swap-disk");
+        assert_eq!(v["hits"][0]["priority"], "critical");
+
+        // block it: the reason is recorded and comes back everywhere
+        let (st, v) = call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-swap-disk", "title": "Swap the failing disk", "body": "x",
+            "priority": "critical", "status": "blocked",
+            "blocked_reason": "waiting on the replacement disk to arrive",
+        }))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert!(v.get("archived").is_none(), "blocked is not an ending: {v}");
+        let (_, v) = call(&app, "GET", "/knowledge/task-swap-disk", None).await;
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["blocked_reason"], "waiting on the replacement disk to arrive");
+        assert!(v.get("archived").is_none(), "still live in the canon: {v}");
+        let (_, v) = call(&app, "GET", "/tasks?status=blocked", None).await;
+        assert_eq!(v["tasks"][0]["blocked_reason"], "waiting on the replacement disk to arrive");
+        let (_, v) = call(&app, "GET", "/search?q=&kind=task&status=blocked", None).await;
+        assert_eq!(v["hits"][0]["blocked_reason"], "waiting on the replacement disk to arrive");
+
+        // all three live statuses are live: listed by default and counted
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 3, "open + in_progress(now blocked) + open: {v}");
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 3, "blocked and in_progress count as work: {v}");
+
+        // moving off blocked clears the stale reason instead of committing a
+        // state that contradicts itself
+        let (_, v) = call(&app, "POST", "/tasks/task-swap-disk/resolve",
+            Some(json!({"status": "in_progress"}))).await;
+        assert_eq!(v["changed"], true, "{v}");
+        let (_, v) = call(&app, "GET", "/knowledge/task-swap-disk", None).await;
+        assert_eq!(v["status"], "in_progress");
+        assert_eq!(v["blocked_reason"], "", "stale reason dropped: {v}");
+        assert_eq!(v["priority"], "critical", "priority survives the transition: {v}");
+
+        // only the terminal statuses close and archive
+        let (_, v) = call(&app, "POST", "/tasks/task-swap-disk/resolve",
+            Some(json!({"resolution": "New disk installed and the array rebuilt."}))).await;
+        assert_eq!(v["archived"], true, "{v}");
+        let (_, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(v["open_tasks"], 2);
+        let (_, v) = call(&app, "GET", "/tasks", None).await;
+        assert_eq!(v["count"], 2, "archived hidden by default: {v}");
+        // the archived task keeps its priority in the record
+        let (_, v) = call(&app, "GET", "/knowledge/task-swap-disk", None).await;
+        assert_eq!(v["archived"], true);
+        assert_eq!(v["priority"], "critical", "{v}");
+        assert_eq!(v["status"], "done");
+        let (_, v) = call(&app, "GET", "/tasks?all=true&priority=critical", None).await;
+        assert_eq!(v["count"], 1, "the archive answers the priority filter too: {v}");
+        assert_eq!(v["tasks"][0]["archived"], true);
+
+        // closing a blocked task directly: the reason is dropped, not carried
+        call(&app, "POST", "/tasks", Some(json!({
+            "key": "task-try-foo", "title": "Try foo", "body": "an idea",
+            "status": "blocked", "blocked_reason": "waiting on the bar rewrite",
+        }))).await;
+        let (_, v) = call(&app, "POST", "/tasks/task-try-foo/resolve",
+            Some(json!({"status": "dropped", "resolution": "Obsolete after the bar rewrite."}))).await;
+        assert_eq!(v["archived"], true, "{v}");
+        let (_, v) = call(&app, "GET", "/knowledge/task-try-foo", None).await;
+        assert_eq!(v["status"], "dropped");
+        assert_eq!(v["blocked_reason"], "", "{v}");
+    }
+
+    // --- task payload validation: the new fields ---
+    #[rstest]
+    #[case::priority_high(json!({"key": "task-a", "title": "t", "body": "x", "priority": "high"}), 200)]
+    #[case::priority_absent(json!({"key": "task-a", "title": "t", "body": "x"}), 200)]
+    #[case::priority_empty(json!({"key": "task-a", "title": "t", "body": "x", "priority": ""}), 200)]
+    #[case::priority_unknown(json!({"key": "task-a", "title": "t", "body": "x", "priority": "urgent"}), 400)]
+    #[case::priority_wrong_case(json!({"key": "task-a", "title": "t", "body": "x", "priority": "HIGH"}), 400)]
+    #[case::status_in_progress(json!({"key": "task-a", "title": "t", "body": "x", "status": "in_progress"}), 200)]
+    #[case::status_blocked_bare(json!({"key": "task-a", "title": "t", "body": "x", "status": "blocked"}), 200)]
+    #[case::status_blocked_with_reason(json!({"key": "task-a", "title": "t", "body": "x", "status": "blocked", "blocked_reason": "waiting on vendor"}), 200)]
+    #[case::status_unknown(json!({"key": "task-a", "title": "t", "body": "x", "status": "wip"}), 400)]
+    #[case::stale_reason_on_open(json!({"key": "task-a", "title": "t", "body": "x", "blocked_reason": "waiting on vendor"}), 400)]
+    #[case::stale_reason_on_in_progress(json!({"key": "task-a", "title": "t", "body": "x", "status": "in_progress", "blocked_reason": "waiting on vendor"}), 400)]
+    #[case::stale_reason_on_done(json!({"key": "task-a", "title": "t", "body": "x", "status": "done", "resolution": "shipped", "blocked_reason": "waiting on vendor"}), 400)]
+    #[case::secret_in_reason(json!({"key": "task-a", "title": "t", "body": "x", "status": "blocked", "blocked_reason": "password: super123secret"}), 400)]
+    #[case::in_progress_needs_no_resolution(json!({"key": "task-a", "title": "t", "body": "x", "status": "in_progress"}), 200)]
+    #[case::done_still_needs_resolution(json!({"key": "task-a", "title": "t", "body": "x", "status": "done"}), 400)]
+    #[tokio::test]
+    async fn task_validation_matrix(#[case] payload: Value, #[case] expect: u16) {
+        let (app, _data, _idx) = app_with_tmp();
+        let (st, v) = call(&app, "POST", "/tasks", Some(payload)).await;
+        assert_eq!(st.as_u16(), expect, "response: {v}");
+    }
+
+    // the task-only fields must not leak onto the other kinds
+    #[rstest]
+    #[case::knowledge_priority("/knowledge", json!({"key": "k", "title": "t", "body": "x", "priority": "high"}))]
+    #[case::incident_priority("/incidents", json!({"key": "inc-a", "title": "t", "body": "x", "service": "s", "severity": "low", "priority": "high"}))]
+    #[tokio::test]
+    async fn task_only_fields_ignored_on_other_kinds(#[case] path: &str, #[case] payload: Value) {
+        let (app, _data, _idx) = app_with_tmp();
+        // unknown fields are dropped by the request types, so the write lands
+        // clean rather than smuggling a task field into another kind
+        let (st, v) = call(&app, "POST", path, Some(payload)).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        let key = v["key"].as_str().unwrap().to_string();
+        let (_, v) = call(&app, "GET", &format!("/knowledge/{key}"), None).await;
+        assert!(v.get("priority").is_none(), "priority is task-only: {v}");
+        assert!(v.get("blocked_reason").is_none(), "blocked_reason is task-only: {v}");
     }
 
     #[tokio::test]

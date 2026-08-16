@@ -133,9 +133,11 @@ Rejected with `400`: non-slug key · empty title · body/refs that look like a s
 
 `kind`: `knowledge` (default) · `incident` (§7) · `task` (§8).
 
-**Lifecycle rule (all kinds): the canon holds only what is live.** Closing an incident or a
-task *archives* it — the file leaves the tree, but the final version stays in the **default
-search** and in `kyb get` (marked `"archived": true`). `kyb rm` on knowledge is a *retraction*
+**Lifecycle rule (all kinds): the canon holds only what is live.** Closing an incident
+(`resolved`) or a task (`done`/`dropped`) *archives* it — the file leaves the tree, but the
+final version stays in the **default search** and in `kyb get` (marked `"archived": true`).
+The intermediate states (`mitigated`, `in_progress`, `blocked`) are not closings: those
+entries stay in the canon. `kyb rm` on knowledge is a *retraction*
 ("this was wrong"): it drops out of the default search; history keeps it, as always.
 
 ---
@@ -171,7 +173,8 @@ kyb query "old rule" --history    # search ALL superseded versions, deleted incl
 ```
 
 Hits come back with the **full body** plus `sha` (→ `kyb get --at`), `committed_at`,
-`is_head`, `score`; incident/task hits carry their extra fields (`status`, `resolution`, …).
+`is_head`, `score`; incident/task hits carry their extra fields (`status`, `resolution`,
+`priority`, `blocked_reason`, …).
 Free text matches keys and tags too: `kubernetes` finds an entry that is only *tagged*
 kubernetes, `orders api` reaches the key `orders-api-deploy`.
 
@@ -284,22 +287,38 @@ detection). Keys start with `task-`, no date; an idea is a task tagged `idea`.
 
 ```bash
 kyb task --key task-raise-log-retention --title "Raise container log retention to 72h" \
-         --tags observability [--knowledge web-app-architecture] <<'EOF'
+         --tags observability --priority high [--knowledge web-app-architecture] <<'EOF'
 Short retention loses evidence during incidents.
 - [ ] measure current log volume first
 EOF
 
-kyb tasks                          # open tasks only, freshest on top
+kyb task --key task-raise-log-retention --title "..." --status in_progress <<< "body"   # picked it up
+kyb task --key task-swap-disk --title "Swap the failing disk" --status blocked \
+         --priority critical --blocked-reason "waiting on the replacement disk" <<< "body"
+
+kyb tasks                          # LIVE tasks (open + in_progress + blocked), freshest on top
+kyb tasks --priority critical      # exact rank filter
+kyb tasks --status blocked         # what is stuck, and on what
 kyb tasks --all                    # + archived (done/dropped), at the bottom
 kyb tasks --open-followups         # loose ends inside tasks, archived included
 kyb done task-raise-log-retention <<< "Raised to 72h with a 2G disk budget."
 kyb done task-try-foo --status dropped <<< "Obsolete after the rewrite."
 ```
 
-`open → done | dropped`; **both closings require a resolution** — what came of it, or why it
-was dropped ("dropped: obsolete" is knowledge too). Closing archives (§3); the server stamps
-`resolved_at`. Follow-ups from a resolved incident that deserve their own life → file them as
-tasks linked via `--knowledge`. `kyb health` reports `open_tasks`.
+**Lifecycle `open → in_progress → blocked → done | dropped`.** Only `done` and `dropped` are
+terminal: they **require a resolution** — what came of it, or why it was dropped ("dropped:
+obsolete" is knowledge too) — and archive the task (§3); the server stamps `resolved_at`.
+`in_progress` and `blocked` are work in flight: no resolution, no archive, still listed and
+still counted by `kyb health` (`open_tasks` = all three live statuses).
+
+| Field | Meaning |
+|---|---|
+| `--priority` | optional rank: `low` `medium` `high` `critical`. Empty = unranked, and it stays unranked — nothing infers one. Exact filter: `kyb tasks --priority high` (the HTTP API takes the same `?priority=` on `/search`). |
+| `--blocked-reason` | optional: what the task waits on. **Only with `--status blocked`** — setting it on any other status is rejected (400), and moving off `blocked` clears it, so a task never advertises a block it is no longer in. |
+
+Updating is the same `kyb task` with the same key (wholesale replace — resend `--priority`
+and `--tags` or they are wiped). Follow-ups from a resolved incident that deserve their own
+life → file them as tasks linked via `--knowledge`.
 
 ---
 
@@ -310,6 +329,7 @@ kyb rm <key>       # knowledge: retract a wrong entry. incident/task: archive it
                    # (resolve/done is the normal path, rm is the manual override)
 kyb reindex        # full index rebuild from git (the service also does it on every start)
 kyb health         # {"ok","entries","open_incidents","open_tasks","index_docs","last_commit"}
+                   # open_tasks = open + in_progress + blocked (every task still in flight)
 ```
 
 ---

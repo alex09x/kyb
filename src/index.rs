@@ -36,8 +36,14 @@ pub struct Fields {
     service: Field,
     status: Field,
     severity: Field,
+    /// Task priority as an exact term — same shape as status/severity, so the
+    /// `?priority=` filter is one more clause in the same BooleanQuery.
+    priority: Field,
     hosts: Field,
     knowledge: Field,
+    /// Stored only: what a blocked task waits on rides on the hit; it is state,
+    /// not prose people grep for.
+    blocked_reason: Field,
     /// Tokenized + stored: "how did we fix X before" must be searchable.
     resolution: Field,
     /// Tokenized + stored: the "is it still happening?" check often names the
@@ -86,6 +92,10 @@ pub struct Hit {
     pub severity: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub status: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub priority: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub blocked_reason: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub knowledge: Vec<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -120,6 +130,7 @@ pub struct SearchOpts {
     pub kind: Option<String>,
     pub status: Option<String>,
     pub service: Option<String>,
+    pub priority: Option<String>,
 }
 
 fn text_opts() -> TextOptions {
@@ -143,8 +154,10 @@ fn build_schema() -> Schema {
     sb.add_text_field("service", STRING | STORED);
     sb.add_text_field("status", STRING | STORED);
     sb.add_text_field("severity", STRING | STORED);
+    sb.add_text_field("priority", STRING | STORED);
     sb.add_text_field("hosts", STRING | STORED);
     sb.add_text_field("knowledge", STRING | STORED);
+    sb.add_text_field("blocked_reason", TextOptions::default().set_stored());
     sb.add_text_field("resolution", text_opts().set_stored());
     sb.add_text_field("detection", text_opts().set_stored());
     sb.add_text_field("affected", TextOptions::default().set_stored());
@@ -210,8 +223,10 @@ impl SearchIndex {
             service: f("service"),
             status: f("status"),
             severity: f("severity"),
+            priority: f("priority"),
             hosts: f("hosts"),
             knowledge: f("knowledge"),
+            blocked_reason: f("blocked_reason"),
             resolution: f("resolution"),
             detection: f("detection"),
             affected: f("affected"),
@@ -262,6 +277,12 @@ impl SearchIndex {
         }
         if !e.severity.is_empty() {
             d.add_text(self.fields.severity, &e.severity);
+        }
+        if !e.priority.is_empty() {
+            d.add_text(self.fields.priority, &e.priority);
+        }
+        if !e.blocked_reason.is_empty() {
+            d.add_text(self.fields.blocked_reason, &e.blocked_reason);
         }
         for h in &e.hosts {
             d.add_text(self.fields.hosts, h.to_lowercase());
@@ -435,6 +456,7 @@ impl SearchIndex {
             (self.fields.kind, opts.kind.as_deref(), false),
             (self.fields.status, opts.status.as_deref(), false),
             (self.fields.service, opts.service.as_deref(), true),
+            (self.fields.priority, opts.priority.as_deref(), false),
         ];
         for (field, value, fold) in exact {
             let Some(v) = value.filter(|v| !v.is_empty()) else { continue };
@@ -493,6 +515,8 @@ impl SearchIndex {
             hosts: multi(self.fields.hosts),
             severity: text(self.fields.severity),
             status: text(self.fields.status),
+            priority: text(self.fields.priority),
+            blocked_reason: text(self.fields.blocked_reason),
             knowledge: multi(self.fields.knowledge),
             resolution: text(self.fields.resolution),
             detection: text(self.fields.detection),
@@ -663,6 +687,63 @@ mod tests {
         assert_eq!(hits[0].kind, "knowledge");
         assert!(hits[0].service.is_empty());
         assert!(hits[0].status.is_empty());
+    }
+
+    fn make_task(key: &str, status: &str, priority: &str) -> Entry {
+        Entry {
+            key: key.into(),
+            title: format!("{key} task"),
+            kind: "task".into(),
+            status: status.into(),
+            priority: priority.into(),
+            body: "Raise the retention window for container logs.".into(),
+            ..Default::default()
+        }
+    }
+
+    // priority is an exact filter alongside kind/status, and both new fields
+    // ride back on the hit
+    #[test]
+    fn task_priority_filter_and_hit_fields() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        store.upsert(make_task("task-high-one", "open", "high"), "2026-08-15").unwrap();
+        store.upsert(make_task("task-high-two", "in_progress", "high"), "2026-08-15").unwrap();
+        store.upsert(make_task("task-low-one", "open", "low"), "2026-08-15").unwrap();
+        let mut blocked = make_task("task-blocked", "blocked", "");
+        blocked.blocked_reason = "waiting on the host-a disk upgrade".into();
+        store.upsert(blocked, "2026-08-15").unwrap();
+        store.upsert(entry("plain-note", "A note", "nothing to do with tasks"), "2026-08-15").unwrap();
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        let by = |status: Option<&str>, priority: Option<&str>| {
+            index
+                .search("", &SearchOpts {
+                    limit: 10,
+                    kind: Some("task".into()),
+                    status: status.map(String::from),
+                    priority: priority.map(String::from),
+                    ..Default::default()
+                })
+                .unwrap()
+        };
+        assert_eq!(by(None, None).len(), 4, "all tasks, the note excluded");
+        assert_eq!(by(None, Some("high")).len(), 2);
+        assert_eq!(by(None, Some("low")).len(), 1);
+        assert_eq!(by(None, Some("critical")).len(), 0, "nothing is critical");
+        assert_eq!(by(Some("open"), Some("high")).len(), 1, "filters combine");
+
+        let h = &by(None, Some("low"))[0];
+        assert_eq!(h.key, "task-low-one");
+        assert_eq!(h.priority, "low");
+        assert!(h.blocked_reason.is_empty());
+
+        let h = &by(Some("blocked"), None)[0];
+        assert_eq!(h.blocked_reason, "waiting on the host-a disk upgrade");
+        assert!(h.priority.is_empty(), "unranked stays unranked");
     }
 
     // the two deletion semantics: archived closed entries stay in the default

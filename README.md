@@ -13,7 +13,7 @@ truth that survives between sessions and across machines.
 <br/>
 
 [![license](https://img.shields.io/badge/license-MIT-00b3c4?labelColor=1a1d24)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-224_passing-2ea043?labelColor=1a1d24)](#stack--tests)
+[![tests](https://img.shields.io/badge/tests-270_passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
@@ -102,10 +102,19 @@ searchable forever.
 ## Tasks
 
 The third kind (`kind: task`, keys prefixed `task-`): short actionable notes and ideas with
-the same close-with-an-outcome discipline — `open → done | dropped`, **a resolution is
-required either way** ("dropped: obsolete after the rewrite" is knowledge too) — and none of
-the incident ceremony. Closing archives the task; `kyb tasks` and the search keep the full
-record.
+the same close-with-an-outcome discipline and none of the incident ceremony.
+
+- **Lifecycle** — `open → in_progress → blocked → done | dropped`. Only `done` and `dropped`
+  are terminal: they require a resolution ("dropped: obsolete after the rewrite" is knowledge
+  too) and archive the task. `in_progress` and `blocked` are work in flight — the task stays
+  live in the canon, in `kyb tasks` and in `open_tasks`.
+- **`priority`** — optional, `low | medium | high | critical`; empty means unranked and stays
+  unranked, nothing infers one. Exact filter on `GET /tasks` and `/search`.
+- **`blocked_reason`** — optional, what the task waits on. It belongs to `status: blocked`
+  only: setting it on any other status is rejected, and moving off `blocked` clears it, so a
+  task never reports a block it is no longer in.
+
+Closing archives the task; `kyb tasks` and the search keep the full record.
 
 ---
 
@@ -153,8 +162,11 @@ kyb incident --key inc-2026-07-22-orders-api-oom --title "..." --service orders_
 kyb incidents [--status X] [--service X] [--open-followups] [--all]   # live by default, --all adds archived
 kyb resolve inc-2026-07-22-orders-api-oom <<< "what fixed it"   # resolution is mandatory; closing archives
 
-kyb task --key task-raise-log-retention --title "..." [--tags idea] <<< "body"
-kyb tasks [--status X] [--open-followups] [--all]               # open by default, --all adds archived
+kyb task --key task-raise-log-retention --title "..." [--tags idea] \
+         [--priority high] [--status in_progress] <<< "body"
+kyb task --key task-swap-disk --title "..." --status blocked \
+         --blocked-reason "waiting on the replacement disk" <<< "body"
+kyb tasks [--status X] [--priority P] [--open-followups] [--all]   # live by default, --all adds archived
 kyb done task-raise-log-retention <<< "what came of it"         # or --status dropped + why
 ```
 
@@ -192,14 +204,14 @@ something breaks and fold the lesson back into knowledge after resolving.
 | `POST` | `/incidents` | upsert a report; reply carries `unknown_knowledge` for dangling links and `hints` for missing structure. `status:resolved` requires `resolution` and archives |
 | `GET` | `/incidents` | `?status=&service=&followups=open&all=true&limit=` — live reports by default, open first, freshest on top; `all=true`, an explicit `status=` or `followups=open` include archived ones |
 | `POST` | `/incidents/{key}/resolve` | `{resolution, status?=resolved}` — flips status, records the outcome, stamps the timeline, archives on close |
-| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, knowledge?, resolution?, tags?, refs?}`; closing statuses require `resolution` and archive |
-| `GET` | `/tasks` | `?status=&followups=open&all=true&limit=` — open tasks by default, freshest on top; same archive rules as `/incidents` |
-| `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — close (`done`/`dropped`) with an outcome, archives |
-| `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=` → ranked hits with full bodies; an empty `q` lists newest first |
+| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, priority?, blocked_reason?, knowledge?, resolution?, tags?, refs?}`; `status` is `open\|in_progress\|blocked\|done\|dropped`, `priority` is `""\|low\|medium\|high\|critical`, `blocked_reason` requires `status:blocked` (400 otherwise); the terminal statuses require `resolution` and archive |
+| `GET` | `/tasks` | `?status=&priority=&followups=open&all=true&limit=` — live tasks (`open`, `in_progress`, `blocked`) by default, freshest on top; same archive rules as `/incidents` |
+| `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — flips status, records the outcome; a non-`blocked` status clears `blocked_reason`; `done`/`dropped` archive |
+| `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=&priority=` → ranked hits with full bodies; an empty `q` lists newest first |
 | `GET` | `/tags` | which topics the base covers, most used first |
 | `DELETE` | `/knowledge/{key}` | knowledge: retract (drops from the default search); incident/task: archive (stays searchable) |
 | `POST` | `/reindex` | full index rebuild from git |
-| `GET` | `/healthz` | `{ok, entries, open_incidents, open_tasks, index_docs, last_commit}` |
+| `GET` | `/healthz` | `{ok, entries, open_incidents, open_tasks, index_docs, last_commit}` — `open_tasks` counts every live status (`open`, `in_progress`, `blocked`) |
 
 Every request except `/healthz` is appended to a JSONL audit log: timestamp, client ip,
 method, path, query, status, duration.
@@ -227,7 +239,7 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 224 cases
+cargo test        # 270 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.

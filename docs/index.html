@@ -474,7 +474,7 @@
             <div class="dot dot-yellow"></div>
             <div class="dot dot-green"></div>
           </div>
-          <div class="terminal-title">bash — kyb query & incident tracking</div>
+          <div class="terminal-title">bash — kyb query, incidents & tasks</div>
         </div>
         <div class="terminal-body" id="term-body">
           <div class="term-line">
@@ -496,6 +496,16 @@
           <div class="term-out">
 <span class="term-out-highlight">✓ Incident Recorded</span>: key=<span class="term-out-key">inc-2026-08-06-orders-api-oom</span> (severity=critical)
   "orders_api OOM loop: the write buffer grows until the container restarts"
+          </div>
+          <br>
+          <div class="term-line">
+            <span class="term-prompt">agent@fleet:~$</span>
+            <span class="term-cmd">kyb tasks --priority critical</span>
+          </div>
+          <div class="term-out">
+<span class="term-out-highlight">✓ 2 live tasks</span> (open · in_progress · blocked)
+  <span class="term-out-key">task-swap-failing-disk</span>   status=blocked      "waiting on the replacement disk"
+  <span class="term-out-key">task-raise-log-retention</span> status=in_progress  "72h retention, 2G disk budget"
           </div>
         </div>
       </div>
@@ -536,6 +546,12 @@
           <div class="card-icon">🚨</div>
           <h3 class="card-title">Structured Incident Tracking</h3>
           <p class="card-desc">Mandatory resolution workflows. Require agents to record symptoms, root causes, workarounds, and resolution proofs before closing incidents.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">✅</div>
+          <h3 class="card-title">Task Board for Agents</h3>
+          <p class="card-desc">Short actionable notes with an optional priority (low → critical) and a real lifecycle: open, in_progress, blocked (with the reason it waits on), done, dropped. Only done and dropped close and archive — everything still in flight stays listed and counted.</p>
         </div>
 
         <div class="card">

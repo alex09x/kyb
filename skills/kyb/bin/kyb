@@ -54,10 +54,13 @@ incident reports (key must start with inc-, e.g. inc-2026-07-22-orders-api-oom):
                (no --resolution: the closing comment is read from stdin)
 
 tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
-  kyb task --key task-<slug> --title "..." [--status open|done|dropped]
+  kyb task --key task-<slug> --title "..." [--status open|in_progress|blocked|done|dropped]
+           [--priority low|medium|high|critical] [--blocked-reason "what it waits on"]
            [--knowledge key1,key2] [--resolution "..."] [--tags a,b] [--refs r1,r2]   (body on stdin)
-  kyb tasks [--status S] [--open-followups] [--all] [--limit N]
-           (open tasks only, freshest on top; --all adds archived closed ones)
+           (--blocked-reason only with --status blocked; done/dropped close and archive)
+  kyb tasks [--status S] [--priority P] [--open-followups] [--all] [--limit N]
+           (live tasks only — open, in_progress, blocked — freshest on top;
+            --all adds archived closed ones)
   kyb done <key> [--status dropped] [--resolution "what came of it"]
            (no --resolution: the closing comment is read from stdin)
 
@@ -224,12 +227,15 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     kyb_curl -X POST "$BASE/incidents/$key/resolve" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   task)
-    key=""; title=""; status="open"; knowledge=""; resolution=""; tags=""; refs=""
+    key=""; title=""; status="open"; priority=""; blocked_reason=""
+    knowledge=""; resolution=""; tags=""; refs=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --key) key="$2"; shift 2 ;;
         --title) title="$2"; shift 2 ;;
         --status) status="$2"; shift 2 ;;
+        --priority) priority="$2"; shift 2 ;;
+        --blocked-reason) blocked_reason="$2"; shift 2 ;;
         --knowledge) knowledge="$2"; shift 2 ;;
         --resolution) resolution="$2"; shift 2 ;;
         --tags) tags="$2"; shift 2 ;;
@@ -239,29 +245,31 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     done
     [ -n "$key" ] && [ -n "$title" ] || die "task: --key and --title are required (body comes from stdin)"
     body="$(cat)"
-    payload="$(BODY="$body" RESOLUTION="$resolution" python3 -c '
+    payload="$(BODY="$body" RESOLUTION="$resolution" BLOCKED_REASON="$blocked_reason" python3 -c '
 import json, os, sys
-key, title, status, knowledge, tags, refs = sys.argv[1:7]
+key, title, status, priority, knowledge, tags, refs = sys.argv[1:8]
 split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
 print(json.dumps({
     "key": key, "title": title, "body": os.environ["BODY"], "status": status,
+    "priority": priority, "blocked_reason": os.environ["BLOCKED_REASON"],
     "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
     "tags": split(tags), "refs": split(refs),
-}))' "$key" "$title" "$status" "$knowledge" "$tags" "$refs")"
+}))' "$key" "$title" "$status" "$priority" "$knowledge" "$tags" "$refs")"
     kyb_curl -X POST "$BASE/tasks" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   tasks)
-    status=""; followups=""; all=""; limit="50"
+    status=""; priority=""; followups=""; all=""; limit="50"
     while [ $# -gt 0 ]; do
       case "$1" in
         --status) status="$2"; shift 2 ;;
+        --priority) priority="$2"; shift 2 ;;
         --open-followups) followups="open"; shift ;;
         --all) all="true"; shift ;;
         --limit) limit="$2"; shift 2 ;;
         *) die "tasks: unknown flag $1" ;;
       esac
     done
-    kyb_curl "$BASE/tasks?status=$(urlenc "$status")&followups=$followups&all=$all&limit=$limit" | pretty
+    kyb_curl "$BASE/tasks?status=$(urlenc "$status")&priority=$(urlenc "$priority")&followups=$followups&all=$all&limit=$limit" | pretty
     ;;
   done)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true

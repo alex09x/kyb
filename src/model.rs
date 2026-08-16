@@ -12,7 +12,17 @@ pub const TASK_PREFIX: &str = "task-";
 
 pub const SEVERITIES: [&str; 4] = ["low", "medium", "high", "critical"];
 pub const STATUSES: [&str; 3] = ["open", "mitigated", "resolved"];
-pub const TASK_STATUSES: [&str; 3] = ["open", "done", "dropped"];
+/// Task lifecycle, listing order included: the live states first, then the two
+/// terminal ones. Only the terminal states close (and archive) a task.
+pub const TASK_STATUSES: [&str; 5] = ["open", "in_progress", "blocked", "done", "dropped"];
+/// The statuses a task can sit in while it is still work: `kyb tasks` and the
+/// health counter must see all three, not just "open".
+pub const TASK_LIVE_STATUSES: [&str; 3] = ["open", "in_progress", "blocked"];
+pub const TASK_TERMINAL_STATUSES: [&str; 2] = ["done", "dropped"];
+/// Task-only, optional: an empty priority means "not ranked", which is the
+/// default and stays the default — nothing infers one.
+pub const PRIORITIES: [&str; 4] = ["low", "medium", "high", "critical"];
+pub const STATUS_BLOCKED: &str = "blocked";
 
 fn default_kind() -> String {
     KIND_KNOWLEDGE.to_string()
@@ -46,6 +56,10 @@ struct Meta {
     severity: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    priority: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    blocked_reason: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     knowledge: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -81,6 +95,13 @@ pub struct Entry {
     pub hosts: Vec<String>,
     pub severity: String,
     pub status: String,
+    /// Task-only, optional: "" | low | medium | high | critical. Empty means
+    /// unranked — the server never guesses one.
+    pub priority: String,
+    /// Task-only, optional: what the task is waiting on. Only meaningful while
+    /// status=blocked; a leftover reason on any other status is a lie about the
+    /// state, so it is rejected on write and cleared on a transition.
+    pub blocked_reason: String,
     /// Keys of the knowledge entries this incident is tied to.
     pub knowledge: Vec<String>,
     /// How the incident ended: what fixed it, or the accepted outcome.
@@ -123,6 +144,8 @@ impl Entry {
             hosts: meta.hosts,
             severity: meta.severity,
             status: meta.status,
+            priority: meta.priority,
+            blocked_reason: meta.blocked_reason,
             knowledge: meta.knowledge,
             resolution: meta.resolution,
             detection: meta.detection,
@@ -147,6 +170,8 @@ impl Entry {
             hosts: self.hosts.clone(),
             severity: self.severity.clone(),
             status: self.status.clone(),
+            priority: self.priority.clone(),
+            blocked_reason: self.blocked_reason.clone(),
             knowledge: self.knowledge.clone(),
             resolution: self.resolution.clone(),
             detection: self.detection.clone(),
@@ -173,6 +198,8 @@ impl Entry {
             && self.hosts == other.hosts
             && self.severity == other.severity
             && self.status == other.status
+            && self.priority == other.priority
+            && self.blocked_reason == other.blocked_reason
             && self.knowledge == other.knowledge
             && self.resolution == other.resolution
             && self.detection == other.detection
@@ -195,10 +222,17 @@ impl Entry {
     }
 
     /// A closed entry leaves the working tree (archive-on-close); its latest
-    /// version stays in the default search.
+    /// version stays in the default search. in_progress and blocked are work in
+    /// flight, not an ending: they keep the task live in the canon.
     pub fn is_closed(&self) -> bool {
         (self.is_incident() && self.status == "resolved")
-            || (self.is_task() && matches!(self.status.as_str(), "done" | "dropped"))
+            || (self.is_task() && TASK_TERMINAL_STATUSES.contains(&self.status.as_str()))
+    }
+
+    /// A task that is still work — the three live statuses. What `kyb tasks`
+    /// and `open_tasks` count.
+    pub fn is_live_task(&self) -> bool {
+        self.is_task() && TASK_LIVE_STATUSES.contains(&self.status.as_str())
     }
 
     /// Unfinished follow-ups: `- [ ]` checklist items in the body (a body
@@ -231,6 +265,17 @@ impl Entry {
                 if !TASK_STATUSES.contains(&self.status.as_str()) {
                     bail!("task status must be one of: {}", TASK_STATUSES.join("|"));
                 }
+                if !self.priority.is_empty() && !PRIORITIES.contains(&self.priority.as_str()) {
+                    bail!("task priority must be empty or one of: {}", PRIORITIES.join("|"));
+                }
+                // a reason left over from an earlier block would describe a
+                // state the task is no longer in — refuse instead of lying
+                if self.status != STATUS_BLOCKED && !self.blocked_reason.trim().is_empty() {
+                    bail!(
+                        "blocked_reason belongs to status={STATUS_BLOCKED}, not '{}' — clear it or block the task",
+                        self.status
+                    );
+                }
                 if self.is_closed() && self.resolution.trim().is_empty() {
                     bail!("closing a task needs a resolution: what came of it, or why it was dropped");
                 }
@@ -241,6 +286,9 @@ impl Entry {
                 }
                 if let Some(hit) = find_secret(&self.resolution) {
                     bail!("resolution looks like a secret ({hit}…) — store secrets as pointers in refs");
+                }
+                if let Some(hit) = find_secret(&self.blocked_reason) {
+                    bail!("blocked_reason looks like a secret ({hit}…) — store secrets as pointers in refs");
                 }
             }
             KIND_INCIDENT => {
@@ -282,6 +330,16 @@ impl Entry {
                 "kind must be '{KIND_KNOWLEDGE}', '{KIND_INCIDENT}' or '{KIND_TASK}', got '{other}'"
             ),
         }
+        // priority and blocked_reason are the task lane only: an incident is
+        // ranked by severity, a knowledge entry is not ranked at all
+        if !self.is_task() {
+            if !self.priority.trim().is_empty() {
+                bail!("priority is a task-only field (got '{}' on kind '{}')", self.priority, self.kind);
+            }
+            if !self.blocked_reason.trim().is_empty() {
+                bail!("blocked_reason is a task-only field (kind '{}')", self.kind);
+            }
+        }
         if let Some(hit) = find_secret(&self.body) {
             bail!("body looks like a secret ({hit}…) — store secrets as pointers in refs");
         }
@@ -304,6 +362,8 @@ impl Default for Entry {
             hosts: vec![],
             severity: String::new(),
             status: String::new(),
+            priority: String::new(),
+            blocked_reason: String::new(),
             knowledge: vec![],
             resolution: String::new(),
             detection: String::new(),
@@ -534,6 +594,163 @@ mod tests {
         let mut c = incident();
         c.knowledge.push("nats-streams".into());
         assert!(!a.same_content(&c));
+    }
+
+    fn task() -> Entry {
+        Entry {
+            key: "task-raise-log-retention".into(),
+            title: "Raise container log retention to 72h".into(),
+            kind: KIND_TASK.into(),
+            status: "open".into(),
+            tags: vec!["idea".into()],
+            updated_at: "2026-08-15".into(),
+            body: "Short retention loses evidence.\n\n- [ ] measure log volume first".into(),
+            ..Default::default()
+        }
+    }
+
+    // --- task priority: optional, and only the four ranks ---
+    #[rstest]
+    #[case::unranked("", true)]
+    #[case::low("low", true)]
+    #[case::medium("medium", true)]
+    #[case::high("high", true)]
+    #[case::critical("critical", true)]
+    #[case::unknown_rank("urgent", false)]
+    #[case::wrong_case("HIGH", false)]
+    #[case::blank("  ", false)]
+    #[case::numeric("1", false)]
+    fn task_priority_validation(#[case] priority: &str, #[case] ok: bool) {
+        let mut e = task();
+        e.priority = priority.into();
+        assert_eq!(e.validate().is_ok(), ok, "priority '{priority}'");
+    }
+
+    // priority is the task lane only — the other kinds are not ranked this way
+    #[rstest]
+    #[case::knowledge_priority(entry(), |e: &mut Entry| e.priority = "high".into())]
+    #[case::knowledge_blocked_reason(entry(), |e: &mut Entry| e.blocked_reason = "waiting".into())]
+    #[case::incident_priority(incident(), |e: &mut Entry| e.priority = "high".into())]
+    #[case::incident_blocked_reason(incident(), |e: &mut Entry| e.blocked_reason = "waiting".into())]
+    fn task_only_fields_rejected_elsewhere(#[case] mut e: Entry, #[case] mutate: fn(&mut Entry)) {
+        assert!(e.validate().is_ok(), "baseline must be valid: {e:?}");
+        mutate(&mut e);
+        assert!(e.validate().is_err(), "task-only field must be rejected: {e:?}");
+    }
+
+    // --- task statuses: three live, two terminal ---
+    #[rstest]
+    #[case("open", true, false)]
+    #[case("in_progress", true, false)]
+    #[case("blocked", true, false)]
+    #[case("done", false, true)]
+    #[case("dropped", false, true)]
+    fn task_status_lifecycle(#[case] status: &str, #[case] live: bool, #[case] closed: bool) {
+        let mut e = task();
+        e.status = status.into();
+        // only the terminal statuses demand an outcome
+        e.resolution = "what came of it".into();
+        assert!(e.validate().is_ok(), "status '{status}' must be accepted");
+        assert_eq!(e.is_live_task(), live, "live('{status}')");
+        assert_eq!(e.is_closed(), closed, "closed('{status}')");
+    }
+
+    #[rstest]
+    #[case::unknown("wip")]
+    #[case::empty("")]
+    #[case::dash("in-progress")]
+    #[case::incident_status("mitigated")]
+    fn bad_task_status_rejected(#[case] status: &str) {
+        let mut e = task();
+        e.status = status.into();
+        assert!(e.validate().is_err(), "status '{status}' must be rejected");
+    }
+
+    // in_progress and blocked are work in flight: they do NOT need a resolution
+    // and do NOT archive
+    #[test]
+    fn live_statuses_need_no_resolution() {
+        for status in ["in_progress", "blocked"] {
+            let mut e = task();
+            e.status = status.into();
+            assert!(e.validate().is_ok(), "{status} must not demand a resolution");
+            assert!(!e.is_closed());
+        }
+        // the terminal ones still do
+        let mut e = task();
+        e.status = "done".into();
+        assert!(e.validate().is_err(), "done still needs a resolution");
+    }
+
+    // a blocked reason on any other status describes a state the task is not in
+    #[test]
+    fn blocked_reason_belongs_to_blocked() {
+        let mut e = task();
+        e.status = STATUS_BLOCKED.into();
+        e.blocked_reason = "waiting on the vendor to ship the fix".into();
+        assert!(e.validate().is_ok());
+        // blocked without a reason stays legal — the field is optional
+        e.blocked_reason = String::new();
+        assert!(e.validate().is_ok());
+        // but a stale reason on a live or terminal status is refused
+        for status in ["open", "in_progress", "done"] {
+            let mut stale = task();
+            stale.status = status.into();
+            stale.resolution = "outcome".into();
+            stale.blocked_reason = "waiting on the vendor".into();
+            let err = stale.validate().unwrap_err().to_string();
+            assert!(err.contains("blocked_reason"), "status '{status}': {err}");
+        }
+    }
+
+    #[test]
+    fn secret_in_blocked_reason_rejected() {
+        let mut e = task();
+        e.status = STATUS_BLOCKED.into();
+        e.blocked_reason = "waiting for the password: super123secret rotation".into();
+        assert!(e.validate().is_err());
+    }
+
+    // the new fields survive markdown and count as content
+    #[test]
+    fn task_roundtrip_with_priority_and_block() {
+        let mut e = task();
+        e.priority = "critical".into();
+        e.status = STATUS_BLOCKED.into();
+        e.blocked_reason = "waiting on the host-a disk upgrade".into();
+        e.knowledge = vec!["web-app-architecture".into()];
+        assert!(e.validate().is_ok());
+        let md = e.to_markdown();
+        assert!(md.contains("kind: task"), "{md}");
+        assert!(md.contains("priority: critical"), "{md}");
+        assert!(md.contains("blocked_reason: waiting on the host-a disk upgrade"), "{md}");
+        let back = Entry::from_markdown(&md).unwrap();
+        assert_eq!(back, e);
+        assert!(back.is_task());
+
+        // both fields are content: changing either is a new version
+        let mut other = back.clone();
+        other.priority = "low".into();
+        assert!(!e.same_content(&other));
+        let mut other = back.clone();
+        other.blocked_reason = "waiting on something else".into();
+        assert!(!e.same_content(&other));
+    }
+
+    // an unranked, unblocked task writes no new frontmatter at all — files from
+    // before the feature parse identically
+    #[test]
+    fn task_frontmatter_stays_clean_without_new_fields() {
+        let md = task().to_markdown();
+        for f in ["priority:", "blocked_reason:"] {
+            assert!(!md.contains(f), "unexpected '{f}' in:\n{md}");
+        }
+        let legacy = "---\nkey: task-old\ntitle: An old task\nkind: task\nstatus: open\n---\n\nbody\n";
+        let e = Entry::from_markdown(legacy).unwrap();
+        assert_eq!(e.priority, "");
+        assert_eq!(e.blocked_reason, "");
+        assert!(e.validate().is_ok());
+        assert!(e.is_live_task());
     }
 
     #[test]
