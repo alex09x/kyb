@@ -32,7 +32,7 @@ if [ "${1:-}" != "--skills" ]; then
 
   step "CI for $sha"
   for _ in $(seq 1 30); do
-    run_id=$(gh run list --commit "$sha" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+    run_id=$(gh run list --workflow ci.yml --commit "$sha" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
     [ -n "$run_id" ] && break
     sleep 5
   done
