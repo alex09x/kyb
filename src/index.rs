@@ -377,6 +377,12 @@ impl SearchIndex {
     /// retraction: history-only. Returns (live, history) doc counts.
     pub fn reindex(&self, w: &mut IndexWriter, store: &Store) -> Result<(usize, usize)> {
         w.delete_all_documents()?;
+        // Tantivy resets the writer stamper when deleting every segment. Its
+        // delete-then-add contract requires a commit boundary before new docs;
+        // without it a multi-threaded writer can discard part of this rebuild.
+        // Do not reload the reader yet: searches keep seeing the previous
+        // complete generation until the replacement generation commits below.
+        w.commit()?;
         // walk_history is chronological, so seq = walk order
         let hist = store.walk_history()?;
         let mut seq = 0u64;
