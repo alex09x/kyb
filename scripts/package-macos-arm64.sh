@@ -69,6 +69,7 @@ for required_input in \
   "$SERVER_BIN" \
   "$CLI_BIN" \
   "$REPO_ROOT/skills/install.sh" \
+  "$REPO_ROOT/skills/validate-frontmatter.py" \
   "$REPO_ROOT/skills/kyb/SKILL.md" \
   "$REPO_ROOT/LICENSE" \
   "$REPO_ROOT/README.md"; do
@@ -136,6 +137,7 @@ for required_member in \
   "$PKG/bin/kyb" \
   "$PKG/bin/kyb-server" \
   "$PKG/skills/install.sh" \
+  "$PKG/skills/validate-frontmatter.py" \
   "$PKG/skills/kyb/SKILL.md" \
   "$PKG/skills/kyb/bin/kyb" \
   "$PKG/LICENSE" \

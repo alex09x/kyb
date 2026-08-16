@@ -1,6 +1,9 @@
 ---
 name: kyb
-description: Our internal infrastructure knowledge base — servers, services, architecture, who calls whom, deploys, ports, configs, decisions and house rules — plus incident reports and tasks. Search it before reasoning about our infra (kyb query), write back what you learn (kyb add, upsert by key), read entries in full (kyb get), walk the git history (kyb history, --history). File incident reports when something breaks (kyb incident), check what is broken right now (kyb incidents), close with an outcome (kyb resolve). Keep short actionable notes and ideas as tasks (kyb task, kyb tasks, kyb done); claim, block and relate them as you work (kyb task-status --status in_progress --assignee, --parent). Triggers, in any language: "remember this", "what do we know about X", "where does X run", "how do we deploy", "what is broken", "incident", "postmortem", "task", "idea", "kyb".
+description: >-
+  Our internal infrastructure knowledge base — servers, services, architecture, who calls whom, deploys, ports, configs, decisions and house rules — plus incident reports and tasks.
+  Search it before reasoning about our infra; write back verified facts, read entries and history, report and resolve incidents, and claim, block, relate, or close tasks as work progresses.
+  Use for questions about our hosts, services, deploys, ports, configs, architecture, incidents, tasks, and operational decisions, including requests such as "remember this", "what do we know about X", "where does X run", "how do we deploy", "what is broken", "incident", "postmortem", "task", "idea", or "kyb".
 ---
 
 # kyb — Know Your Business: our infrastructure knowledge base

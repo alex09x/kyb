@@ -12,6 +12,12 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+skill_file="$SRC/kyb/SKILL.md"
+validator="$SRC/validate-frontmatter.py"
+
+# Fail before touching HOME: a malformed canonical skill must never be copied to
+# every provider and reported as successfully installed.
+python3 "$validator" "$skill_file" >/dev/null
 
 # A Homebrew post-install step runs from a different working tree than a normal checkout of this repo.
 cli_bin="${KYB_INSTALL_BINARY:-$SRC/kyb/bin/kyb}"
@@ -31,7 +37,8 @@ fi
 for agent in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/config/skills"; do
   if [ -d "$(dirname "$agent")" ]; then
     install -d "$agent/kyb"
-    install -m 644 "$SRC/kyb/SKILL.md" "$agent/kyb/SKILL.md"
+    install -m 644 "$skill_file" "$agent/kyb/SKILL.md"
+    python3 "$validator" "$agent/kyb/SKILL.md" >/dev/null
     # the old layout bundled bin/ per agent; the CLI now comes from PATH
     rm -rf "$agent/kyb/bin"
     echo "✓ SKILL    $agent/kyb/SKILL.md"
