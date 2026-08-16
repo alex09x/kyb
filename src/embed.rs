@@ -12,6 +12,7 @@
 //! Entirely optional: with no model on disk the service runs lexical-only.
 
 use anyhow::{anyhow, Context, Result};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// e5 models are trained with these prefixes and degrade noticeably without them.
@@ -157,34 +158,102 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// vectors live in memory and are rebuilt from the canon like everything else.
 pub struct Semantic {
     embedder: tokio::sync::Mutex<Embedder>,
-    vectors: tokio::sync::RwLock<Vec<(String, Vec<f32>)>>,
+    vectors: tokio::sync::RwLock<VectorState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct UpdateTicket {
+    key: String,
+    generation: u64,
+}
+
+pub struct RebuildJob {
+    docs: Vec<(UpdateTicket, String)>,
+}
+
+#[derive(Default)]
+struct VectorState {
+    next_generation: u64,
+    expected: HashMap<String, u64>,
+    vectors: Vec<(String, Vec<f32>)>,
+}
+
+impl VectorState {
+    fn next_ticket(&mut self, key: &str) -> UpdateTicket {
+        self.next_generation = self.next_generation.checked_add(1).expect("semantic update generation exhausted");
+        let generation = self.next_generation;
+        self.expected.insert(key.to_string(), generation);
+        self.vectors.retain(|(stored, _)| stored != key);
+        UpdateTicket { key: key.to_string(), generation }
+    }
+
+    fn install(&mut self, ticket: &UpdateTicket, vector: Vec<f32>) -> bool {
+        if self.expected.get(&ticket.key) != Some(&ticket.generation) {
+            return false;
+        }
+        match self.vectors.iter_mut().find(|(key, _)| key == &ticket.key) {
+            Some(slot) => slot.1 = vector,
+            None => self.vectors.push((ticket.key.clone(), vector)),
+        }
+        true
+    }
+
+    fn reset(&mut self, keys: impl IntoIterator<Item = String>) -> Vec<UpdateTicket> {
+        self.expected.clear();
+        self.vectors.clear();
+        keys.into_iter().map(|key| self.next_ticket(&key)).collect()
+    }
 }
 
 impl Semantic {
     pub fn load(dir: &Path) -> Result<Semantic> {
         Ok(Semantic {
             embedder: tokio::sync::Mutex::new(Embedder::load(dir)?),
-            vectors: tokio::sync::RwLock::new(Vec::new()),
+            vectors: tokio::sync::RwLock::new(VectorState::default()),
         })
     }
 
-    /// (key, "title. body") pairs — one vector per entry.
-    pub async fn rebuild(&self, docs: Vec<(String, String)>) -> Result<usize> {
-        let texts: Vec<String> = docs.iter().map(|(_, t)| t.clone()).collect();
-        let mut out = Vec::with_capacity(docs.len());
-        // batch, so a big base does not build one giant tensor
-        for (chunk_docs, chunk_texts) in docs.chunks(16).zip(texts.chunks(16)) {
-            let vecs = self.embedder.lock().await.embed_passages(chunk_texts)?;
-            for ((key, _), v) in chunk_docs.iter().zip(vecs) {
-                out.push((key.clone(), v));
-            }
-        }
-        let n = out.len();
-        *self.vectors.write().await = out;
-        Ok(n)
+    /// Reserve the next committed version of a key before releasing the
+    /// service's writer lock. Until its embedding lands, no older vector is
+    /// exposed for that key.
+    pub async fn begin_upsert(&self, key: &str) -> UpdateTicket {
+        self.vectors.write().await.next_ticket(key)
     }
 
-    pub async fn upsert(&self, key: &str, text: &str) -> Result<()> {
+    /// Invalidate a key before releasing the service's writer lock. Any
+    /// embedding already in flight can then finish only as a no-op.
+    pub async fn invalidate(&self, key: &str) {
+        self.vectors.write().await.next_ticket(key);
+    }
+
+    /// Snapshot a complete rebuild while the service's writer lock is held.
+    /// A concurrent write gets a newer ticket and wins even when the older
+    /// rebuild finishes last.
+    pub async fn begin_rebuild(&self, docs: Vec<(String, String)>) -> RebuildJob {
+        let keys = docs.iter().map(|(key, _)| key.clone());
+        let tickets = self.vectors.write().await.reset(keys);
+        RebuildJob {
+            docs: tickets.into_iter().zip(docs.into_iter().map(|(_, text)| text)).collect(),
+        }
+    }
+
+    pub async fn finish_rebuild(&self, job: RebuildJob) -> Result<usize> {
+        let mut installed = 0;
+        // batch, so a big base does not build one giant tensor
+        for chunk in job.docs.chunks(16) {
+            let texts: Vec<String> = chunk.iter().map(|(_, text)| text.clone()).collect();
+            let vectors = self.embedder.lock().await.embed_passages(&texts)?;
+            let mut state = self.vectors.write().await;
+            for ((ticket, _), vector) in chunk.iter().zip(vectors) {
+                if state.install(ticket, vector) {
+                    installed += 1;
+                }
+            }
+        }
+        Ok(installed)
+    }
+
+    pub async fn finish_upsert(&self, ticket: UpdateTicket, text: &str) -> Result<bool> {
         let v = self
             .embedder
             .lock()
@@ -192,24 +261,15 @@ impl Semantic {
             .embed_passages(&[text.to_string()])?
             .pop()
             .ok_or_else(|| anyhow!("empty embedding"))?;
-        let mut vecs = self.vectors.write().await;
-        match vecs.iter_mut().find(|(k, _)| k == key) {
-            Some(slot) => slot.1 = v,
-            None => vecs.push((key.to_string(), v)),
-        }
-        Ok(())
-    }
-
-    pub async fn remove(&self, key: &str) {
-        self.vectors.write().await.retain(|(k, _)| k != key);
+        Ok(self.vectors.write().await.install(&ticket, v))
     }
 
     /// Keys most similar to the query, best first.
     pub async fn search(&self, query: &str, top: usize) -> Result<Vec<(String, f32)>> {
         let qv = self.embedder.lock().await.embed_query(query)?;
-        let vecs = self.vectors.read().await;
+        let state = self.vectors.read().await;
         let mut scored: Vec<(String, f32)> =
-            vecs.iter().map(|(k, v)| (k.clone(), cosine(&qv, v))).collect();
+            state.vectors.iter().map(|(k, v)| (k.clone(), cosine(&qv, v))).collect();
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(top);
         Ok(scored)
@@ -273,6 +333,35 @@ mod tests {
         assert!((cosine(&a, &a) - 1.0).abs() < 1e-6);
         let b = vec![0.8f32, -0.6];
         assert!(cosine(&a, &b).abs() < 1e-6, "orthogonal");
+    }
+
+    #[test]
+    fn late_vector_cannot_replace_a_newer_committed_version() {
+        let mut state = VectorState::default();
+        let old = state.next_ticket("service");
+        let new = state.next_ticket("service");
+        assert!(state.install(&new, vec![2.0]));
+        assert!(!state.install(&old, vec![1.0]));
+        assert_eq!(state.vectors, vec![("service".into(), vec![2.0])]);
+    }
+
+    #[test]
+    fn delete_invalidates_an_embedding_already_in_flight() {
+        let mut state = VectorState::default();
+        let pending = state.next_ticket("service");
+        state.next_ticket("service");
+        assert!(!state.install(&pending, vec![1.0]));
+        assert!(state.vectors.is_empty());
+    }
+
+    #[test]
+    fn rebuild_snapshot_cannot_overwrite_a_later_write() {
+        let mut state = VectorState::default();
+        let rebuild = state.reset(["service".to_string()]).pop().unwrap();
+        let later = state.next_ticket("service");
+        assert!(state.install(&later, vec![2.0]));
+        assert!(!state.install(&rebuild, vec![1.0]));
+        assert_eq!(state.vectors, vec![("service".into(), vec![2.0])]);
     }
 
 

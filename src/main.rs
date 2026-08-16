@@ -45,27 +45,39 @@ fn embed_text(e: &model::Entry) -> String {
     }
 }
 
-async fn rebuild_vectors(st: &AppState) {
-    let Some(sem) = st.semantic.as_ref() else { return };
+fn vector_docs(st: &AppState) -> Option<Vec<(String, String)>> {
+    st.semantic.as_ref()?;
     // live tree + archived incidents/tasks: everything the default search
     // covers must be reachable semantically too
     let mut entries = match st.store.list_head() {
         Ok(v) => v,
         Err(e) => {
             eprintln!("kyb: cannot list canon for embeddings: {e:#}");
-            return;
+            return None;
         }
     };
     match st.store.archived_latest() {
         Ok(mut archived) => entries.append(&mut archived),
         Err(e) => eprintln!("kyb: archived entries not embedded: {e:#}"),
     }
-    let docs: Vec<(String, String)> =
-        entries.iter().map(|e| (e.key.clone(), embed_text(e))).collect();
-    match sem.rebuild(docs).await {
+    Some(entries.iter().map(|e| (e.key.clone(), embed_text(e))).collect())
+}
+
+async fn finish_vector_rebuild(st: &AppState, job: embed::RebuildJob) {
+    let Some(sem) = st.semantic.as_ref() else { return };
+    match sem.finish_rebuild(job).await {
         Ok(n) => eprintln!("kyb: embedded {n} entries"),
         Err(e) => eprintln!("kyb: embedding failed, staying lexical: {e:#}"),
     }
+}
+
+async fn rebuild_vectors(st: &AppState) {
+    let Some(sem) = st.semantic.as_ref() else { return };
+    let writer = st.writer.lock().await;
+    let Some(docs) = vector_docs(st) else { return };
+    let job = sem.begin_rebuild(docs).await;
+    drop(writer);
+    finish_vector_rebuild(st, job).await;
 }
 
 fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
@@ -150,8 +162,9 @@ type Built = Result<(model::Entry, Value), Reply>;
 /// section, so no concurrent reopen can slip between the closing commit and
 /// the archival and lose its freshly recreated file to it.
 ///
-/// Only the vector refresh happens after the lock is dropped — it touches
-/// neither git nor the index, and a stale vector is never a lost write.
+/// The semantic update gets a generation ticket before the lock is dropped;
+/// model computation happens outside the lock and can install its vector only
+/// while that ticket still represents the newest committed version.
 async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built) -> Reply {
     let mut w = st.writer.lock().await;
     let (entry, extra) = match build(st.as_ref()) {
@@ -164,10 +177,17 @@ async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built
     if closed {
         archive_locked(st, &mut w, &key, &mut reply);
     }
+    let pending = match (st.semantic.as_ref(), committed) {
+        (Some(sem), Some(entry)) => {
+            let ticket = sem.begin_upsert(&entry.key).await;
+            Some((ticket, entry))
+        }
+        _ => None,
+    };
     drop(w);
-    if let (Some(sem), Some(e)) = (st.semantic.as_ref(), committed) {
-        if let Err(err) = sem.upsert(&e.key, &embed_text(&e)).await {
-            eprintln!("kyb: embedding not updated for {}: {err:#}", e.key);
+    if let (Some(sem), Some((ticket, entry))) = (st.semantic.as_ref(), pending) {
+        if let Err(err) = sem.finish_upsert(ticket, &embed_text(&entry)).await {
+            eprintln!("kyb: embedding not updated for {}: {err:#}", entry.key);
         }
     }
     reply
@@ -1058,6 +1078,7 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
+    let mut w = st.writer.lock().await;
     let entry = match st.store.get(&key) {
         Err(e) => return err500(e),
         Ok(None) => {
@@ -1065,7 +1086,6 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         }
         Ok(Some(e)) => e,
     };
-    let mut w = st.writer.lock().await;
     if entry.kind == model::KIND_KNOWLEDGE {
         match st.store.delete(&key) {
             Err(e) => err500(e),
@@ -1079,10 +1099,10 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
                         e.context("git committed but the index was not updated — run POST /reindex"),
                     );
                 }
-                drop(w);
                 if let Some(sem) = st.semantic.as_ref() {
-                    sem.remove(&key).await;
+                    sem.invalidate(&key).await;
                 }
+                drop(w);
                 (StatusCode::OK, Json(json!({"key": key, "deleted": true, "sha": sha})))
             }
         }
@@ -1103,11 +1123,20 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
 async fn reindex(State(st): St) -> Reply {
     let mut w = st.writer.lock().await;
     let res = st.index.reindex(&mut w, &st.store);
+    let vector_job = match (&res, st.semantic.as_ref()) {
+        (Ok(_), Some(sem)) => match vector_docs(&st) {
+            Some(docs) => Some(sem.begin_rebuild(docs).await),
+            None => None,
+        },
+        _ => None,
+    };
     drop(w);
     match res {
         Err(e) => err500(e),
         Ok((heads, hist)) => {
-            rebuild_vectors(&st).await;
+            if let Some(job) = vector_job {
+                finish_vector_rebuild(&st, job).await;
+            }
             (StatusCode::OK, Json(json!({"ok": true, "head_docs": heads, "history_docs": hist})))
         }
     }
