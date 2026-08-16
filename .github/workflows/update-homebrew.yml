@@ -103,6 +103,9 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf tap
+          # `gh repo clone` authenticates the clone itself, but Git still needs
+          # a credential helper for the later push from this fresh runner.
+          gh auth setup-git
           gh repo clone "$TAP_REPO" tap
           default_branch="$(gh repo view "$TAP_REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')"
           # Re-runs must converge on one commit, not stack onto a stale branch.

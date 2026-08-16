@@ -57,19 +57,17 @@ jobs:
   #   packaging/homebrew/kyb.rb.in.
   #
   # RACE AVOIDANCE
-  #   update-homebrew-formula triggers on `release: published` and immediately
-  #   wants the asset. GitHub does not emit that event for drafts, so a new
-  #   release is created as a draft, the asset is uploaded, and only then is the
-  #   release published — a consumer can never observe a published release
-  #   without its asset. Re-runs reuse an existing release and re-upload with
-  #   --clobber instead of re-drafting it, so an already published release is
-  #   never briefly withdrawn. update-homebrew-formula still polls for the asset,
-  #   because a manual workflow_dispatch can fire while an upload is in flight.
+  #   The release is created as a draft, the asset is uploaded, and only then is
+  #   it published — a consumer can never observe a published release without
+  #   its asset. Events created with GITHUB_TOKEN do not start another workflow,
+  #   so the final step explicitly dispatches update-homebrew.yml. Re-runs reuse
+  #   the existing release and the formula workflow is idempotent.
   release-macos-arm64:
     needs: [test, e2e-macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     permissions:
+      actions: write
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -146,9 +144,17 @@ jobs:
       - name: Publish the release
         run: |
           set -euo pipefail
-          # No-op when the release is already published; otherwise this is the
-          # draft -> published transition that starts update-homebrew-formula.
+          # No-op when the release is already published.
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Dispatch the Homebrew formula update
+        run: |
+          set -euo pipefail
+          default_branch="$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef --jq '.defaultBranchRef.name')"
+          gh workflow run update-homebrew.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$default_branch" \
+            -f "tag=$RELEASE_TAG"
 
   # Build each Linux architecture on a native GitHub runner, then let Docker's
   # official reusable workflow assemble the multi-platform manifest.  Building
