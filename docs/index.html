@@ -1,609 +1,590 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KYB — Shared Memory for AI Agent Fleets | kyb-memory.com</title>
-  <meta name="description" content="A git-backed, searchable knowledge base and incident tracker for AI agent fleets. Fast hybrid search, zero-secret leaks, and multi-agent skill integration.">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg: #090b10;
-      --bg-card: rgba(18, 22, 33, 0.7);
-      --bg-card-hover: rgba(26, 32, 48, 0.85);
-      --border: rgba(255, 255, 255, 0.08);
-      --border-accent: rgba(0, 242, 254, 0.3);
-      --primary: #00f2fe;
-      --primary-glow: rgba(0, 242, 254, 0.15);
-      --secondary: #4facfe;
-      --accent-purple: #7f00ff;
-      --accent-pink: #e100ff;
-      --text: #f0f4f8;
-      --text-muted: #8a99ad;
-      --text-dim: #5a697b;
-      --green: #10b981;
-      --red: #ef4444;
-      --amber: #f59e0b;
-      --font-sans: 'Inter', system-ui, sans-serif;
-      --font-heading: 'Outfit', sans-serif;
-      --font-mono: 'Fira Code', monospace;
-    }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KYB — Shared Memory &amp; Incident Tracker for AI Agent Fleets</title>
+<meta name="description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.">
+<link rel="canonical" href="https://kybmemory.com/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#131720">
+<meta name="author" content="KYB">
+<meta name="keywords" content="AI agent memory, agent knowledge base, incident tracker, hybrid search, BM25, vector search, git-backed, Rust, Claude Code, Codex, MCP alternative, infrastructure knowledge base">
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="KYB — Know Your Business">
+<meta property="og:title" content="KYB — the shared memory your AI agent fleet keeps forgetting it needs">
+<meta property="og:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.">
+<meta property="og:url" content="https://kybmemory.com/">
+<meta property="og:image" content="https://kybmemory.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="KYB — git-backed shared memory and incident tracker for AI agent fleets">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="KYB — shared memory for AI agent fleets">
+<meta name="twitter:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.">
+<meta name="twitter:image" content="https://kybmemory.com/og.png">
 
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: var(--font-sans);
-      line-height: 1.6;
-      overflow-x: hidden;
-      background-image: 
-        radial-gradient(circle at 15% 15%, rgba(0, 242, 254, 0.07) 0%, transparent 40%),
-        radial-gradient(circle at 85% 65%, rgba(127, 0, 255, 0.07) 0%, transparent 45%);
-    }
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
 
-    /* Grid overlay */
-    .grid-bg {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background-size: 50px 50px;
-      background-image: 
-        linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-      pointer-events: none;
-      z-index: 0;
-    }
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
 
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 2rem;
-      position: relative;
-      z-index: 1;
-    }
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"SoftwareApplication","name":"KYB — Know Your Business","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Docker","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.","url":"https://kybmemory.com/","softwareVersion":"0.1","license":"https://opensource.org/licenses/MIT","programmingLanguage":"Rust","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"codeRepository":"https://github.com/alex09x/kyb"},
+{"@type":"WebSite","name":"KYB","url":"https://kybmemory.com/","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT."},
+{"@type":"FAQPage","mainEntity":[
+{"@type":"Question","name":"What is KYB?","acceptedAnswer":{"@type":"Answer","text":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. It stores which servers exist, how services are wired, what broke and how it ended, and what work is still in flight — so the operational truth survives between agent sessions and across machines."}},
+{"@type":"Question","name":"Does KYB need a database?","acceptedAnswer":{"@type":"Answer","text":"No. Git is the canon: one markdown file per entry, one commit per change, and a commit sha is a version id. The Tantivy search index is a disposable cache rebuilt from git on every start."}},
+{"@type":"Question","name":"How does KYB search work?","acceptedAnswer":{"@type":"Answer","text":"Hybrid search: BM25 lexical scoring fused by reciprocal rank with vector search over every entry, using a multilingual e5-small int8 ONNX model on CPU. A query takes about 6 ms. Without the model on disk the service degrades to lexical-only."}},
+{"@type":"Question","name":"Which AI agents does KYB support?","acceptedAnswer":{"@type":"Answer","text":"The installer wires the KYB skill into every agent it finds on a machine: Claude Code, Codex and Antigravity. It writes a pointer into each agent's always-loaded global instructions, so the skill is discovered without being asked for."}},
+{"@type":"Question","name":"How do I install KYB?","acceptedAnswer":{"@type":"Answer","text":"On Apple Silicon macOS: brew install alex09x/apps/kyb, then brew services start kyb. With Docker: docker compose up -d, using the ghcr.io/alex09x/kyb image. From source: cargo run --release."}}]}]}
+</script>
 
-    /* Header */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 2rem 0;
-      border-bottom: 1px solid var(--border);
-    }
+<style>
 
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      font-family: var(--font-heading);
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: #fff;
-      text-decoration: none;
-    }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    --bg: oklch(0.148 0.012 260);
+    --bg2: oklch(0.185 0.014 260);
+    --panel: oklch(0.207 0.014 260);
+    --panel2: oklch(0.235 0.015 260);
+    --border: oklch(0.315 0.016 260);
+    --text: oklch(0.935 0.006 260);
+    --muted: oklch(0.685 0.013 260);
+    --faint: oklch(0.64 0.012 260);
+    --accent: oklch(0.76 0.132 196);
+    --accent-dim: oklch(0.40 0.07 196);
+    --incident: oklch(0.77 0.13 62);
+    --incident-dim: oklch(0.42 0.08 62);
+    --good: oklch(0.78 0.15 150);
+    --violet: oklch(0.70 0.14 300);
+    background: var(--bg);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: oklch(0.86 0.11 196); }
+  ::selection { background: oklch(0.76 0.132 196 / 0.30); }
+  @keyframes kybBlink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
 
-    .logo-badge {
-      background: linear-gradient(135deg, var(--primary), var(--accent-purple));
-      color: #090b10;
-      padding: 0.2rem 0.6rem;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 800;
-      letter-spacing: 1px;
-    }
-
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 2rem;
-      list-style: none;
-    }
-
-    .nav-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.95rem;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover {
-      color: var(--primary);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: linear-gradient(135deg, var(--primary), var(--secondary));
-      color: #090b10;
-      font-weight: 700;
-      font-size: 0.95rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      text-decoration: none;
-      transition: all 0.25s ease;
-      border: none;
-      cursor: pointer;
-      box-shadow: 0 4px 20px var(--primary-glow);
-    }
-
-    .btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 25px rgba(0, 242, 254, 0.3);
-    }
-
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text);
-      border: 1px solid var(--border);
-      box-shadow: none;
-    }
-
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(255, 255, 255, 0.2);
-    }
-
-    /* Hero Section */
-    .hero {
-      padding: 6rem 0 4rem;
-      text-align: center;
-    }
-
-    .hero-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: rgba(0, 242, 254, 0.08);
-      border: 1px solid rgba(0, 242, 254, 0.2);
-      padding: 0.4rem 1rem;
-      border-radius: 50px;
-      font-size: 0.85rem;
-      color: var(--primary);
-      margin-bottom: 2rem;
-      font-weight: 600;
-    }
-
-    .hero-title {
-      font-family: var(--font-heading);
-      font-size: 3.8rem;
-      font-weight: 800;
-      line-height: 1.15;
-      margin-bottom: 1.5rem;
-      letter-spacing: -1px;
-    }
-
-    .hero-title span {
-      background: linear-gradient(135deg, var(--primary) 0%, var(--accent-pink) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .hero-subtitle {
-      font-size: 1.25rem;
-      color: var(--text-muted);
-      max-width: 760px;
-      margin: 0 auto 2.5rem;
-      font-weight: 400;
-    }
-
-    .hero-cta {
-      display: flex;
-      justify-content: center;
-      gap: 1rem;
-      margin-bottom: 4rem;
-    }
-
-    /* Interactive Terminal Demo */
-    .terminal-container {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
-      max-width: 900px;
-      margin: 0 auto 6rem;
-      text-align: left;
-    }
-
-    .terminal-header {
-      background: #161b22;
-      padding: 0.8rem 1.2rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .terminal-dots {
-      display: flex;
-      gap: 8px;
-    }
-
-    .dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-    }
-
-    .dot-red { background: #ff5f56; }
-    .dot-yellow { background: #ffbd2e; }
-    .dot-green { background: #27c93f; }
-
-    .terminal-title {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      color: var(--text-muted);
-    }
-
-    .terminal-body {
-      padding: 1.5rem;
-      font-family: var(--font-mono);
-      font-size: 0.9rem;
-      color: #c9d1d9;
-      min-height: 280px;
-    }
-
-    .term-line {
-      margin-bottom: 0.75rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.5rem;
-    }
-
-    .term-prompt {
-      color: var(--primary);
-      user-select: none;
-    }
-
-    .term-cmd {
-      color: #fff;
-      font-weight: 600;
-    }
-
-    .term-out {
-      color: var(--text-muted);
-      margin-left: 1.2rem;
-      white-space: pre-wrap;
-    }
-
-    .term-out-highlight {
-      color: var(--green);
-    }
-
-    .term-out-key {
-      color: var(--secondary);
-    }
-
-    /* Features Grid */
-    .features {
-      padding: 4rem 0 6rem;
-    }
-
-    .section-header {
-      text-align: center;
-      margin-bottom: 4rem;
-    }
-
-    .section-title {
-      font-family: var(--font-heading);
-      font-size: 2.5rem;
-      font-weight: 800;
-      margin-bottom: 1rem;
-    }
-
-    .section-subtitle {
-      color: var(--text-muted);
-      font-size: 1.1rem;
-      max-width: 600px;
-      margin: 0 auto;
-    }
-
-    .grid-3 {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 2rem;
-    }
-
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 2.5rem 2rem;
-      transition: all 0.3s ease;
-      backdrop-filter: blur(10px);
-    }
-
-    .card:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--border-accent);
-      transform: translateY(-4px);
-    }
-
-    .card-icon {
-      width: 52px;
-      height: 52px;
-      background: rgba(0, 242, 254, 0.1);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--primary);
-      font-size: 1.6rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .card-title {
-      font-family: var(--font-heading);
-      font-size: 1.35rem;
-      font-weight: 700;
-      margin-bottom: 0.75rem;
-    }
-
-    .card-desc {
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      line-height: 1.6;
-    }
-
-    /* Quickstart / Code Section */
-    .quickstart {
-      padding: 4rem 0 6rem;
-    }
-
-    .code-box {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-family: var(--font-mono);
-      font-size: 0.95rem;
-    }
-
-    .code-text {
-      color: #e6edf3;
-    }
-
-    .code-text span {
-      color: var(--primary);
-    }
-
-    .copy-btn {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      padding: 0.4rem 0.8rem;
-      border-radius: 6px;
-      font-size: 0.8rem;
-      font-family: var(--font-sans);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .copy-btn:hover {
-      background: rgba(255, 255, 255, 0.15);
-      color: #fff;
-    }
-
-    /* Footer */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 3rem 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: var(--text-dim);
-      font-size: 0.9rem;
-    }
-
-    .made-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border);
-      padding: 0.3rem 0.7rem;
-      border-radius: 6px;
-      color: var(--text-muted);
-      font-weight: 500;
-      font-size: 0.85rem;
-    }
-
-    .made-badge strong {
-      color: var(--primary);
-    }
-
-    @media (max-width: 768px) {
-      .hero-title { font-size: 2.5rem; }
-      .hero-subtitle { font-size: 1rem; }
-      .hero-cta { flex-direction: column; }
-    }
-  </style>
+  img { max-width: 100%; height: auto; }
+  [data-hover] { transition: filter .18s ease, border-color .18s ease, color .18s ease, transform .18s ease; }
+  [data-hover="0"]:hover, [data-hover="2"]:hover, [data-hover="5"]:hover { border-color: var(--accent) !important; }
+  [data-hover="1"]:hover, [data-hover="4"]:hover { filter: brightness(1.08); }
+  [data-hover="3"]:hover, [data-hover="6"]:hover { color: var(--text) !important; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+  @media (max-width: 900px) {
+    nav div div:nth-child(3) { display: none !important; }
+    section > div[style*="grid-template-columns: 1.1fr"],
+    section > div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
 </head>
 <body>
-  <div class="grid-bg"></div>
+<div style="background: var(--bg); color: var(--text); font-family: 'Hanken Grotesk', system-ui, sans-serif; -webkit-font-smoothing: antialiased; line-height: 1.5; min-height: 100vh; overflow-x: hidden;">
 
-  <div class="container">
-    <header>
-      <a href="#" class="logo">
-        <span class="logo-badge">KYB</span>
-        kyb-memory.com
-      </a>
-      <ul class="nav-links">
-        <li><a href="#features">Features</a></li>
-        <li><a href="#quickstart">Quickstart</a></li>
-        <li><a href="#api">HTTP API</a></li>
-        <li><a href="https://github.com/alex09x/kyb" target="_blank">GitHub</a></li>
-      </ul>
-      <a href="https://github.com/alex09x/kyb" target="_blank" class="btn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        Star on GitHub
-      </a>
-    </header>
-
-    <section class="hero">
-      <div class="hero-pill">⚡ Git-Backed Shared Memory for AI Agent Fleets</div>
-      <h1 class="hero-title">The shared memory your AI agent fleet <span>keeps forgetting</span> it needs.</h1>
-      <p class="hero-subtitle">
-        KYB is a high-speed BM25 hybrid search engine and incident tracker written in Rust. It preserves operational truth, host maps, topology, and post-mortems across AI agent sessions.
-      </p>
-      <div class="hero-cta">
-        <a href="#quickstart" class="btn">Deploy in 60 Seconds</a>
-        <a href="https://github.com/alex09x/kyb" target="_blank" class="btn btn-secondary">Explore GitHub Repo</a>
-      </div>
-
-      <!-- Interactive Terminal Simulator -->
-      <div class="terminal-container">
-        <div class="terminal-header">
-          <div class="terminal-dots">
-            <div class="dot dot-red"></div>
-            <div class="dot dot-yellow"></div>
-            <div class="dot dot-green"></div>
-          </div>
-          <div class="terminal-title">bash — kyb query, incidents & tasks</div>
-        </div>
-        <div class="terminal-body" id="term-body">
-          <div class="term-line">
-            <span class="term-prompt">agent@fleet:~$</span>
-            <span class="term-cmd">kyb query "which servers run clickhouse?"</span>
-          </div>
-          <div class="term-out">
-<span class="term-out-highlight">✓ Match 1 (score 0.867)</span>: <span class="term-out-key">orders-api-architecture</span>
-  "orders_api on host-a is the single write path into ClickHouse (gRPC :9000)"
-
-<span class="term-out-highlight">✓ Match 2 (score 0.836)</span>: <span class="term-out-key">host-a-services</span>
-  "host-a runs orders_api and web_app next to the local ClickHouse container"
-          </div>
-          <br>
-          <div class="term-line">
-            <span class="term-prompt">agent@fleet:~$</span>
-            <span class="term-cmd">kyb incident --key inc-2026-08-06-orders-api-oom --severity critical</span>
-          </div>
-          <div class="term-out">
-<span class="term-out-highlight">✓ Incident Recorded</span>: key=<span class="term-out-key">inc-2026-08-06-orders-api-oom</span> (severity=critical)
-  "orders_api OOM loop: the write buffer grows until the container restarts"
-          </div>
-          <br>
-          <div class="term-line">
-            <span class="term-prompt">agent@fleet:~$</span>
-            <span class="term-cmd">kyb tasks --priority critical</span>
-          </div>
-          <div class="term-out">
-<span class="term-out-highlight">✓ 2 live tasks</span> (open · in_progress · blocked)
-  <span class="term-out-key">task-swap-failing-disk</span>   status=blocked      assignee=agent-b  "waiting on the replacement disk"
-  <span class="term-out-key">task-raise-log-retention</span> status=in_progress  assignee=agent-a  "72h retention, 2G disk budget"
-          </div>
-          <br>
-          <div class="term-line">
-            <span class="term-prompt">agent@fleet:~$</span>
-            <span class="term-cmd">kyb task-status task-raise-log-retention --status blocked --blocked-reason "waiting on the disk budget"</span>
-          </div>
-          <div class="term-out">
-<span class="term-out-highlight">✓ Task moved</span>: <span class="term-out-key">task-raise-log-retention</span> status=blocked assignee=agent-a (changed=true)
-  title, body, tags and priority untouched — a transition resends nothing
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="features" id="features">
-      <div class="section-header">
-        <h2 class="section-title">Built for Autonomous Agent Operations</h2>
-        <p class="section-subtitle">Prevent hallucinated infrastructure topologies and lost incident history.</p>
-      </div>
-
-      <div class="grid-3">
-        <div class="card">
-          <div class="card-icon">⚡</div>
-          <h3 class="card-title">Hybrid BM25 Search (~6ms)</h3>
-          <p class="card-desc">Sub-10ms lexical and semantic search over inverted indices. Agents get exact hostnames, ports, and configuration anchors instantly.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">📜</div>
-          <h3 class="card-title">Git-Backed Version History</h3>
-          <p class="card-desc">Every knowledge addition, incident, and resolution is backed by Git commits. Complete audit trail of system decisions across sessions.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🛡️</div>
-          <h3 class="card-title">Zero Secret Leak Guard</h3>
-          <p class="card-desc">Automatic regex credential scanner blocks passwords, API tokens, and SSH keys from entering the knowledge base. Only safe pointers allowed.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🤖</div>
-          <h3 class="card-title">Multi-Agent Skill Injector</h3>
-          <p class="card-desc">One-line installer configures skills and system prompt rules across Claude Code, Codex CLI, and Antigravity (AGY) automatically.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🚨</div>
-          <h3 class="card-title">Structured Incident Tracking</h3>
-          <p class="card-desc">Mandatory resolution workflows. Require agents to record symptoms, root causes, workarounds, and resolution proofs before closing incidents.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">✅</div>
-          <h3 class="card-title">Task Board for Agents</h3>
-          <p class="card-desc">Short actionable notes with an optional priority (low → critical) and a real lifecycle: open, in_progress, blocked (with the reason it waits on), done, dropped. Only done and dropped close and archive — everything still in flight stays listed and counted.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🪪</div>
-          <h3 class="card-title">Claimable, Relatable Tasks</h3>
-          <p class="card-desc">An optional assignee label says who holds a task right now, and parent_task hangs child work under the task it belongs to. One partial transition claims, blocks or hands back a task without resending its title, body, tags or priority — and every change is a git commit, so history replays who held what, in which status, at any point.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-icon">🐳</div>
-          <h3 class="card-title">Zero-Dependency Docker Deploy</h3>
-          <p class="card-desc">Packaged into a lightweight Docker image ready to deploy on any server in seconds with persistent JSON/Markdown storage.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="quickstart" id="quickstart">
-      <div class="section-header">
-        <h2 class="section-title">Quickstart in 60 Seconds</h2>
-        <p class="section-subtitle">Run the server and equip your agent fleet.</p>
-      </div>
-
-      <div style="max-width: 800px; margin: 0 auto;">
-        <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 600;">1. Start the KYB Docker Server:</p>
-        <div class="code-box">
-          <div class="code-text"><span>docker</span> run -d --name kyb -p 9310:9310 -v "$PWD/data:/data" --restart always ghcr.io/alex09x/kyb:latest</div>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('docker run -d --name kyb -p 9310:9310 -v &quot;$PWD/data:/data&quot; --restart always ghcr.io/alex09x/kyb:latest')">Copy</button>
-        </div>
-
-        <p style="color: var(--text-muted); margin-bottom: 0.75rem; font-weight: 600; margin-top: 2rem;">2. Inject KYB Skill into Agent Fleet (Claude Code, Codex, Antigravity):</p>
-        <div class="code-box">
-          <div class="code-text"><span>KYB_SERVER</span>=your-server-ip ./skills/install.sh</div>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('KYB_SERVER=your-server-ip ./skills/install.sh')">Copy</button>
-        </div>
-      </div>
-    </section>
-
-    <footer>
-      <div>© 2026 KYB Project. Released under MIT License.</div>
-      <div class="made-badge">
-        <span style="color: var(--text-dim);">made by</span> <strong>big</strong>
-      </div>
-    </footer>
+  <div style="position: absolute; inset: 0; overflow: hidden; pointer-events: none;">
+    <div style="position: absolute; top: -240px; left: 50%; transform: translateX(-50%); width: 900px; height: 620px; background: radial-gradient(ellipse at center, oklch(0.76 0.132 196 / 0.14), transparent 68%); filter: blur(20px);"></div>
+    <div style="position: absolute; top: 380px; right: -180px; width: 560px; height: 520px; background: radial-gradient(ellipse at center, oklch(0.77 0.13 62 / 0.09), transparent 66%); filter: blur(24px);"></div>
   </div>
+
+  <!-- ===================== NAV ===================== -->
+  <nav aria-label="Primary" style="position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: oklch(0.148 0.012 260 / 0.72); border-bottom: 1px solid var(--border);">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 14px 28px; display: flex; align-items: center; gap: 20px;">
+      <a href="#top" style="display: flex; align-items: center; gap: 11px; color: var(--text);">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 15px; color: oklch(0.15 0.01 260); box-shadow: 0 0 0 1px oklch(0.76 0.132 196 / 0.4);">K</span>
+        <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 17px; letter-spacing: -0.01em;">KYB</span>
+      </a>
+      <div style="flex: 1;"></div>
+      <div style="display: flex; align-items: center; gap: 24px; font-size: 14px; font-weight: 500;">
+        <a href="#how" style="color: var(--muted);">How it works</a>
+        <a href="#incidents" style="color: var(--muted);">Incidents</a>
+        <a href="#tasks" style="color: var(--muted);">Tasks</a>
+        <a href="#skill" style="color: var(--muted);">Agent skill</a>
+        <a href="#api" style="color: var(--muted);">API</a>
+        <a href="#install" style="color: var(--muted);">Install</a>
+      </div>
+      <a href="https://github.com/alex09x/kyb" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 15px; border-radius: 9px; background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 13.5px; font-weight: 600;" data-hover="0">
+        <span style="color: var(--incident);">★</span> Star on GitHub
+      </a>
+    </div>
+  </nav>
+
+  <main>
+  <div id="top"></div>
+
+  <!-- ===================== HERO ===================== -->
+  <header style="position: relative; max-width: 1120px; margin: 0 auto; padding: 90px 28px 40px;">
+    <div style="display: inline-flex; align-items: center; gap: 9px; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--border); background: oklch(0.207 0.014 260 / 0.6); font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted); letter-spacing: 0.02em; margin-bottom: 26px;">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good);"></span>
+      Open source · Rust · MIT · kybmemory.com
+    </div>
+
+    <h1 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(38px, 6vw, 68px); line-height: 1.03; letter-spacing: -0.025em; margin: 0 0 24px; max-width: 16ch; text-wrap: balance;">
+      The shared memory your <span style="color: var(--accent);">AI agent fleet</span> keeps forgetting it needs.
+    </h1>
+
+    <p style="font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 62ch; margin: 0 0 20px; text-wrap: pretty;">
+      <strong style="color: var(--text); font-weight: 600;">KYB — Know Your Business</strong> is a git-backed, searchable knowledge base for fleets of AI agents. Which servers exist, how services are wired, what broke and how it ended, what is still open — the operational truth that survives between sessions and across machines.
+    </p>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 9px; margin: 26px 0 32px;">
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">license</span><span style="padding: 4px 9px; background: var(--accent-dim); color: var(--text);">MIT</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">tests</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 150); color: var(--text);">321 test cases</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">search</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">hybrid · ~6ms</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">rust</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">edition 2021</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">release</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 300); color: var(--text);">brew · docker</span></span>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+      <a href="https://github.com/alex09x/kyb" style="display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px; border-radius: 11px; background: var(--accent); color: oklch(0.15 0.01 260); font-weight: 700; font-size: 15px;" data-hover="1">
+        <span style="color: oklch(0.15 0.01 260);">★</span> Star on GitHub
+      </a>
+      <a href="#install" style="display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px; border-radius: 11px; background: var(--panel); border: 1px solid var(--border); color: var(--text); font-weight: 600; font-size: 15px;" data-hover="2">
+        Install →
+      </a>
+      <a href="#api" style="display: inline-flex; align-items: center; gap: 9px; padding: 13px 20px; border-radius: 11px; color: var(--muted); font-weight: 600; font-size: 15px;" data-hover="3">
+        Read the docs
+      </a>
+    </div>
+  </header>
+
+  <!-- ===================== TERMINAL ===================== -->
+  <section style="max-width: 1120px; margin: 0 auto; padding: 34px 28px 20px;">
+    <div style="border-radius: 16px; border: 1px solid var(--border); background: linear-gradient(180deg, var(--bg2), var(--bg)); box-shadow: 0 40px 80px -40px oklch(0 0 0 / 0.7); overflow: hidden;">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.7);">
+        <span style="width: 12px; height: 12px; border-radius: 50%; background: oklch(0.68 0.16 25);"></span>
+        <span style="width: 12px; height: 12px; border-radius: 50%; background: oklch(0.82 0.14 85);"></span>
+        <span style="width: 12px; height: 12px; border-radius: 50%; background: oklch(0.78 0.15 150);"></span>
+        <span style="flex: 1; text-align: center; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">agent@fleet — kyb — 96×26</span>
+      </div>
+      <pre role="region" tabindex="0" aria-label="KYB terminal example" style="margin: 0; padding: 24px 26px; font-family: 'IBM Plex Mono'; font-size: 14px; line-height: 1.85; color: var(--text); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> kyb query <span style="color: var(--incident);">"which servers run clickhouse?"</span></span><span style="display:block;"><span style="color: var(--accent);">orders-api-architecture</span><span style="color: var(--muted);">  ·  score 0.867  ·  #infra #clickhouse</span></span><span style="display:block;"><span style="color: var(--muted);">  "orders_api on host-a is the single write path into ClickHouse (gRPC :9000)"</span></span><span style="display:block;">&nbsp;</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb incident --key inc-2026-08-06-orders-api-oom --severity <span style="color: var(--incident);">critical</span></span><span style="display:block;"><span style="color: var(--muted);">created · status </span><span style="color: var(--incident);">open</span><span style="color: var(--muted);"> · hints: add a `detection` check, link `knowledge`</span></span><span style="display:block;">&nbsp;</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb task-status task-raise-log-retention --status <span style="color: var(--violet);">in_progress</span> --assignee agent-a</span><span style="display:block;"><span style="color: var(--muted);">moved · assignee=agent-a · title, body, tags and priority untouched</span></span><span style="display:block;">&nbsp;</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb query <span style="color: var(--incident);">"why did the order service keep restarting"</span>   <span style="color: var(--faint);"># no keyword overlap</span></span><span style="display:block;"><span style="color: var(--accent);">inc-2026-08-06-orders-api-oom</span><span style="color: var(--muted);">  ·  resolved  ·  semantic hit ✓</span></span><span style="display:block;"><span style="color: var(--good);">$</span> <span style="display: inline-block; width: 9px; height: 17px; background: var(--accent); vertical-align: -3px; animation: kybBlink 1.1s steps(1) infinite;"></span></span></pre>
+    </div>
+  </section>
+
+  <!-- ===================== PROBLEM ===================== -->
+  <section style="max-width: 1120px; margin: 44px auto 0; padding: 0 28px;">
+    <div style="border-radius: 14px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 26px 30px; display: flex; flex-wrap: wrap; gap: 22px; align-items: center;">
+      <span style="font-family: 'Space Grotesk'; font-size: 15px; font-weight: 600; color: var(--incident);">The problem</span>
+      <p style="margin: 0; font-size: 17px; color: var(--text); flex: 1; min-width: 300px; text-wrap: pretty;">
+        Agents forget everything between sessions. Multiple agents — Claude Code, Codex, Antigravity — on multiple machines rediscover the same infrastructure over and over, and every hard-won incident lesson evaporates the moment the context window closes.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== FEATURES ===================== -->
+  <section id="how" style="max-width: 1120px; margin: 88px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// How it works</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">Six ideas, one operational truth.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 60ch; margin: 0 0 38px;">No database, no namespaces, no ceremony. Just git, a disposable index, and a search that actually finds things.</p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 18px; margin-bottom: 16px;">⎇</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Git is the canon</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">One markdown file per entry, one commit per change. <strong style="color: var(--text); font-weight: 600;">A commit sha is a version id.</strong> There is no database — history, diff and rollback come for free, and any text editor can read the canon.</p>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 18px; margin-bottom: 16px;">⌕</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Hybrid search</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">BM25 fused (reciprocal rank) with vector search over every entry — e5-small, int8 ONNX, ~5&nbsp;ms on CPU. Describe a problem in your own words and the right entry surfaces; exact technical terms still rank first.</p>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--incident); font-size: 18px; margin-bottom: 16px;">⚠</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Incidents &amp; tasks built in</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Not just facts: operational events and work in flight are first-class entries with real lifecycles — and <strong style="color: var(--text); font-weight: 600;">every closing demands an outcome in writing</strong>.</p>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 18px; margin-bottom: 16px;">↺</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Upserts by key</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Writes are keyed and deterministic — a no-op when content did not change, so no empty commits. Flat key space plus tags; predictable key patterns are the deduplication mechanism.</p>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--good); font-size: 18px; margin-bottom: 16px;">⌂</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Local, private, no secrets</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Binds to <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">127.0.0.1</span> by default. To serve a trusted LAN, opt into one exact private interface; there is <strong style="color: var(--text); font-weight: 600;">no auth</strong>, so never publish port 9310 to the internet. Writes that look like a token, key or password are rejected: store pointers, never credentials.</p>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--incident); font-size: 18px; margin-bottom: 16px;">🦀</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Rust, all the way down</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">axum + tantivy 0.22 + git2 + ort (ONNX Runtime). One write mutex, lock-free reads. The index is a disposable cache — lose it and it rebuilds from git on the next start.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ARCHITECTURE ===================== -->
+  <section style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Architecture</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 34px;">Git in, ranked answers out.</h2>
+
+    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 38px 30px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 8px;">
+        <div style="flex: 1; min-width: 220px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel); padding: 22px;">
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 8px;">01 · SOURCE OF TRUTH</div>
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 20px; margin: 0 0 8px;">Git canon</h3>
+          <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;">Markdown + YAML frontmatter, one commit per change.</p>
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">nats-streams.md → sha 1163de8f</div>
+        </div>
+        <div style="display: grid; place-items: center; padding: 0 4px; min-width: 46px;"><span style="font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 26px;">→</span></div>
+        <div style="flex: 1; min-width: 220px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel); padding: 22px;">
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 8px;">02 · DISPOSABLE CACHE</div>
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 20px; margin: 0 0 8px;">Tantivy index</h3>
+          <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;">Rebuilt from git on every start — covers head <em>and</em> all history.</p>
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">BM25 terms + e5 int8 vectors</div>
+        </div>
+        <div style="display: grid; place-items: center; padding: 0 4px; min-width: 46px;"><span style="font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 26px;">→</span></div>
+        <div style="flex: 1; min-width: 220px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel); padding: 22px;">
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 8px;">03 · QUERY TIME</div>
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 20px; margin: 0 0 8px;">Hybrid search</h3>
+          <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;">Reciprocal-rank fusion of lexical + vector, filtered by tag / kind / status.</p>
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">ranked hits · ~6 ms</div>
+        </div>
+      </div>
+      <div style="margin-top: 20px; text-align: center; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">↺  no model on disk → the service degrades gracefully to lexical-only</div>
+    </div>
+  </section>
+
+  <!-- ===================== THREE KINDS ===================== -->
+  <section style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Entry kinds</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">Three kinds, one flat key space.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Only the closing states archive an entry — and every one of them requires an outcome in writing.</p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+      <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
+        <div style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--accent); margin-bottom: 12px;">knowledge</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 18px; margin: 0 0 8px;">What is true now</h3>
+        <p style="margin: 0 0 14px; color: var(--muted); font-size: 15px;">A fact under a stable key: architecture, topology, deploys, decisions, gotchas.</p>
+        <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">live → retracted</div>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid var(--incident-dim); background: linear-gradient(180deg, oklch(0.77 0.13 62 / 0.06), var(--panel)); padding: 24px;">
+        <div style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--incident); margin-bottom: 12px;">incident &nbsp;· &nbsp;inc-…</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 18px; margin: 0 0 8px;">What happened</h3>
+        <p style="margin: 0 0 14px; color: var(--muted); font-size: 15px;">An operational event: what broke, the impact, the runbook, the resolution.</p>
+        <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">open → mitigated → <span style="color: var(--good);">resolved</span></div>
+      </div>
+      <div style="border-radius: 14px; border: 1px solid oklch(0.70 0.14 300 / 0.45); background: linear-gradient(180deg, oklch(0.70 0.14 300 / 0.06), var(--panel)); padding: 24px;">
+        <div style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--violet); margin-bottom: 12px;">task &nbsp;· &nbsp;task-…</div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 18px; margin: 0 0 8px;">What is in flight</h3>
+        <p style="margin: 0 0 14px; color: var(--muted); font-size: 15px;">Work and ideas: who holds it right now, what it waits on, what came of it.</p>
+        <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">open → in_progress → blocked → <span style="color: var(--good);">done</span> | dropped</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== INCIDENTS ===================== -->
+  <section id="incidents" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Incidents</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">A report is a control panel, not a story.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 34px;">The server teaches structure instead of gating on it — a bare report is accepted, but the reply names every missing actionable part. Two hard rules: keys start with <span style="font-family: 'IBM Plex Mono'; font-size: 14px; color: var(--incident);">inc-</span>, and closing requires a resolution.</p>
+
+    <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 16px; align-items: start;">
+      <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 130px 1fr; font-size: 14.5px;">
+          <div style="padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident);">detection</div>
+          <div style="padding: 14px 16px; background: var(--bg2); border-bottom: 1px solid var(--border); color: var(--muted);">An executable "is it still happening?" check, with the expected healthy result.</div>
+          <div style="padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident);">affected</div>
+          <div style="padding: 14px 16px; background: var(--bg2); border-bottom: 1px solid var(--border); color: var(--muted);">Machine-readable poisoned windows — a backtest excludes them programmatically.</div>
+
+<div style="padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident);">knowledge</div>
+          <div style="padding: 14px 16px; background: var(--bg2); border-bottom: 1px solid var(--border); color: var(--muted);">Links to the knowledge entries the incident concerns.</div>
+          <div style="padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident);">resolution</div>
+          <div style="padding: 14px 16px; background: var(--bg2); border-bottom: 1px solid var(--border); color: var(--muted);">How it ended — searchable, so "how did we fix this last time" has an answer.</div>
+          <div style="padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident);">runbook</div>
+          <div style="padding: 14px 16px; background: var(--bg2); border-bottom: 1px solid var(--border); color: var(--muted);">Each step marked <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">SAFE</span> (an agent may act alone) or <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--incident);">APPROVAL</span> (human required).</div>
+          <div style="padding: 14px 16px; background: var(--panel); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--incident);">follow-ups</div>
+          <div style="padding: 14px 16px; background: var(--bg2); color: var(--muted);">Checkbox loose ends in the body — the server counts them and warns when you close over them.</div>
+        </div>
+      </div>
+
+      <div style="border-radius: 14px; border: 1px solid var(--incident-dim); background: linear-gradient(180deg, oklch(0.77 0.13 62 / 0.06), transparent); padding: 22px;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+          <span style="font-family: 'IBM Plex Mono'; font-size: 12px; padding: 3px 9px; border-radius: 6px; background: var(--incident); color: oklch(0.16 0.01 60); font-weight: 600;">RESOLVED</span>
+          <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">severity: critical</span>
+        </div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 17px; margin: 0 0 4px;">inc-2026-08-06-orders-api-oom</h3>
+        <p style="margin: 0 0 18px; color: var(--muted); font-size: 14px;">orders_api OOM loop: the write buffer grows until the container restarts.</p>
+        <div style="display: flex; flex-direction: column;">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--border);"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--incident);"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted);">started</span><span style="flex:1;"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">14:02</span></div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--border);"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--incident);"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted);">detected</span><span style="flex:1;"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">14:09</span></div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--border);"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--accent);"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted);">mitigated</span><span style="flex:1;"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">14:31</span></div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--good);"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted);">resolved</span><span style="flex:1;"></span><span style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">16:48</span></div>
+        </div>
+        <div style="margin-top: 16px; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;">✓ resolution recorded · 0 open follow-ups</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TASKS ===================== -->
+  <section id="tasks" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--violet); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Tasks</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">A board your agents can actually share.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 64ch; margin: 0 0 34px;">A task is a short actionable note with a real lifecycle. Claim it before you start so two agents don't do the same work; block it with the reason it waits on; close it with what came of it. Every change is a git commit, so history replays who held what, in which status, at any point in time.</p>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;">
+      <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
+        <div style="padding: 13px 18px; background: var(--panel); border-bottom: 1px solid var(--border); font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">kyb tasks <span style="color: var(--faint); font-family: 'IBM Plex Mono'; font-size: 12.5px; font-weight: 400;">— live only, freshest on top</span></div>
+        <div style="padding: 16px 18px; border-bottom: 1px solid var(--border); background: var(--bg2);">
+          <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 7px; flex-wrap: wrap;">
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; background: oklch(0.70 0.14 300 / 0.18); color: var(--violet); border: 1px solid oklch(0.70 0.14 300 / 0.35);">in_progress</span>
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; background: oklch(0.77 0.13 62 / 0.15); color: var(--incident); border: 1px solid var(--incident-dim);">high</span>
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; color: var(--faint);">assignee=agent-a</span>
+          </div>
+          <div style="font-family: 'IBM Plex Mono'; font-size: 13.5px; color: var(--accent);">task-raise-log-retention</div>
+          <div style="font-size: 14px; color: var(--muted); margin-top: 3px;">72h retention, 2G disk budget</div>
+        </div>
+        <div style="padding: 16px 18px; border-bottom: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 7px; flex-wrap: wrap;">
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; background: oklch(0.77 0.13 62 / 0.15); color: var(--incident); border: 1px solid var(--incident-dim);">blocked</span>
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; background: oklch(0.68 0.16 25 / 0.15); color: oklch(0.75 0.16 25); border: 1px solid oklch(0.45 0.10 25);">critical</span>
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; color: var(--faint);">assignee=agent-b</span>
+          </div>
+          <div style="font-family: 'IBM Plex Mono'; font-size: 13.5px; color: var(--accent);">task-swap-failing-disk</div>
+          <div style="font-size: 14px; color: var(--muted); margin-top: 3px;">waits on: the replacement disk</div>
+        </div>
+        <div style="padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 7px; flex-wrap: wrap;">
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; padding: 2px 8px; border-radius: 5px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border);">open</span>
+            <span style="font-family: 'IBM Plex Mono'; font-size: 11.5px; color: var(--faint);">unclaimed</span>
+          </div>
+          <div style="font-family: 'IBM Plex Mono'; font-size: 13.5px; color: var(--accent);">task-audit-log-rotation</div>
+          <div style="font-size: 14px; color: var(--muted); margin-top: 3px;">audit.jsonl grows unbounded</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 22px 24px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 14px;">Partial transitions</h3>
+          <p style="margin: 0 0 14px; color: var(--muted); font-size: 15px; text-wrap: pretty;"><span style="font-family: 'IBM Plex Mono'; font-size: 13.5px; color: var(--violet);">kyb task-status</span> sends the status and nothing else — title, body, tags, priority and links stay exactly as stored. A transition never has to fetch and resend the task.</p>
+          <div style="display: grid; gap: 8px; font-family: 'IBM Plex Mono'; font-size: 12.5px;">
+            <div style="display: flex; gap: 10px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;"><span style="color: var(--faint); min-width: 88px;">pick up</span><span style="color: var(--text);">--status in_progress --assignee agent-a</span></div>
+            <div style="display: flex; gap: 10px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;"><span style="color: var(--faint); min-width: 88px;">get stuck</span><span style="color: var(--text);">--status blocked --blocked-reason "…"</span></div>
+            <div style="display: flex; gap: 10px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;"><span style="color: var(--faint); min-width: 88px;">hand back</span><span style="color: var(--text);">--status open --assignee ""</span></div>
+            <div style="display: flex; gap: 10px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;"><span style="color: var(--faint); min-width: 88px;">finish</span><span style="color: var(--good);">kyb done &lt;key&gt; &lt;&lt;&lt; "what came of it"</span></div>
+          </div>
+        </div>
+        <div style="border-radius: 14px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 22px 24px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 10px;">Nothing is inferred</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Unranked stays unranked, unclaimed stays unclaimed. A <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">blocked_reason</span> is only valid while blocked — moving off <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">blocked</span> clears it, so a task never advertises a block it is out of. <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">parent_task</span> hangs child work under the task it belongs to.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== AGENT SKILL ===================== -->
+  <section id="skill" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 40px 34px;">
+      <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// The agent skill</div>
+      <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; margin: 0 0 12px;">One command wires it into every agent on the machine.</h2>
+      <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 28px; text-wrap: pretty;">A skill an agent never opens is a skill it never uses — so the installer drops a pointer into each agent's <strong style="color: var(--text); font-weight: 600;">always-loaded global instructions</strong>. Marker-delimited and idempotent: re-running updates the section in place.</p>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 26px;">
+        <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Claude Code</h3>
+          <p style="margin: 0; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted); line-height: 1.7;">~/.claude/skills/kyb<br>+ CLAUDE.md</p>
+        </div>
+        <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Codex</h3>
+          <p style="margin: 0; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted); line-height: 1.7;">~/.codex/skills/kyb<br>+ AGENTS.md</p>
+        </div>
+        <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Antigravity</h3>
+          <p style="margin: 0; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--muted); line-height: 1.7;">~/.gemini/…/skills/kyb<br>+ GEMINI.md</p>
+        </div>
+      </div>
+
+      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 14px; overflow-x: auto; margin-bottom: 26px;"><span style="color: var(--good);">$</span> KYB_SERVER=your-server:9310 bash skills/install.sh</div>
+
+      <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 17px; margin: 0 0 14px;">What no database can enforce — governance</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
+        <div style="border-radius: 11px; border: 1px solid var(--border); background: var(--bg); padding: 16px 18px;"><span style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">01</span><p style="margin: 6px 0 0; color: var(--muted); font-size: 14.5px;">The loop is <strong style="color: var(--text); font-weight: 600;">ask → assess → enrich</strong>: query before reasoning, write back what you learned before finishing.</p></div>
+        <div style="border-radius: 11px; border: 1px solid var(--border); background: var(--bg); padding: 16px 18px;"><span style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">02</span><p style="margin: 6px 0 0; color: var(--muted); font-size: 14.5px;">Always query before adding. Found something close? Overwrite the <strong style="color: var(--text); font-weight: 600;">same key</strong> — duplicates kill a shared base.</p></div>
+        <div style="border-radius: 11px; border: 1px solid var(--border); background: var(--bg); padding: 16px 18px;"><span style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">03</span><p style="margin: 6px 0 0; color: var(--muted); font-size: 14.5px;">Entries are self-contained and hold verified facts only — never a guess dressed as knowledge.</p></div>
+        <div style="border-radius: 11px; border: 1px solid var(--border); background: var(--bg); padding: 16px 18px;"><span style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">04</span><p style="margin: 6px 0 0; color: var(--muted); font-size: 14.5px;">Working a task means <strong style="color: var(--text); font-weight: 600;">claiming it first</strong>, blocking it with a reason, closing it with an outcome.</p></div>
+        <div style="border-radius: 11px; border: 1px solid var(--border); background: var(--bg); padding: 16px 18px;"><span style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">05</span><p style="margin: 6px 0 0; color: var(--muted); font-size: 14.5px;">Broke something? File an incident, close it with a real resolution, then <strong style="color: var(--text); font-weight: 600;">fold the lesson back into knowledge</strong>.</p></div>
+        <div style="border-radius: 11px; border: 1px solid var(--border); background: var(--bg); padding: 16px 18px;"><span style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">06</span><p style="margin: 6px 0 0; color: var(--muted); font-size: 14.5px;">Secrets never in bodies — pointers in <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">refs</span>, and the server rejects the rest.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== BENCHMARK ===================== -->
+  <section style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Search quality</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">Vectors earn their keep.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">14 real questions against a real base, phrased the way an agent would ask rather than the way the entry was written. Top-1 / top-3 hit rate — lexical alone barely finds anything.</p>
+
+    <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden; background: var(--panel);">
+      <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint); background: var(--bg2);">
+        <div style="padding: 13px 20px;">SETUP</div>
+        <div style="padding: 13px 20px; text-align: center;">TOP-1</div>
+        <div style="padding: 13px 20px; text-align: center;">TOP-3</div>
+        <div style="padding: 13px 20px; text-align: center;">LATENCY</div>
+      </div>
+      <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px;">
+        <div style="padding: 16px 20px; color: var(--muted);">lexical only</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">2 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">3 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~2 ms</div>
+      </div>
+      <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px; background: oklch(0.76 0.132 196 / 0.06);">
+        <div style="padding: 16px 20px; color: var(--text); font-weight: 600;">+ e5-small int8 <span style="color: var(--faint); font-weight: 400; font-family: 'IBM Plex Mono'; font-size: 12.5px;">118 MB · baked into the image</span></div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">9 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">12 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~6 ms</div>
+      </div>
+      <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px;">
+        <div style="padding: 16px 20px; color: var(--muted);">+ e5-base int8 <span style="color: var(--faint); font-family: 'IBM Plex Mono'; font-size: 12.5px;">266 MB</span></div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--text);">10 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--text);">12 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~10 ms</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== HTTP API ===================== -->
+  <section id="api" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// HTTP API</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">A small, honest surface.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Every request except <span style="font-family:'IBM Plex Mono'; font-size:14px;">/healthz</span> is appended to a JSONL audit log — timestamp, ip, method, path, status, duration.</p>
+
+    <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg2); border-bottom: 1px solid var(--border);">
+        <div style="padding: 12px 16px;">METHOD</div><div style="padding: 12px 16px;">PATH</div><div style="padding: 12px 16px;">WHAT IT DOES</div>
+      </div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--good); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">POST</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--accent);">/knowledge</div><div style="padding: 13px 16px; color: var(--muted);">Upsert by key → <span style="font-family:'IBM Plex Mono'; font-size:12.5px;">{key, sha, changed, action}</span>. Identical content = no commit.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center; background: oklch(0.185 0.014 260 / 0.4);"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--accent);">/knowledge/{key}</div><div style="padding: 13px 16px; color: var(--muted);">Current entry; <span style="font-family:'IBM Plex Mono'; font-size:12.5px;">?at=&lt;sha&gt;</span> returns a version from history.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--accent);">/knowledge/{key}/history</div><div style="padding: 13px 16px; color: var(--muted);">Every version, newest first, with what changed.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center; background: oklch(0.185 0.014 260 / 0.4);"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--incident); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">DEL</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--accent);">/knowledge/{key}</div><div style="padding: 13px 16px; color: var(--muted);">Retract knowledge / archive an incident or task. History stays searchable.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--good); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">POST</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--incident);">/incidents</div><div style="padding: 13px 16px; color: var(--muted);">Upsert a report; reply carries <span style="font-family:'IBM Plex Mono'; font-size:12.5px;">hints</span> + <span style="font-family:'IBM Plex Mono'; font-size:12.5px;">unknown_knowledge</span>.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center; background: oklch(0.185 0.014 260 / 0.4);"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--incident);">/incidents</div><div style="padding: 13px 16px; color: var(--muted);">Filter by status / service / follow-ups. Live first, freshest on top.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--good); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">POST</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--incident);">/incidents/{key}/resolve</div><div style="padding: 13px 16px; color: var(--muted);">Flip status, record the outcome, stamp the timeline. Resolution required.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center; background: oklch(0.185 0.014 260 / 0.4);"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--good); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">POST</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--violet);">/tasks</div><div style="padding: 13px 16px; color: var(--muted);">Upsert a task, or send a <strong style="color: var(--text); font-weight: 600;">partial</strong> status / assignee / parent / blocked-reason update.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--violet);">/tasks</div><div style="padding: 13px 16px; color: var(--muted);"><span style="font-family:'IBM Plex Mono'; font-size:12.5px;">?status=&amp;priority=&amp;assignee=&amp;parent_task=</span> — live tasks, freshest on top.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center; background: oklch(0.185 0.014 260 / 0.4);"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--good); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">POST</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--violet);">/tasks/{key}/resolve</div><div style="padding: 13px 16px; color: var(--muted);"><span style="font-family:'IBM Plex Mono'; font-size:12.5px;">done</span> or <span style="font-family:'IBM Plex Mono'; font-size:12.5px;">dropped</span> — resolution required, then archived.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--accent);">/search</div><div style="padding: 13px 16px; color: var(--muted);">Ranked hits with full bodies. <span style="font-family:'IBM Plex Mono'; font-size:12.5px;">?q=&amp;tag=&amp;history=&amp;kind=&amp;status=&amp;sort=</span></div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; border-bottom: 1px solid var(--border); align-items: center; background: oklch(0.185 0.014 260 / 0.4);"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--accent);">/tags</div><div style="padding: 13px 16px; color: var(--muted);">Which topics the base covers, most used first.</div></div>
+      <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-size: 14px; align-items: center;"><div style="padding: 13px 16px;"><span style="font-family:'IBM Plex Mono'; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;">GET</span></div><div style="padding: 13px 16px; font-family:'IBM Plex Mono'; font-size: 13px; color: var(--good);">/healthz</div><div style="padding: 13px 16px; color: var(--muted);">entries · open_incidents · open_tasks · index_docs · last_commit</div></div>
+    </div>
+  </section>
+
+  <!-- ===================== INSTALL ===================== -->
+  <section id="install" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Install</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 34px;">Up in two commands.</h2>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+      <div style="border-radius: 14px; border: 1px solid var(--accent-dim); overflow: hidden;">
+        <div style="padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13px;">🍺</span>
+          <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">macOS · Apple Silicon</span>
+        </div>
+        <pre role="region" tabindex="0" aria-label="Homebrew installation commands" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> brew install alex09x/apps/kyb</span><span style="display:block;"><span style="color: var(--good);">$</span> brew services start kyb</span></pre>
+        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">Installs both binaries, wires the skill into every agent on the machine, and keeps the server alive under launchd.</div>
+      </div>
+
+      <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
+        <div style="padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13px;">🐳</span>
+          <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">Docker</span>
+        </div>
+        <pre role="region" tabindex="0" aria-label="Docker installation commands" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> docker compose up -d</span><span style="display:block;"><span style="color: var(--faint);"># ghcr.io/alex09x/kyb:latest</span></span></pre>
+        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">The model is baked into the image, so the container has no network dependency at runtime.</div>
+      </div>
+
+      <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
+        <div style="padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13px;">🦀</span>
+          <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">From source</span>
+        </div>
+        <pre role="region" tabindex="0" aria-label="Source installation command" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> cargo run --release</span><span style="display:block;"><span style="color: var(--faint);"># reindexes, listens on :9310</span></span></pre>
+        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">Rust edition 2021. The index rebuilds from git on every start.</div>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px; border-radius: 14px; border: 1px solid var(--incident-dim); background: linear-gradient(180deg, oklch(0.77 0.13 62 / 0.07), transparent); padding: 22px 26px; display: flex; gap: 18px; align-items: flex-start;">
+      <span style="color: var(--incident); font-size: 20px; line-height: 1.2;">⚠</span>
+      <div>
+        <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Two things to know before you expose it</h3>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">There is <strong style="color: var(--text); font-weight: 600;">no auth by design</strong> — keep port 9310 on a private network. And run the container as <strong style="color: var(--text); font-weight: 600;">your host uid</strong>: otherwise the git canon ends up root-owned and unreadable by hand, and git-as-truth is the whole point.</p>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 22px 24px;">
+      <div style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px; margin-bottom: 14px;">Configuration <span style="color: var(--faint); font-weight: 400; font-family:'IBM Plex Mono'; font-size: 12.5px;">— env, all optional</span></div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 24px; font-family: 'IBM Plex Mono'; font-size: 13px;">
+        <div style="display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);"><span style="color: var(--accent);">KYB_DATA</span><span style="color: var(--faint);">./kyb-data</span></div>
+        <div style="display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);"><span style="color: var(--accent);">KYB_INDEX</span><span style="color: var(--faint);">./index</span></div>
+        <div style="display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);"><span style="color: var(--accent);">KYB_ADDR</span><span style="color: var(--faint);">127.0.0.1:9310</span></div>
+        <div style="display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);"><span style="color: var(--accent);">KYB_MODEL</span><span style="color: var(--faint);">dir · absent = lexical</span></div>
+        <div style="display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);"><span style="color: var(--accent);">KYB_AUDIT</span><span style="color: var(--faint);">audit.jsonl</span></div>
+        <div style="display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border);"><span style="color: var(--accent);">KYB_SERVER</span><span style="color: var(--faint);">for install.sh</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px; border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
+      <div style="padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel);"><span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">CLI cheatsheet</span></div>
+      <pre role="region" tabindex="0" aria-label="KYB command-line examples" style="margin: 0; padding: 22px 24px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.95; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> kyb tags <span style="color: var(--faint);">/</span> kyb health          <span style="color: var(--faint);"># the map of the base, and its pulse</span></span><span style="display:block;"><span style="color: var(--good);">$</span> kyb query <span style="color: var(--incident);">"nats streams"</span> --tag infra --history</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb add --key nats-streams --title <span style="color: var(--incident);">"..."</span> --tags nats,infra &lt;&lt;&lt; <span style="color: var(--incident);">"body"</span></span><span style="display:block;"><span style="color: var(--good);">$</span> kyb get nats-streams --at <span style="color: var(--accent);">&lt;sha&gt;</span>      <span style="color: var(--faint);"># any historical version</span></span><span style="display:block;"><span style="color: var(--good);">$</span> kyb incident --template               <span style="color: var(--faint);"># the report skeleton</span></span><span style="display:block;"><span style="color: var(--good);">$</span> kyb incidents --status open --open-followups</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb resolve inc-… &lt;&lt;&lt; <span style="color: var(--incident);">"what fixed it"</span>  <span style="color: var(--faint);"># resolution mandatory</span></span><span style="display:block;"><span style="color: var(--good);">$</span> kyb task-status task-… --status <span style="color: var(--violet);">in_progress</span> --assignee agent-a</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb tasks --status blocked --priority critical</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb done task-… &lt;&lt;&lt; <span style="color: var(--incident);">"what came of it"</span></span></pre>
+    </div>
+  </section>
+
+  <!-- ===================== FLEET DEPLOY ===================== -->
+  <section style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Fleet deploy</div>
+    <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">One idempotent command, whole pipeline.</h2>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Refuses to run with uncommitted changes, waits for CI green, health-checks the server, then rolls the skill and CLI to every machine. Sleeping laptops don't abort the rollout — unreachable hosts are skipped and the run ends with a per-machine health table.</p>
+
+    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 32px 28px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin-bottom: 24px;">
+        <span style="font-family: 'IBM Plex Mono'; font-size: 13px; padding: 10px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text);">git push</span>
+        <span style="color: var(--accent); font-family: 'IBM Plex Mono';">→</span>
+        <span style="font-family: 'IBM Plex Mono'; font-size: 13px; padding: 10px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text);">CI builds the image</span>
+        <span style="color: var(--accent); font-family: 'IBM Plex Mono';">→</span>
+        <span style="font-family: 'IBM Plex Mono'; font-size: 13px; padding: 10px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text);">server pulls &amp; restarts</span>
+        <span style="color: var(--accent); font-family: 'IBM Plex Mono';">→</span>
+        <span style="font-family: 'IBM Plex Mono'; font-size: 13px; padding: 10px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--accent-dim); color: var(--text);">skill + CLI to every machine</span>
+      </div>
+      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.9; overflow-x: auto;"><div><span style="color: var(--good);">$</span> scripts/deploy.sh            <span style="color: var(--faint);"># everything</span></div><div><span style="color: var(--good);">$</span> scripts/deploy.sh --skills   <span style="color: var(--faint);"># only roll skills + CLI</span></div></div>
+      <p style="margin: 18px 0 0; color: var(--muted); font-size: 14.5px; text-wrap: pretty;">Machine-specific config lives <strong style="color: var(--text); font-weight: 600;">outside the repo</strong> in a gitignored <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">fleet.local.sh</span>. Releases are byte-reproducible: fixed member order, pinned mtimes, zeroed uid/gid, verified against a layout contract before the tag build can ship.</p>
+    </div>
+  </section>
+
+  <!-- ===================== FINAL CTA ===================== -->
+  <section style="max-width: 1120px; margin: 96px auto 0; padding: 0 28px;">
+    <div style="border-radius: 22px; border: 1px solid var(--border); background: radial-gradient(ellipse at 50% -10%, oklch(0.76 0.132 196 / 0.16), var(--panel) 62%); padding: 64px 34px; text-align: center;">
+      <div style="width: 54px; height: 54px; border-radius: 14px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 26px; color: oklch(0.15 0.01 260); margin: 0 auto 22px; box-shadow: 0 12px 40px -10px oklch(0.76 0.132 196 / 0.6);">K</div>
+      <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4.4vw, 44px); letter-spacing: -0.025em; margin: 0 0 14px; text-wrap: balance;">Give your agents a memory.</h2>
+      <p style="font-size: 18px; color: var(--muted); max-width: 52ch; margin: 0 auto 30px;">One command to run it, one to wire every agent on every machine into the same operational truth.</p>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;">
+        <a href="https://github.com/alex09x/kyb" style="display: inline-flex; align-items: center; gap: 9px; padding: 14px 26px; border-radius: 12px; background: var(--accent); color: oklch(0.15 0.01 260); font-weight: 700; font-size: 15px;" data-hover="4"><span style="color: oklch(0.15 0.01 260);">★</span> Star on GitHub</a>
+        <a href="#install" style="display: inline-flex; align-items: center; gap: 9px; padding: 14px 26px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-weight: 600; font-size: 15px;" data-hover="5">Install</a>
+        <a href="#api" style="display: inline-flex; align-items: center; gap: 9px; padding: 14px 26px; border-radius: 12px; color: var(--muted); font-weight: 600; font-size: 15px;" data-hover="6">Read the docs →</a>
+      </div>
+    </div>
+  </section>
+
+  </main>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer style="max-width: 1120px; margin: 60px auto 0; padding: 34px 28px 60px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 13px; color: oklch(0.15 0.01 260);">K</span>
+      <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">KYB — Know Your Business</span>
+    </div>
+    <div style="flex: 1;"></div>
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; font-family: 'IBM Plex Mono'; font-size: 13px; align-items: center;">
+      <a href="https://kybmemory.com" style="color: var(--accent);">kybmemory.com</a>
+      <a href="https://github.com/alex09x/kyb" style="color: var(--muted);">GitHub</a>
+      <a href="#api" style="color: var(--muted);">API</a>
+      <a href="#install" style="color: var(--muted);">Install</a>
+      <span style="color: var(--faint);">MIT © 2026</span>
+    </div>
+  </footer>
+
+</div>
 </body>
 </html>

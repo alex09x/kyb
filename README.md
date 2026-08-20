@@ -13,7 +13,7 @@ truth that survives between sessions and across machines.
 <br/>
 
 [![license](https://img.shields.io/badge/license-MIT-00b3c4?labelColor=1a1d24)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-315_passing-2ea043?labelColor=1a1d24)](#stack--tests)
+[![tests](https://img.shields.io/badge/tests-321_cases-2ea043?labelColor=1a1d24)](#stack--tests)
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
@@ -259,7 +259,7 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 315 cases
+cargo test        # 321 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.
