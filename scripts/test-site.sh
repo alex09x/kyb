@@ -21,7 +21,6 @@ required = {
     "robots.txt",
     "sitemap.xml",
     "_headers",
-    "_redirects",
 }
 missing = sorted(name for name in required if not (site / name).is_file())
 if missing:
@@ -92,9 +91,8 @@ for expected in ("Content-Security-Policy:", "Strict-Transport-Security:", "X-Co
     if expected not in headers:
         raise SystemExit(f"missing security header: {expected}")
 
-redirects = (site / "_redirects").read_text(encoding="utf-8")
-if "https://www.kybmemory.com/*  https://kybmemory.com/:splat  301" not in redirects:
-    raise SystemExit("www-to-apex redirect is missing")
+if (site / "_redirects").exists():
+    raise SystemExit("www-to-apex redirects belong in Cloudflare Redirect Rules, not Pages _redirects")
 
 print(
     f"Static site checks passed: {len(parser.ids)} ids, "
