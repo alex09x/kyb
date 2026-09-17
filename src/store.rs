@@ -335,6 +335,42 @@ impl Store {
             .collect())
     }
 
+    /// Every key that has ever existed, including retracted ones.
+    ///
+    /// Path names only - no blob is read - because the question is which keys
+    /// were used, not what they said. That keeps it cheap enough to run on a
+    /// create, where the alternative is walk_history(), which reads every
+    /// version of everything.
+    pub fn all_keys_ever(&self) -> Result<HashSet<String>> {
+        let repo = self.repo()?;
+        if repo.head().is_err() {
+            return Ok(HashSet::new());
+        }
+        let mut walk = repo.revwalk()?;
+        walk.push_head()?;
+        walk.set_sorting(Sort::TOPOLOGICAL)?;
+        let mut out = HashSet::new();
+        for oid in walk {
+            let commit = repo.find_commit(oid?)?;
+            let tree = commit.tree()?;
+            let parent = match commit.parent(0) {
+                Ok(p) => Some(p.tree()?),
+                Err(_) => None,
+            };
+            let diff = repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), None)?;
+            for delta in diff.deltas() {
+                for file in [delta.old_file(), delta.new_file()] {
+                    let Some(path) = file.path().and_then(|p| p.to_str()) else { continue };
+                    let Some(name) = path.rsplit('/').next() else { continue };
+                    if let Some(key) = name.strip_suffix(".md") {
+                        out.insert(key.to_string());
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Full history: every commit × changed .md files → one version per doc.
     /// A version identical in content to the key's previous one (the layout
     /// migration is a pure rename) is skipped — moves are not new knowledge.

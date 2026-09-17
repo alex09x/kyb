@@ -91,9 +91,14 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
     let (heads, hist) = index.reindex(&mut writer, &store)?;
     eprintln!("kyb: reindex on start — {heads} head entries, {hist} history versions");
     let audit = audit::Audit::open(&cfg.audit_path)?;
+    let model_start = std::time::Instant::now();
     let semantic = match embed::Semantic::load(&cfg.model_dir, cfg.index_dir.join("vectors.cache")) {
         Ok(s) => {
-            eprintln!("kyb: semantic search on ({})", cfg.model_dir.display());
+            eprintln!(
+                "kyb: semantic search on ({}) — model loaded in {:.1}s",
+                cfg.model_dir.display(),
+                model_start.elapsed().as_secs_f64()
+            );
             Some(s)
         }
         Err(e) => {
@@ -126,11 +131,32 @@ fn build_app(state: Arc<AppState>) -> Router {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Timed and logged on EVERY start, not measured once.
+    //
+    // The whole point of the finding is that this grows with the base's age:
+    // the index and the vectors are rebuilt from git each time, so a restart is
+    // a window in which the fleet has no shared memory at all. A single
+    // measurement gives today's number and says nothing about the trend, and
+    // until now nothing recorded the duration - so the symptom was
+    // indistinguishable from "the service is still coming up", which it is.
+    //
+    // The split matters as much as the total: when this gets slow again, the log
+    // already says whether it was the embeddings (cached, so probably not) or
+    // the per-document indexing that is linear in history.
+    let boot = std::time::Instant::now();
     let cfg = config::Config::from_env();
     let state = build_state(&cfg)?;
+    let indexed = boot.elapsed();
     rebuild_vectors(&state).await;
+    let ready = boot.elapsed();
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
+    eprintln!(
+        "kyb: ready in {:.1}s (canon, index and model load {:.1}s, embeddings {:.1}s)",
+        ready.as_secs_f64(),
+        indexed.as_secs_f64(),
+        (ready - indexed).as_secs_f64()
+    );
     eprintln!("kyb: listening on http://{}", cfg.addr);
     // ConnectInfo so the audit log sees the real client IP
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
@@ -245,6 +271,10 @@ fn commit_locked(
         return ((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))), None);
     }
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    // Asked before the write, while "absent from the tree but present in
+    // history" is still distinguishable from "just created".
+    let had_history = matches!(st.store.get(&entry.key), Ok(None))
+        && st.store.history(&entry.key).map(|v| !v.is_empty()).unwrap_or(false);
     let (c, action) = match st.store.upsert(entry, &today) {
         Err(e) => return (err500(e), None),
         Ok(store::UpsertOutcome::Unchanged(entry)) => {
@@ -269,11 +299,25 @@ fn commit_locked(
     // one topic in half while both entries answer and nothing fails - the
     // author is the only one who can tell a family apart from a slip.
     if action == "created" {
-        let existing = st.store.list_head().unwrap_or_default();
-        let similar =
-            model::similar_keys(&c.entry.key, existing.iter().map(|e| e.key.as_str()));
+        // Every key that ever existed, not only the live ones. A retracted entry
+        // leaves the working tree, so comparing against the tree alone would be
+        // silent about the worst case: re-creating a key somebody deliberately
+        // took away. That is not an accidental twin - it is a decision being
+        // undone by someone who cannot see that it was made.
+        let mut known = st.store.all_keys_ever().unwrap_or_default();
+        known.extend(st.store.list_head().unwrap_or_default().into_iter().map(|e| e.key));
+        let similar = model::similar_keys(&c.entry.key, known.iter().map(String::as_str));
         if !similar.is_empty() {
             resp["similar"] = json!(similar);
+        }
+        // An exact match is a different message: not "looks like a neighbour"
+        // but "this existed and was withdrawn - read why before continuing".
+        if had_history {
+            resp["revived"] = json!(true);
+            resp["hint"] = json!(format!(
+                "'{}' existed before and was retracted; see `kyb history {}` for why",
+                c.entry.key, c.entry.key
+            ));
         }
     }
     if let (Some(obj), Some(add)) = (resp.as_object_mut(), extra.as_object()) {
@@ -1611,6 +1655,49 @@ mod api_tests {
         call(&app, "POST", "/knowledge", Some(upsert_body("demo", "body"))).await;
         let (st, v) = call(&app, "GET", uri, None).await;
         assert_eq!(st, StatusCode::OK, "{uri} must still work, got {v}");
+    }
+
+    /// Re-creating a key somebody deliberately retracted is worse than an
+    /// accidental twin: a decision is being undone by someone who cannot see it
+    /// was made. The tree has forgotten the key; history has not.
+    #[tokio::test]
+    async fn a_retracted_key_is_flagged_when_it_comes_back() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("withdrawn", "the first take"))).await;
+        call(&app, "DELETE", "/knowledge/withdrawn", None).await;
+        assert_eq!(call(&app, "GET", "/knowledge/withdrawn", None).await.0, StatusCode::NOT_FOUND);
+
+        let (st, v) =
+            call(&app, "POST", "/knowledge", Some(upsert_body("withdrawn", "a second take"))).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["action"], "created", "the tree has forgotten it");
+        assert_eq!(v["revived"], true, "history has not, and says so");
+        assert!(v["hint"].as_str().unwrap().contains("retracted"), "{v}");
+
+        // a plain create carries neither flag
+        let (_, v) = call(&app, "POST", "/knowledge", Some(upsert_body("brand-new", "x"))).await;
+        assert!(v["revived"].is_null());
+        assert!(v["hint"].is_null());
+    }
+
+    /// The twin check looks past the working tree too: a near-twin of a
+    /// retracted key is exactly the case a tree-only comparison would miss.
+    #[tokio::test]
+    async fn a_twin_of_a_retracted_key_is_still_surfaced() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("rule-name-your-comparison-baseline", "x")))
+            .await;
+        call(&app, "DELETE", "/knowledge/rule-name-your-comparison-baseline", None).await;
+
+        let (_, v) =
+            call(&app, "POST", "/knowledge", Some(upsert_body("rule-name-your-comparison-base", "y")))
+                .await;
+        let similar: Vec<&str> =
+            v["similar"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+        assert!(
+            similar.contains(&"rule-name-your-comparison-baseline"),
+            "a retracted near-twin must still be surfaced, got {v}"
+        );
     }
 
     #[tokio::test]
