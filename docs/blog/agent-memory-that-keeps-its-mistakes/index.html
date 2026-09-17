@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent memory that keeps its mistakes — KYB</title>
+<meta name="description" content="Why we made git the canon for a fleet of AI agents: an overwriting memory can only answer what is true now, and the failure that costs you is an answer that used to be true.">
+<link rel="canonical" href="https://kybmemory.com/blog/agent-memory-that-keeps-its-mistakes/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#131720">
+<meta name="author" content="KYB">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="KYB — Know Your Business">
+<meta property="og:title" content="Agent memory that keeps its mistakes">
+<meta property="og:description" content="Why we made git the canon for a fleet of AI agents: an overwriting memory can only answer what is true now, and the failure that costs you is an answer that used to be true.">
+<meta property="og:url" content="https://kybmemory.com/blog/agent-memory-that-keeps-its-mistakes/">
+<meta property="og:image" content="https://kybmemory.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="KYB — git-backed shared memory and incident tracker for AI agent fleets">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Agent memory that keeps its mistakes">
+<meta name="twitter:description" content="An overwriting memory can only answer what is true now. The failure that costs you is an answer that used to be true.">
+<meta name="twitter:image" content="https://kybmemory.com/og.png">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Agent memory that keeps its mistakes","description":"Why we made git the canon for a fleet of AI agents: an overwriting memory can only answer what is true now, and the failure that costs you is an answer that used to be true.","datePublished":"2026-09-17","dateModified":"2026-09-17","inLanguage":"en","url":"https://kybmemory.com/blog/agent-memory-that-keeps-its-mistakes/","mainEntityOfPage":{"@type":"WebPage","@id":"https://kybmemory.com/blog/agent-memory-that-keeps-its-mistakes/"},"image":"https://kybmemory.com/og.png","author":{"@type":"Organization","name":"KYB"},"publisher":{"@type":"Organization","name":"KYB"},"about":{"@type":"SoftwareApplication","name":"KYB — Know Your Business","applicationCategory":"DeveloperApplication","codeRepository":"https://github.com/alex09x/kyb","license":"https://opensource.org/licenses/MIT"}}
+</script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    --bg: oklch(0.148 0.012 260);
+    --bg2: oklch(0.185 0.014 260);
+    --panel: oklch(0.207 0.014 260);
+    --panel2: oklch(0.235 0.015 260);
+    --border: oklch(0.315 0.016 260);
+    --text: oklch(0.935 0.006 260);
+    --muted: oklch(0.685 0.013 260);
+    --faint: oklch(0.64 0.012 260);
+    --accent: oklch(0.76 0.132 196);
+    --accent-dim: oklch(0.40 0.07 196);
+    --incident: oklch(0.77 0.13 62);
+    --incident-dim: oklch(0.42 0.08 62);
+    --good: oklch(0.78 0.15 150);
+    --violet: oklch(0.70 0.14 300);
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 17px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; line-height: 1.22; }
+  h1 { font-size: clamp(32px, 5.2vw, 48px); margin: 0 0 18px; }
+  h2 { font-size: clamp(23px, 3.2vw, 28px); margin: 54px 0 14px; }
+  h3 { font-size: 19px; margin: 32px 0 10px; }
+  p { margin: 0 0 18px; text-wrap: pretty; }
+  ul, ol { margin: 0 0 18px; padding-left: 22px; }
+  li { margin: 0 0 9px; }
+  code { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; background: var(--bg2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+  pre { font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; line-height: 1.85; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; overflow-x: auto; margin: 0 0 20px; }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+  blockquote { margin: 0 0 20px; padding: 2px 0 2px 20px; border-left: 3px solid var(--accent-dim); color: var(--muted); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+  .lede { font-size: 20px; color: var(--muted); }
+  .note { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin: 0 0 22px; }
+  .note p:last-child { margin-bottom: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 22px; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-family: 'Space Grotesk', sans-serif; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); }
+  @media (max-width: 600px) {
+    body { font-size: 16px; }
+    .lede { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div id="top">
+
+  <nav aria-label="Primary" style="position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: oklch(0.148 0.012 260 / 0.72); border-bottom: 1px solid var(--border);">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 14px 28px; display: flex; align-items: center; gap: 20px;">
+      <a href="/" style="display: flex; align-items: center; gap: 11px; color: var(--text);">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 15px; color: oklch(0.15 0.01 260); box-shadow: 0 0 0 1px oklch(0.76 0.132 196 / 0.4);">K</span>
+        <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 17px; letter-spacing: -0.01em;">KYB</span>
+      </a>
+      <div style="flex: 1;"></div>
+      <div style="display: flex; align-items: center; gap: 24px; font-size: 14px; font-weight: 500;">
+        <a href="/#how" style="color: var(--muted);">How it works</a>
+        <a href="/blog/" style="color: var(--muted);">Blog</a>
+        <a href="/#install" style="color: var(--muted);">Install</a>
+      </div>
+      <a href="https://github.com/alex09x/kyb" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 15px; border-radius: 9px; background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 13.5px; font-weight: 600;">
+        <span style="color: var(--incident);">★</span> Star on GitHub
+      </a>
+    </div>
+  </nav>
+
+  <article class="wrap" style="padding-top: 64px; padding-bottom: 20px;">
+
+    <p style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--faint); margin: 0 0 14px;">
+      <a href="/blog/" style="color: var(--faint);">Blog</a> · <time datetime="2026-09-17">17 September 2026</time> · 9 min
+    </p>
+
+    <h1>Agent memory that keeps its mistakes</h1>
+
+    <p class="lede">An overwriting memory can only ever answer one question: what is true now. The
+    failure that actually costs you is an answer that <em>used to be</em> true — and nothing in it
+    says so.</p>
+
+    <h2>The fleet forgets, and then argues</h2>
+
+    <p>Run more than one coding agent and the arithmetic turns against you quickly. Sessions end.
+    Context windows compact. A task starts on one provider and finishes on another. Each new agent
+    arrives fluent and amnesiac, and re-derives what the last one already worked out: which service
+    owns that write path, why the retry budget is set the way it is, what happened the last time the
+    queue backed up at 3am.</p>
+
+    <p>The standard answer is a vector store. Embed the documents, retrieve the top-k, stuff it in
+    the prompt. It works — until the facts move. Then you meet the failure mode that matters:</p>
+
+    <blockquote>The base confidently returns something that was true in June.</blockquote>
+
+    <p>In an overwriting store there is no such thing as a stale answer, because there is no such
+    thing as a previous answer. There is only <em>current</em>. The moment you write the new value,
+    the old one and the fact that it ever changed both stop existing. An agent cannot detect a
+    problem the data model has defined out of existence.</p>
+
+    <h2>What KYB is</h2>
+
+    <p><a href="https://github.com/alex09x/kyb">KYB</a> is a git-backed, searchable knowledge base
+    and incident tracker for fleets of AI agents. One HTTP service, one CLI, and a skill wired into
+    each agent's always-loaded instructions — so it gets used without anyone remembering to ask
+    for it.</p>
+
+    <p>Three kinds share one flat key space:</p>
+
+    <table>
+      <tr><th>Kind</th><th>Answers</th><th>Lifecycle</th></tr>
+      <tr><td><code>knowledge</code></td><td>what is true now</td><td>upsert by key, forever</td></tr>
+      <tr><td><code>incidents</code></td><td>what happened</td><td>open → resolved, archived on close</td></tr>
+      <tr><td><code>tasks</code></td><td>what is in flight</td><td>open → in_progress / blocked → done</td></tr>
+    </table>
+
+    <p>No projects, no namespaces, no folders to argue about. Tags carry the scope, and the key is
+    the identity.</p>
+
+    <h2>Git is the canon, not an implementation detail</h2>
+
+    <p>One markdown file per entry. One commit per change. A commit sha <em>is</em> the version id.
+    The Tantivy search index is a disposable cache — delete it and it rebuilds from git on the next
+    start.</p>
+
+    <p>This is not minimalism for its own sake. It buys three concrete things:</p>
+
+    <ul>
+      <li><strong>Every superseded version stays.</strong> Not in an audit log <em>beside</em> the
+      data — in the data. The history is the same object as the content.</li>
+      <li><strong>There is no migration story.</strong> The canon is text in a git repository. When
+      the service is down you can still read it with <code>cat</code> and fix it in an editor.</li>
+      <li><strong>Backup is <code>git clone</code>.</strong> There is no second system holding state
+      that has to be kept consistent with the first.</li>
+    </ul>
+
+    <p>When an incident or task closes, its file leaves the working tree — the tree holds only what
+    is live — while the content stays in history and stays searchable. Archive on close, not
+    delete. A resolved incident is still the best answer to "has this bitten us before?".</p>
+
+    <h2>Search: lexical and vectors, fused</h2>
+
+    <p>BM25 over the text (title weighted ×2, tags and keys ×1.5) fused by reciprocal rank with
+    vector search over a multilingual e5-small int8 ONNX model running on CPU. A query lands in
+    about 6 ms on a base of a few hundred entries.</p>
+
+    <p>The vectors are not there to rerank a lexical top-k. They <em>retrieve</em>, independently.
+    That distinction is the whole point: a question phrased in words the entry never uses, or asked
+    in a different language than the entry was written in, has no lexical anchor at all. BM25 cannot
+    rerank a list it never produced.</p>
+
+    <pre><code>$ kyb query "why did checkout keep timing out"   # no keyword overlap
+inc-2026-05-14-checkout-timeouts  ·  resolved  ·  semantic hit ✓</code></pre>
+
+    <p>Without the model on disk the service degrades to lexical-only. That is still a working
+    product, just a duller one — and it is a deliberate degradation rather than a crash.</p>
+
+    <h2>The schema has opinions</h2>
+
+    <p>An incident report that cannot tell you whether the thing is still happening is a story, not
+    a report. So a report carries fields that make it actionable by a machine:</p>
+
+    <ul>
+      <li><code>detection</code> — an executable check <em>and</em> the result that means healthy.</li>
+      <li><code>affected</code> — <code>{scope, from, to}</code> windows, so a backtest can exclude
+      a poisoned period programmatically instead of someone remembering to.</li>
+      <li><code>resolution</code> — mandatory to close. A report with no ending teaches nobody.</li>
+      <li>unfinished <code>- [ ]</code> items are counted, and a close warns about the loose ends.</li>
+    </ul>
+
+    <p>And the service refuses to swallow secrets. A body, ref, resolution or detection that looks
+    like a token, an AWS key id or private key material is rejected at write time, with a message
+    telling you to store a pointer instead. Refs point at where the secret lives; they are not the
+    place it lives.</p>
+
+    <h2>Why versioning with provenance beats overwriting</h2>
+
+    <p>An overwriting store answers one question: <em>what do we believe now.</em> A versioned one
+    can, in principle, answer two more:</p>
+
+    <ul>
+      <li><em>What did we believe then?</em> — the question you ask when reconstructing why an
+      agent made the call it made last Tuesday.</li>
+      <li><em>Where did this change?</em> — the question you ask when an assumption you have been
+      carrying for a month quietly stopped being true.</li>
+    </ul>
+
+    <p>For a human wiki, those are a nice-to-have; a person usually remembers that something
+    changed even when the page doesn't say so. For a fleet of agents it is structural, because
+    <strong>the agent acting on a fact is almost never the one that wrote it.</strong> It has no
+    memory of the change, no colleague to ask, and no instinct that the page looks different from
+    last time. Everything it can know has to be in the retrieval result.</p>
+
+    <p>So the design rule is: never lose the shape of a belief changing. Store the new value, keep
+    the old one addressable, and keep the commit that moved between them.</p>
+
+    <h2>What it does not do yet</h2>
+
+    <div class="note">
+      <p><strong>Being straight about the gap.</strong> The storage keeps every version and the
+      index holds every version — but the query layer cannot address <em>time</em> yet.</p>
+      <p>Today <code>--history</code> searches all versions at once, ranked by relevance rather than
+      scoped to a moment. Point-in-time retrieval exists only as <code>kyb get &lt;key&gt; --at
+      &lt;sha&gt;</code>, which needs a commit sha you already have. And there is no diff endpoint:
+      history tells you <em>that</em> an entry changed, not <em>what</em> changed in it.</p>
+      <p>So "what did we believe on 1 August" and "where did this change" are not one call yet. The
+      substrate is there and the commit timestamps are already indexed; the addressing is what is
+      being built next. We would rather say that than describe a roadmap in the present tense.</p>
+    </div>
+
+    <h2>The skill is the delivery mechanism</h2>
+
+    <p>A knowledge base an agent never opens is a knowledge base that does not exist. So the
+    installer does not just drop a CLI on <code>PATH</code> — it writes a pointer into each agent's
+    always-loaded global instructions, between markers so re-running updates in place instead of
+    appending copies.</p>
+
+    <pre><code>$ kyb query "queue retention" --tag infra
+$ kyb add --key queue-retention --title "..." --tags queue,infra &lt;&lt;&lt; "body"
+$ kyb incident --key inc-2026-05-14-checkout-timeouts --service svc-checkout --severity high
+$ kyb resolve inc-2026-05-14-checkout-timeouts &lt;&lt;&lt; "what fixed it"
+$ kyb tasks --status blocked --priority critical</code></pre>
+
+    <p>That is the part that turns a database into a habit: the agent finds the skill in its own
+    instructions, on every machine, without being told.</p>
+
+    <h2>Where it is not a fit</h2>
+
+    <ul>
+      <li><strong>You need auth.</strong> There is none, deliberately — the service binds to
+      localhost or one private interface and trusts the network boundary. If that is not your
+      threat model, this is the wrong tool.</li>
+      <li><strong>You have millions of documents.</strong> The vector index lives in memory and is
+      rebuilt from git on start. It is sized for hundreds to thousands of entries about your own
+      systems, not a document warehouse.</li>
+      <li><strong>You want a wiki for people.</strong> The write path is a CLI and an HTTP API
+      shaped for agents. A human can use it, but nobody will enjoy composing prose through it.</li>
+    </ul>
+
+    <h2>Try it</h2>
+
+    <pre><code># Docker — the image already contains the embedding model
+docker compose up -d
+
+# then wire the skill into every agent on the machine
+bash skills/install.sh</code></pre>
+
+    <p>Source, issues and the full API surface:
+    <a href="https://github.com/alex09x/kyb">github.com/alex09x/kyb</a>. MIT.
+    It is early and the repository is honest about that — including the part above about what the
+    query layer still cannot do.</p>
+
+  </article>
+
+  <footer style="max-width: 1120px; margin: 40px auto 0; padding: 34px 28px 60px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 13px; color: oklch(0.15 0.01 260);">K</span>
+      <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">KYB — Know Your Business</span>
+    </div>
+    <div style="flex: 1;"></div>
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; font-family: 'IBM Plex Mono'; font-size: 13px; align-items: center;">
+      <a href="https://kybmemory.com" style="color: var(--accent);">kybmemory.com</a>
+      <a href="https://github.com/alex09x/kyb" style="color: var(--muted);">GitHub</a>
+      <a href="/blog/" style="color: var(--muted);">Blog</a>
+      <span style="color: var(--faint);">MIT © 2026</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
