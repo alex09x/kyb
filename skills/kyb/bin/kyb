@@ -12,6 +12,47 @@ BASE="http://$ADDR"
 
 die() { echo "kyb: $*" >&2; exit 1; }
 
+# A server older than this CLI cannot object to a parameter it has never heard
+# of: it ignores the unknown name and answers the question it DID understand. Ask
+# about the past and you get today's data with a 200, which is indistinguishable
+# from "nothing changed". The server cannot fix that - only a client that checks
+# before asking can, so this refuses to send a version-dependent flag to a server
+# that does not advertise the capability.
+require_capability() { # require_capability <capability> <flag> <what goes wrong without it>
+  local want="$1" flag="$2" why="$3" health
+  health="$(curl -sS -m 10 "$BASE/healthz" 2>/dev/null)" \
+    || die "cannot reach $ADDR to check whether it supports $flag"
+  CAP_WANT="$want" CAP_FLAG="$flag" CAP_WHY="$why" CAP_HEALTH="$health" python3 - <<'PY' || exit 1
+import json, os, sys
+
+want = os.environ["CAP_WANT"]
+flag = os.environ["CAP_FLAG"]
+why = os.environ["CAP_WHY"]
+raw = os.environ["CAP_HEALTH"]
+
+def refuse(*lines):
+    for line in lines:
+        print("kyb: " + line, file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    health = json.loads(raw)
+except json.JSONDecodeError:
+    refuse(flag + " needs a server that reports its capabilities;",
+           "this one did not answer /healthz with JSON.")
+
+caps = health.get("capabilities")
+if caps is None:
+    refuse("this server does not report capabilities, so it predates " + flag + ".",
+           why,
+           "Upgrade the server, or drop " + flag + ".")
+if want not in caps:
+    refuse("server " + str(health.get("version", "unknown")) + " does not support "
+           + flag + " (it reports: " + (", ".join(caps) or "none") + ").",
+           why)
+PY
+}
+
 pretty() { if command -v jq >/dev/null 2>&1; then jq .; else cat; fi; }
 
 urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${1:-}"; }
@@ -106,6 +147,8 @@ case "$cmd" in
         *) die "query: unknown flag $1" ;;
       esac
     done
+    [ -z "$as_of" ]  || require_capability as_of "--as-of" "An older server ignores a parameter it does not know and answers as if it were absent, so you would get CURRENT data as the answer to a question about the past."
+    [ -z "$changed" ] || require_capability changed_between "--changed-between" "An older server ignores a parameter it does not know and answers as if it were absent, so you would get CURRENT data as the answer to a question about the past."
     kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&as_of=$(urlenc "$as_of")&changed_between=$(urlenc "$changed")&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")" | pretty
     ;;
   tags)
@@ -361,6 +404,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
         *) die "diff: unknown option $1" ;;
       esac
     done
+    require_capability diff "kyb diff" "An older server has no such route and would simply answer 404."
     kyb_curl "$BASE/knowledge/$key/diff?from=$(urlenc "$from")&to=$(urlenc "$to")" | pretty
     ;;
 

@@ -1371,6 +1371,19 @@ async fn reindex(State(st): St) -> Reply {
     }
 }
 
+/// What this build can answer, for a client to check BEFORE it asks.
+///
+/// `deny_unknown_fields` protects a server that has it. The configuration that
+/// will actually be common after a release is the opposite one - a CLI updated
+/// through brew talking to a server nobody has redeployed yet - and that server
+/// cannot object to a parameter it has never heard of. It will answer a question
+/// about the past with today's data and a 200.
+///
+/// So the check has to happen on the client, before the request, against a list
+/// the server publishes. Names match the query parameters exactly; entries are
+/// only ever added, never renamed, because an older CLI matches on the string.
+const CAPABILITIES: [&str; 3] = ["as_of", "changed_between", "diff"];
+
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
     let open_incidents =
@@ -1388,6 +1401,8 @@ async fn healthz(State(st): St) -> Reply {
             "open_tasks": open_tasks,
             "index_docs": index_docs,
             "last_commit": last.map(|(sha, time)| json!({"sha": sha, "time": time})),
+            "version": env!("CARGO_PKG_VERSION"),
+            "capabilities": CAPABILITIES,
         })),
     )
 }
@@ -1533,6 +1548,19 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn healthz_advertises_version_and_capabilities() {
+        let (app, _data, _idx) = app_with_tmp();
+        let (st, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        let caps: Vec<&str> =
+            v["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap()).collect();
+        for want in ["as_of", "changed_between", "diff"] {
+            assert!(caps.contains(&want), "healthz must advertise {want}, got {caps:?}");
+        }
     }
 
     /// The failure this prevents is not a crash - it is a plausible answer.
@@ -3170,6 +3198,35 @@ mod published_claims {
         let (st, v) = call(&app, "GET", &format!("/search?q=value&as_of={older}"), None).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(v["count"], 1, "one row per key even when the bound cannot separate versions");
+    }
+
+    /// The capability list is a promise to clients that check it before asking.
+    /// Every name on it must be backed by an endpoint, and the CLI must gate the
+    /// same names - a rename on one side and not the other turns the preflight
+    /// into a permanent refusal or a silent pass.
+    #[tokio::test]
+    async fn every_advertised_capability_is_backed_and_gated() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "one"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "two"))).await;
+
+        let probes = [
+            ("as_of", "/search?q=one&as_of=2999-01-01"),
+            ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
+            ("diff", "/knowledge/svc/diff"),
+        ];
+        assert_eq!(probes.len(), super::CAPABILITIES.len(), "a capability was added without a probe");
+
+        let cli = published("skills/kyb/bin/kyb");
+        for (cap, uri) in probes {
+            assert!(super::CAPABILITIES.contains(&cap), "{cap} is probed but not advertised");
+            let (st, v) = call(&app, "GET", uri, None).await;
+            assert_eq!(st, StatusCode::OK, "advertised {cap} but {uri} answered {st}: {v}");
+            assert!(
+                cli.contains(&format!("require_capability {cap} ")),
+                "the CLI does not gate {cap}, so it would send it to a server that cannot honour it"
+            );
+        }
     }
 
     /// README and the agent skill document the same three commands. An agent
