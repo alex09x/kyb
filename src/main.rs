@@ -91,7 +91,7 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
     let (heads, hist) = index.reindex(&mut writer, &store)?;
     eprintln!("kyb: reindex on start — {heads} head entries, {hist} history versions");
     let audit = audit::Audit::open(&cfg.audit_path)?;
-    let semantic = match embed::Semantic::load(&cfg.model_dir) {
+    let semantic = match embed::Semantic::load(&cfg.model_dir, cfg.index_dir.join("vectors.cache")) {
         Ok(s) => {
             eprintln!("kyb: semantic search on ({})", cfg.model_dir.display());
             Some(s)

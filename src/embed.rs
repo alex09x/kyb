@@ -13,7 +13,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// e5 models are trained with these prefixes and degrade noticeably without them.
 const QUERY_PREFIX: &str = "query: ";
@@ -149,6 +149,151 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// Identity of the model that produced a vector: a git blob id over the two
+/// files that define it.
+///
+/// Vectors from different models are not comparable - a cosine between them is
+/// a number with no meaning - and a cache that never invalidates would never
+/// throw the old ones out. The index would quietly become a mixture, search
+/// would keep returning results, and nothing would fail. So the fingerprint is
+/// stored with the cache and a mismatch discards it wholesale.
+fn model_fingerprint(dir: &Path) -> Result<String> {
+    let mut parts = vec![];
+    for name in ["model.onnx", "tokenizer.json"] {
+        let bytes = std::fs::read(dir.join(name))?;
+        let oid = git2::Oid::hash_object(git2::ObjectType::Blob, &bytes)
+            .map_err(|e| anyhow!("fingerprint {name}: {e}"))?;
+        parts.push(oid.to_string());
+    }
+    Ok(parts.join("-"))
+}
+
+/// Content-addressed vector cache on disk.
+///
+/// Keyed by the hash of the embedded TEXT rather than by an entry key or a
+/// commit sha, which makes it correct for free in three ways: a version's text
+/// never changes, so an entry can never go stale; two versions with identical
+/// text share one vector; and nothing has to be invalidated when an entry is
+/// renamed, archived or rewritten.
+///
+/// It lives in the index directory because it is the same kind of thing as the
+/// Tantivy index - derived, disposable, rebuildable from the canon. Deleting it
+/// costs exactly one cold rebuild.
+pub struct VectorCache {
+    path: PathBuf,
+    fingerprint: String,
+    dim: usize,
+    map: HashMap<[u8; 20], Vec<f32>>,
+    dirty: bool,
+}
+
+const CACHE_MAGIC: &[u8; 8] = b"KYBVEC01";
+
+pub fn text_hash(text: &str) -> [u8; 20] {
+    let oid = git2::Oid::hash_object(git2::ObjectType::Blob, text.as_bytes())
+        .expect("hashing a string cannot fail");
+    let mut out = [0u8; 20];
+    out.copy_from_slice(oid.as_bytes());
+    out
+}
+
+impl VectorCache {
+    /// Never fails: an unreadable, truncated or foreign cache is simply an empty
+    /// one. A corrupt cache must cost a rebuild, never a start-up failure.
+    pub fn open(path: PathBuf, fingerprint: String) -> VectorCache {
+        let mut cache =
+            VectorCache { path, fingerprint, dim: 0, map: HashMap::new(), dirty: false };
+        match cache.read() {
+            Ok(n) if n > 0 => eprintln!("kyb: vector cache: {n} entries reused"),
+            Ok(_) => {}
+            Err(e) => eprintln!("kyb: vector cache ignored ({e}); embeddings will be recomputed"),
+        }
+        cache
+    }
+
+    fn read(&mut self) -> Result<usize> {
+        let Ok(bytes) = std::fs::read(&self.path) else { return Ok(0) };
+        let mut cur = 0usize;
+        let take = |cur: &mut usize, n: usize| -> Result<&[u8]> {
+            let end = cur.checked_add(n).ok_or_else(|| anyhow!("truncated"))?;
+            if end > bytes.len() {
+                return Err(anyhow!("truncated"));
+            }
+            let out = &bytes[*cur..end];
+            *cur = end;
+            Ok(out)
+        };
+        if take(&mut cur, 8)? != CACHE_MAGIC {
+            return Err(anyhow!("not a kyb vector cache"));
+        }
+        let fp_len = u32::from_le_bytes(take(&mut cur, 4)?.try_into()?) as usize;
+        let fp = std::str::from_utf8(take(&mut cur, fp_len)?)?.to_string();
+        if fp != self.fingerprint {
+            return Err(anyhow!("built by a different embedding model"));
+        }
+        let dim = u32::from_le_bytes(take(&mut cur, 4)?.try_into()?) as usize;
+        if dim == 0 || dim > 8192 {
+            return Err(anyhow!("implausible dimension {dim}"));
+        }
+        self.dim = dim;
+        // A half-written tail is expected: upserts append, and a crash can land
+        // mid-record. Keep what parsed and drop the rest.
+        while cur < bytes.len() {
+            let Ok(key) = take(&mut cur, 20) else { break };
+            let mut hash = [0u8; 20];
+            hash.copy_from_slice(key);
+            let Ok(raw) = take(&mut cur, dim * 4) else { break };
+            let v = raw
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                .collect();
+            self.map.insert(hash, v);
+        }
+        Ok(self.map.len())
+    }
+
+    pub fn get(&self, hash: &[u8; 20]) -> Option<Vec<f32>> {
+        self.map.get(hash).cloned()
+    }
+
+    pub fn insert(&mut self, hash: [u8; 20], vector: Vec<f32>) {
+        if self.dim == 0 {
+            self.dim = vector.len();
+        }
+        if vector.len() != self.dim {
+            return; // a model that changed under us; the fingerprint will catch it next start
+        }
+        if self.map.insert(hash, vector).is_none() {
+            self.dirty = true;
+        }
+    }
+
+    /// Rewrites the whole file. Cheap enough at this size (a few MB) and avoids
+    /// the failure modes of partial updates.
+    pub fn flush(&mut self) {
+        if !self.dirty || self.dim == 0 {
+            return;
+        }
+        let mut out = Vec::with_capacity(16 + self.map.len() * (20 + self.dim * 4));
+        out.extend_from_slice(CACHE_MAGIC);
+        out.extend_from_slice(&(self.fingerprint.len() as u32).to_le_bytes());
+        out.extend_from_slice(self.fingerprint.as_bytes());
+        out.extend_from_slice(&(self.dim as u32).to_le_bytes());
+        for (hash, v) in &self.map {
+            out.extend_from_slice(hash);
+            for f in v {
+                out.extend_from_slice(&f.to_le_bytes());
+            }
+        }
+        let tmp = self.path.with_extension("tmp");
+        if let Err(e) = std::fs::write(&tmp, &out).and_then(|_| std::fs::rename(&tmp, &self.path)) {
+            eprintln!("kyb: vector cache not written ({e}); it will be rebuilt next start");
+            return;
+        }
+        self.dirty = false;
+    }
+}
+
 /// The embedder plus a vector for every current entry.
 ///
 /// HEAD-ONLY, and deliberately so for now: one vector per key, for the version
@@ -173,6 +318,7 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 pub struct Semantic {
     embedder: tokio::sync::Mutex<Embedder>,
     vectors: tokio::sync::RwLock<VectorState>,
+    cache: tokio::sync::Mutex<VectorCache>,
 }
 
 #[derive(Clone, Debug)]
@@ -220,10 +366,15 @@ impl VectorState {
 }
 
 impl Semantic {
-    pub fn load(dir: &Path) -> Result<Semantic> {
+    /// `cache_path` belongs in the index directory: it is derived, disposable
+    /// data of exactly the same kind as the Tantivy index.
+    pub fn load(dir: &Path, cache_path: PathBuf) -> Result<Semantic> {
+        let embedder = Embedder::load(dir)?;
+        let fingerprint = model_fingerprint(dir)?;
         Ok(Semantic {
-            embedder: tokio::sync::Mutex::new(Embedder::load(dir)?),
+            embedder: tokio::sync::Mutex::new(embedder),
             vectors: tokio::sync::RwLock::new(VectorState::default()),
+            cache: tokio::sync::Mutex::new(VectorCache::open(cache_path, fingerprint)),
         })
     }
 
@@ -253,28 +404,70 @@ impl Semantic {
 
     pub async fn finish_rebuild(&self, job: RebuildJob) -> Result<usize> {
         let mut installed = 0;
-        // batch, so a big base does not build one giant tensor
-        for chunk in job.docs.chunks(16) {
-            let texts: Vec<String> = chunk.iter().map(|(_, text)| text.clone()).collect();
-            let vectors = self.embedder.lock().await.embed_passages(&texts)?;
+        let mut hits = 0usize;
+        let mut cache = self.cache.lock().await;
+
+        // Whatever the cache already holds costs nothing: the text of a version
+        // never changes, so a vector for that exact text is still the right one.
+        let mut misses: Vec<(usize, &UpdateTicket, &String, [u8; 20])> = vec![];
+        let mut ready: Vec<(&UpdateTicket, Vec<f32>)> = vec![];
+        for (idx, (ticket, text)) in job.docs.iter().enumerate() {
+            let hash = text_hash(text);
+            match cache.get(&hash) {
+                Some(v) => {
+                    hits += 1;
+                    ready.push((ticket, v));
+                }
+                None => misses.push((idx, ticket, text, hash)),
+            }
+        }
+        {
             let mut state = self.vectors.write().await;
-            for ((ticket, _), vector) in chunk.iter().zip(vectors) {
+            for (ticket, vector) in ready {
                 if state.install(ticket, vector) {
                     installed += 1;
                 }
             }
         }
+
+        // batch, so a big base does not build one giant tensor
+        for chunk in misses.chunks(16) {
+            let texts: Vec<String> = chunk.iter().map(|(_, _, text, _)| (*text).clone()).collect();
+            let vectors = self.embedder.lock().await.embed_passages(&texts)?;
+            let mut state = self.vectors.write().await;
+            for ((_, ticket, _, hash), vector) in chunk.iter().zip(vectors) {
+                cache.insert(*hash, vector.clone());
+                if state.install(ticket, vector) {
+                    installed += 1;
+                }
+            }
+        }
+        cache.flush();
+        if hits > 0 || !misses.is_empty() {
+            eprintln!("kyb: embeddings: {hits} from cache, {} computed", misses.len());
+        }
         Ok(installed)
     }
 
     pub async fn finish_upsert(&self, ticket: UpdateTicket, text: &str) -> Result<bool> {
-        let v = self
-            .embedder
-            .lock()
-            .await
-            .embed_passages(&[text.to_string()])?
-            .pop()
-            .ok_or_else(|| anyhow!("empty embedding"))?;
+        let hash = text_hash(text);
+        let cached = self.cache.lock().await.get(&hash);
+        let v = match cached {
+            Some(v) => v,
+            None => {
+                let v = self
+                    .embedder
+                    .lock()
+                    .await
+                    .embed_passages(&[text.to_string()])?
+                    .pop()
+                    .ok_or_else(|| anyhow!("empty embedding"))?;
+                let mut cache = self.cache.lock().await;
+                cache.insert(hash, v.clone());
+                cache.flush();
+                v
+            }
+        };
         Ok(self.vectors.write().await.install(&ticket, v))
     }
 
@@ -339,6 +532,70 @@ mod tests {
     #[test]
     fn fusion_without_semantics_preserves_lexical_order() {
         assert_eq!(fuse_lists(&keys(&["a", "b", "c"]), &[], 0.6), keys(&["a", "b", "c"]));
+    }
+
+    #[test]
+    fn cache_round_trips_and_a_new_model_invalidates_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vectors.cache");
+        let a = text_hash("first passage");
+        let b = text_hash("second passage");
+
+        let mut cache = VectorCache::open(path.clone(), "model-A".into());
+        cache.insert(a, vec![1.0, 0.0, 0.0]);
+        cache.insert(b, vec![0.0, 1.0, 0.0]);
+        cache.flush();
+
+        // same model: everything comes back
+        let reopened = VectorCache::open(path.clone(), "model-A".into());
+        assert_eq!(reopened.get(&a), Some(vec![1.0, 0.0, 0.0]));
+        assert_eq!(reopened.get(&b), Some(vec![0.0, 1.0, 0.0]));
+
+        // different model: vectors from two models are not comparable, and a
+        // cache that never invalidates would keep serving the old ones
+        let other = VectorCache::open(path.clone(), "model-B".into());
+        assert_eq!(other.get(&a), None, "a cache from another model must not be reused");
+        assert_eq!(other.get(&b), None);
+    }
+
+    #[test]
+    fn a_damaged_cache_costs_a_rebuild_not_a_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vectors.cache");
+        let a = text_hash("passage");
+
+        let b = text_hash("another");
+        let mut cache = VectorCache::open(path.clone(), "m".into());
+        cache.insert(a, vec![0.5; 8]);
+        cache.insert(b, vec![0.25; 8]);
+        cache.flush();
+
+        // A crash mid-append leaves a half-written record: what parsed is kept
+        // and the torn tail is dropped. Which of the two is torn depends on the
+        // map's iteration order, so the assertion is about the count, not the
+        // identity - a test that depends on HashMap ordering fails at random.
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() - 7]).unwrap();
+        let truncated = VectorCache::open(path.clone(), "m".into());
+        let survivors =
+            [truncated.get(&a), truncated.get(&b)].into_iter().flatten().collect::<Vec<_>>();
+        assert_eq!(survivors.len(), 1, "the whole record before the tear survives, the torn one does not");
+
+        // something else entirely under that name
+        std::fs::write(&path, b"this is not a vector cache at all").unwrap();
+        assert_eq!(VectorCache::open(path.clone(), "m".into()).get(&a), None);
+
+        // nothing there at all
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(VectorCache::open(path.clone(), "m".into()).get(&a), None);
+    }
+
+    /// The cache is keyed by the text, not by the entry: two entries that say
+    /// the same thing share one vector, and renaming an entry costs nothing.
+    #[test]
+    fn the_cache_is_keyed_by_content() {
+        assert_eq!(text_hash("same words"), text_hash("same words"));
+        assert_ne!(text_hash("same words"), text_hash("same words "));
     }
 
     #[test]
