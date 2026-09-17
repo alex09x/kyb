@@ -1401,7 +1401,7 @@ mod api_tests {
     use rstest::rstest;
     use tower::util::ServiceExt;
 
-    async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+    pub(super) async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
         let b = Request::builder().method(method).uri(uri);
         let req = match body {
             Some(v) => b
@@ -1419,7 +1419,7 @@ mod api_tests {
 
     // The title is Russian on purpose: one API-level ru-stem check below
     // searches «стримах» and must match «стримы» from this title.
-    fn upsert_body(key: &str, body: &str) -> Value {
+    pub(super) fn upsert_body(key: &str, body: &str) -> Value {
         json!({"key": key, "title": "NATS стримы", "body": body, "tags": ["nats"]})
     }
 
@@ -1440,7 +1440,7 @@ mod api_tests {
         (build_app(state.clone()), state, data, idx)
     }
 
-    fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
+    pub(super) fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
         let (app, _state, data, idx) = app_with_state();
         (app, data, idx)
     }
@@ -3059,5 +3059,133 @@ mod api_tests {
         let (_, v) = call(&app, "GET", "/tasks?all=true", None).await;
         assert_eq!(v["count"], 1, "and stay in the record: {v}");
         assert_eq!(v["tasks"][0]["assignee"], "agent-b");
+    }
+}
+
+/// Published claims, checked against the software that is supposed to back them.
+///
+/// A section that says what a system does NOT do is the only part of a document
+/// invalidated by our own progress, so it rots fastest and exactly when nobody
+/// is rereading it. "Remember to check it last" is an intention; this is a gate.
+///
+/// Each claim below pairs a sentence that must still be present in a published
+/// file with a check of the behaviour it describes. It fails in both directions
+/// on purpose:
+///
+///   - the sentence is there but the behaviour contradicts it -> the text lies;
+///   - the sentence is gone -> the table is stale, and whoever rewrote the
+///     paragraph has to say what the new claim is and how it is checked.
+///
+/// The second direction is the one that matters. Without it, a rewrite silently
+/// disables the gate.
+#[cfg(test)]
+mod published_claims {
+    use super::api_tests::*;
+    use axum::http::StatusCode;
+
+    const BLOG: &str = "docs/blog/agent-memory-that-keeps-its-mistakes/index.html";
+
+    fn published(rel: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"))
+    }
+
+    fn claims(rel: &str, phrase: &str) {
+        assert!(
+            published(rel).contains(phrase),
+            "{rel} no longer contains the claim {phrase:?}.\n\
+             The published text changed but this check did not. Update the claim \
+             and its check together, or the gate stops guarding anything."
+        );
+    }
+
+    /// The post says as_of, changed_between and /diff work. They must.
+    #[tokio::test]
+    async fn the_post_promises_three_temporal_questions_and_gets_them() {
+        claims(BLOG, "<code>--as-of</code> gives the base as");
+        claims(BLOG, "<code>--changed-between</code> gives what moved inside a window");
+        claims(BLOG, "<code>/diff</code> says what moved <em>inside</em> one");
+
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 9090"))).await;
+
+        let (st, v) = call(&app, "GET", "/search?q=port&as_of=2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK, "the post promises --as-of");
+        assert_eq!(v["count"], 1, "as_of returns one version per key, as the post says");
+
+        let (st, v) =
+            call(&app, "GET", "/search?q=port&changed_between=2000-01-01,2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK, "the post promises --changed-between");
+        assert_eq!(v["count"], 1);
+
+        let (st, v) = call(&app, "GET", "/knowledge/svc/diff", None).await;
+        assert_eq!(st, StatusCode::OK, "the post promises /diff");
+        assert_eq!(v["changed"], true);
+    }
+
+    /// The post says all three are lexical, and explains why: one vector per key,
+    /// for the head version.
+    ///
+    /// This one is checked at the source rather than through a response, because
+    /// the test app runs without an embedding model and reports semantic=false
+    /// for every query - which would make a behavioural assertion pass while
+    /// proving nothing. The guard below IS the claim, and removing it is exactly
+    /// the change (vectors keyed by version) that makes the sentence false.
+    #[test]
+    fn the_post_says_the_temporal_questions_are_lexical_and_the_guard_is_still_there() {
+        claims(BLOG, "All three are lexical");
+        claims(BLOG, "one vector per key,");
+
+        let src = published("src/main.rs");
+        let guard = src
+            .split("let want_semantic")
+            .nth(1)
+            .and_then(|tail| tail.split(';').next())
+            .unwrap_or_default()
+            .to_string();
+        for needed in ["!history", "as_of.is_none()", "window.is_none()"] {
+            assert!(
+                guard.contains(needed),
+                "want_semantic no longer excludes {needed}, so a versioned query can now be \
+                 answered semantically - which makes {BLOG} wrong where it says the temporal \
+                 questions are lexical. Update both together."
+            );
+        }
+    }
+
+    /// The post states the second-granularity limit. The behaviour behind it is
+    /// covered by index::tests::as_of_is_second_granular; here the sentence is
+    /// tied to the constant that keeps it true.
+    #[tokio::test]
+    async fn the_post_states_the_second_granularity_limit() {
+        claims(BLOG, "two versions written inside the same
+      second cannot be told apart");
+
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "value one"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "value two"))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/svc/history", None).await;
+        let older = h["versions"][1]["sha"].as_str().unwrap().to_string();
+        let (st, v) = call(&app, "GET", &format!("/search?q=value&as_of={older}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1, "one row per key even when the bound cannot separate versions");
+    }
+
+    /// README and the agent skill document the same three commands. An agent
+    /// that reads the skill and finds a command that does not exist is worse off
+    /// than one that never read it.
+    #[tokio::test]
+    async fn the_skill_and_readme_document_commands_that_exist() {
+        for doc in ["README.md", "skills/kyb/SKILL.md"] {
+            claims(doc, "--as-of");
+            claims(doc, "--changed-between");
+            claims(doc, "kyb diff");
+        }
+        let cli = published("skills/kyb/bin/kyb");
+        for flag in ["--as-of", "--changed-between"] {
+            assert!(cli.contains(flag), "the docs promise {flag} but the CLI does not parse it");
+        }
+        assert!(cli.contains("  diff)"), "the docs promise `kyb diff` but the CLI has no such verb");
     }
 }
