@@ -1118,9 +1118,17 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
         );
     }
     // Semantic retrieval covers current knowledge only - the vector index holds
-    // one vector per key, for the head version. A history or as_of question is
-    // about a specific past version, which no head vector can represent, so
-    // those queries stay lexical rather than silently matching today's text.
+    // one vector per key, for the head version. A history, as_of or
+    // changed_between question is about a specific past version, which no head
+    // vector can represent, so those queries stay lexical rather than silently
+    // matching today's text.
+    //
+    // PROVISIONAL, and tied to exactly one fact: vectors are head-only. Extend
+    // the vector index to (key, sha) and this restriction has no remaining
+    // justification - it must be revisited in the same change, not left to
+    // outlive the reason it was written for. It is also the reason a versioned
+    // search is lexical while a current-state search is hybrid, which is a
+    // difference no benchmark comparing the two can be allowed to inherit.
     let want_semantic = !recent
         && !history
         && as_of.is_none()

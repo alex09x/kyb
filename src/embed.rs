@@ -151,6 +151,20 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 
 /// The embedder plus a vector for every current entry.
 ///
+/// HEAD-ONLY, and deliberately so for now: one vector per key, for the version
+/// in the working tree. Every consequence of that choice is downstream of this
+/// struct - `search` returns keys rather than versions, the hybrid path
+/// materialises a key's live document, and `/search` refuses to answer
+/// `history`, `as_of` and `changed_between` semantically because no head vector
+/// can stand for a past version.
+///
+/// Extending this to (key, sha) is the change that removes all of those
+/// restrictions at once. It is not a local edit: the ticket/generation guard
+/// below is keyed by key and exists to reject a stale vector landing after a
+/// newer write, so versioning it needs care rather than a rename. The rebuild
+/// cost also moves from one pass over the head entries to one over every
+/// version in history.
+///
 /// Reranking alone cannot answer a question whose words appear nowhere in the
 /// base — BM25 returns no candidates and there is nothing to reorder. So every
 /// head entry is embedded and searched directly. The corpus is small (hundreds
