@@ -196,6 +196,7 @@ kubernetes, `orders api` reaches the key `orders-api-deploy`.
 ## 6. Read an entry and its history
 
 ```bash
+kyb query "..." --as-of 2026-08-01  # what the base said then, one version per key
 kyb get nats-streams              # current version (archived entries carry "archived":true)
 kyb get nats-streams --at <sha>   # the version at a specific commit
 kyb history nats-streams          # every version, newest first: sha · time · message · added|modified|deleted

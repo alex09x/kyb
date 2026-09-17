@@ -837,6 +837,22 @@ struct GetQ {
     at: Option<String>,
 }
 
+/// `as_of` in the three shapes an agent actually has to hand.
+///
+/// A bare date resolves to the END of that day: "what did we believe on the 1st"
+/// means once the 1st had happened. A git revision is accepted because that is
+/// what a `history` call just handed back, and making the caller convert a sha
+/// into a timestamp would be busywork with a rounding error in it.
+fn parse_as_of(raw: &str, st: &AppState) -> Option<i64> {
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Some(t.timestamp());
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        return d.and_hms_opt(23, 59, 59).map(|dt| dt.and_utc().timestamp());
+    }
+    st.store.rev_time(raw).ok().flatten()
+}
+
 fn bad_key(key: &str) -> Option<Reply> {
     if model::is_valid_key(key) {
         None
@@ -926,6 +942,10 @@ struct SearchQ {
     q: Option<String>,
     tag: Option<String>,
     history: Option<bool>,
+    /// as_of=<RFC3339 | YYYY-MM-DD | git revision>: answer as the base stood
+    /// then. A bare date means the END of that day, because "what did we
+    /// believe on the 1st" means after the 1st happened, not before it began.
+    as_of: Option<String>,
     limit: Option<usize>,
     /// sort=recent orders by commit time instead of relevance
     sort: Option<String>,
@@ -955,15 +975,34 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
     // and listings read newest first
     let recent = sort == Some("recent") || (q.trim().is_empty() && sort.is_none());
     let history = p.history.unwrap_or(false);
-    // Semantic retrieval covers current knowledge only: history questions are
-    // "what did this say back then", which is a lexical, not a fuzzy, ask.
-    let want_semantic =
-        !recent && !history && !q.trim().is_empty() && st.semantic.is_some() && p.semantic != Some(false);
+    let as_of = match p.as_of.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(raw) => match parse_as_of(raw, &st) {
+            Some(t) => Some(t),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "as_of: expected an RFC3339 timestamp, a YYYY-MM-DD date, or a git revision that resolves"})),
+                )
+            }
+        },
+    };
+    // Semantic retrieval covers current knowledge only - the vector index holds
+    // one vector per key, for the head version. A history or as_of question is
+    // about a specific past version, which no head vector can represent, so
+    // those queries stay lexical rather than silently matching today's text.
+    let want_semantic = !recent
+        && !history
+        && as_of.is_none()
+        && !q.trim().is_empty()
+        && st.semantic.is_some()
+        && p.semantic != Some(false);
     // an empty ?kind= from the CLI is "no filter", not "match nothing"
     let norm = |o: &Option<String>| o.clone().filter(|s| !s.trim().is_empty());
     let opts = index::SearchOpts {
         tags: tags.clone(),
         history,
+        as_of,
         limit: if want_semantic { limit.max(24) } else { limit },
         recent,
         kind: norm(&p.kind),
@@ -1304,6 +1343,51 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn search_as_of_over_http() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 9090"))).await;
+
+        // a date in the past: the entry did not exist yet
+        let (st, v) = call(&app, "GET", "/search?q=port&as_of=2000-01-01", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 0);
+
+        // a date in the future: one row, the current value, and never semantic -
+        // the vector index holds head vectors only
+        let (st, v) = call(&app, "GET", "/search?q=port&as_of=2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1, "as_of returns one version per key");
+        assert_eq!(v["semantic"], false, "as_of must not be answered from head vectors");
+        assert!(v["hits"][0]["body"].as_str().unwrap().contains("9090"));
+
+        // a git revision is accepted: it is what /history just handed back
+        let (_, h) = call(&app, "GET", "/knowledge/svc/history", None).await;
+        let sha = h["versions"][0]["sha"].as_str().unwrap().to_string();
+        let (st, v) = call(&app, "GET", &format!("/search?q=port&as_of={sha}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1);
+
+        // an RFC3339 instant is accepted too
+        let (st, _) =
+            call(&app, "GET", "/search?q=port&as_of=2026-08-01T12%3A00%3A00Z", None).await;
+        assert_eq!(st, StatusCode::OK);
+    }
+
+    #[rstest]
+    #[case("not-a-date")]
+    #[case("2026-13-99")]
+    #[case("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")]
+    #[tokio::test]
+    async fn search_as_of_rejects_garbage(#[case] value: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "body"))).await;
+        let (st, v) = call(&app, "GET", &format!("/search?as_of={value}"), None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "as_of={value} must be refused, got {v}");
+        assert!(v["error"].as_str().unwrap().contains("as_of"));
     }
 
     #[tokio::test]

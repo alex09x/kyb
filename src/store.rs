@@ -197,6 +197,20 @@ impl Store {
         Ok(None)
     }
 
+    /// Commit time of any revision git can resolve - a sha, a prefix, a tag.
+    /// Lets `as_of` accept "the state at this commit" as well as a timestamp,
+    /// which is the form an agent has to hand after a `history` call.
+    pub fn rev_time(&self, rev: &str) -> Result<Option<i64>> {
+        let repo = self.repo()?;
+        let Ok(obj) = repo.revparse_single(rev) else {
+            return Ok(None);
+        };
+        let Ok(commit) = obj.peel_to_commit() else {
+            return Ok(None);
+        };
+        Ok(Some(commit.time().seconds()))
+    }
+
     fn commit_path(&self, rel: &str, msg: &str, delete: bool) -> Result<(String, i64)> {
         let repo = self.repo()?;
         let mut idx = repo.index()?;
