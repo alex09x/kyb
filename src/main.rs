@@ -265,6 +265,17 @@ fn commit_locked(
         );
     }
     let mut resp = json!({"key": c.entry.key, "sha": c.sha, "changed": true, "action": action});
+    // Only on a create, and only as information. Two near-identical keys split
+    // one topic in half while both entries answer and nothing fails - the
+    // author is the only one who can tell a family apart from a slip.
+    if action == "created" {
+        let existing = st.store.list_head().unwrap_or_default();
+        let similar =
+            model::similar_keys(&c.entry.key, existing.iter().map(|e| e.key.as_str()));
+        if !similar.is_empty() {
+            resp["similar"] = json!(similar);
+        }
+    }
     if let (Some(obj), Some(add)) = (resp.as_object_mut(), extra.as_object()) {
         obj.extend(add.clone());
     }

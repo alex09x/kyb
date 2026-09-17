@@ -1104,6 +1104,43 @@ mod tests {
         assert!(!a.same_content(&b));
     }
 
+    /// The case that prompted this: two agents wrote the same rule minutes
+    /// apart, one key ending in "base" and the other in "baseline".
+    #[test]
+    fn a_near_twin_key_is_surfaced() {
+        let existing = [
+            "rule-name-your-comparison-baseline",
+            "rule-limitations-section-verified-last",
+            "kyb-temporal-query-gap",
+        ];
+        assert_eq!(
+            similar_keys("rule-name-your-comparison-base", existing.into_iter()),
+            vec!["rule-name-your-comparison-baseline"]
+        );
+    }
+
+    /// A deliberate series is not a slip, and a warning that fires on one
+    /// teaches people to ignore it. Calibrated against the operator's own key
+    /// space, where these three shapes are the whole of the false positives.
+    #[rstest]
+    #[case("questiontocase-benchmark-v2-2026-09-17", "questiontocase-benchmark-v1-2026-09-17")]
+    #[case("tester-run16-analysis", "tester-run15-analysis")]
+    #[case("task-prod-code-rag-rat-rust-receiver-resolution", "prod-code-rag-rat-rust-receiver-resolution")]
+    fn a_series_is_not_a_duplicate(#[case] new: &str, #[case] existing: &str) {
+        assert!(
+            similar_keys(new, [existing].into_iter()).is_empty(),
+            "{new} vs {existing} differ only by a number or a kind prefix"
+        );
+    }
+
+    #[test]
+    fn unrelated_keys_stay_quiet() {
+        let existing = ["nats-streams", "kyb-architecture", "inc-2026-08-06-orders-api-oom"];
+        assert!(similar_keys("queue-retention", existing.into_iter()).is_empty());
+        // and a key never reports itself
+        assert!(similar_keys("nats-streams", ["nats-streams"].into_iter()).is_empty());
+    }
+
     #[test]
     fn diff_reports_the_fields_that_moved() {
         let mut a = Entry {
@@ -1277,4 +1314,90 @@ pub fn diff_entries(from: &Entry, to: &Entry) -> (Vec<FieldChange>, BodyDiff) {
     scalar("refs", &join(&from.refs), &join(&to.refs));
     scalar("knowledge", &join(&from.knowledge), &join(&to.knowledge));
     (fields, line_diff(&from.body, &to.body))
+}
+
+/// Keys close enough to a new one that the author should see them before
+/// committing to a name.
+///
+/// A knowledge base is worth what it is findable at, and two near-identical keys
+/// split one topic in half without anything failing: both entries exist, both
+/// answer, and a search finds whichever it likes. Nothing in the system objects,
+/// because nothing is wrong - which is the shape of every expensive failure we
+/// keep meeting.
+///
+/// This informs, it does not block. Calibrated on the operator's own 866 keys:
+/// at a 0.85 similarity threshold, 12 of 374,545 pairs come close, and 5 of
+/// those are deliberate series - `benchmark-v1`/`v2`, `run14`/`run15`, a
+/// `task-` twin of a knowledge entry - which the shape rule below suppresses.
+/// The rest are real families (one exchange name apart), and they are shown
+/// without alarm: the author knows whether the resemblance is intended, and a
+/// warning that cries wolf teaches people to scroll past it.
+const SIMILAR_KEY_THRESHOLD: f64 = 0.85;
+
+/// Two keys with the same shape differ only by a number or by a kind prefix,
+/// which is a series, not a slip.
+fn key_shape(key: &str) -> String {
+    let stripped = key.strip_prefix(TASK_PREFIX).or_else(|| key.strip_prefix(INCIDENT_PREFIX)).unwrap_or(key);
+    let mut out = String::with_capacity(stripped.len());
+    let mut in_digits = false;
+    for ch in stripped.chars() {
+        if ch.is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+                in_digits = true;
+            }
+        } else {
+            out.push(ch);
+            in_digits = false;
+        }
+    }
+    out
+}
+
+/// Levenshtein distance, abandoned as soon as it exceeds `cap`. The cap is what
+/// makes this cheap enough to run against every existing key on every create.
+fn edit_distance_within(a: &str, b: &str, cap: usize) -> Option<usize> {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    if a.len().abs_diff(b.len()) > cap {
+        return None;
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        let mut best = i;
+        for j in 1..=b.len() {
+            let sub = prev[j - 1] + usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(sub);
+            best = best.min(cur[j]);
+        }
+        if best > cap {
+            return None;
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    let d = prev[b.len()];
+    (d <= cap).then_some(d)
+}
+
+pub fn similar_keys<'a>(new: &str, existing: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let shape_new = key_shape(new);
+    let mut out: Vec<(usize, String)> = vec![];
+    for other in existing {
+        if other == new {
+            continue;
+        }
+        let longest = new.chars().count().max(other.chars().count());
+        let cap = (longest as f64 * (1.0 - SIMILAR_KEY_THRESHOLD)) as usize;
+        if cap == 0 {
+            continue;
+        }
+        let Some(d) = edit_distance_within(new, other, cap) else { continue };
+        if key_shape(other) == shape_new {
+            continue;
+        }
+        out.push((d, other.to_string()));
+    }
+    out.sort();
+    out.into_iter().map(|(_, k)| k).take(3).collect()
 }
