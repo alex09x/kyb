@@ -144,6 +144,11 @@ pub struct SearchOpts {
     /// the current one. `history` is about *all* versions; this is about *one*
     /// moment, and they are different questions.
     pub as_of: Option<i64>,
+    /// Unix seconds, inclusive: which entries moved inside this window. Answers
+    /// "what changed while I was away", which is the question an agent taking
+    /// over from another actually has - and which neither `history` (all time)
+    /// nor `as_of` (one instant) can express.
+    pub changed_between: Option<(i64, i64)>,
     pub limit: usize,
     /// Order by commit time instead of relevance ("what changed lately").
     pub recent: bool,
@@ -477,7 +482,11 @@ impl SearchIndex {
         // as_of is a history question - it asks for a version, not for the head -
         // so it selects the history world the same way --history does.
         let as_of = opts.as_of;
-        let head_val = if opts.history || as_of.is_some() { 0 } else { 1 };
+        let window = opts.changed_between;
+        // Both read versions rather than the head slice; both collapse to one
+        // row per key afterwards.
+        let versioned = opts.history || as_of.is_some() || window.is_some();
+        let head_val = if versioned { 0 } else { 1 };
         clauses.push((
             Occur::Must,
             Box::new(TermQuery::new(
@@ -491,6 +500,15 @@ impl SearchIndex {
                 Box::new(RangeQuery::new_i64(
                     "committed_at".to_string(),
                     i64::MIN..at.saturating_add(1),
+                )),
+            ));
+        }
+        if let Some((lo, hi)) = window {
+            clauses.push((
+                Occur::Must,
+                Box::new(RangeQuery::new_i64(
+                    "committed_at".to_string(),
+                    lo..hi.saturating_add(1),
                 )),
             ));
         }
@@ -531,7 +549,8 @@ impl SearchIndex {
         // its own superseded versions. The corpus is hundreds to thousands of
         // entries by design (see the README), so collecting every match and
         // collapsing in memory is both exact and cheap.
-        let fetch = if as_of.is_some() { limit.max(AS_OF_CANDIDATES) } else { limit };
+        let collapse = as_of.is_some() || window.is_some();
+        let fetch = if collapse { limit.max(AS_OF_CANDIDATES) } else { limit };
         let top: Vec<(f32, tantivy::DocAddress)> = if opts.recent {
             // seq, not committed_at: git time is 1s-granular and a write burst
             // ties on it, turning "latest first" into segment-order roulette
@@ -547,9 +566,10 @@ impl SearchIndex {
         } else {
             searcher.search(&query, &TopDocs::with_limit(fetch))?
         };
-        let top = match as_of {
-            None => top,
-            Some(_) => self.collapse_to_latest_per_key(&searcher, top, limit)?,
+        let top = if collapse {
+            self.collapse_to_latest_per_key(&searcher, top, limit)?
+        } else {
+            top
         };
         let mut hits = vec![];
         for (score, addr) in top {

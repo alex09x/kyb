@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub const KIND_KNOWLEDGE: &str = "knowledge";
@@ -1102,4 +1103,178 @@ mod tests {
         b.body = "different".into();
         assert!(!a.same_content(&b));
     }
+
+    #[test]
+    fn diff_reports_the_fields_that_moved() {
+        let mut a = Entry {
+            key: "svc".into(),
+            title: "Service".into(),
+            status: "open".into(),
+            tags: vec!["infra".into()],
+            body: "line one\nthe port is 8080\nline three".into(),
+            ..Default::default()
+        };
+        let mut b = a.clone();
+        b.status = "resolved".into();
+        b.tags = vec!["infra".into(), "postmortem".into()];
+        b.body = "line one\nthe port is 9090\nline three".into();
+
+        let (fields, body) = diff_entries(&a, &b);
+        assert_eq!(
+            fields,
+            vec![
+                FieldChange { field: "status", from: "open".into(), to: "resolved".into() },
+                FieldChange { field: "tags", from: "infra".into(), to: "infra, postmortem".into() },
+            ]
+        );
+        assert_eq!(body.removed, vec!["the port is 8080"]);
+        assert_eq!(body.added, vec!["the port is 9090"]);
+
+        // identical versions produce nothing at all
+        a.status = "resolved".into();
+        a.tags = b.tags.clone();
+        a.body = b.body.clone();
+        let (fields, body) = diff_entries(&a, &b);
+        assert!(fields.is_empty());
+        assert_eq!(body, BodyDiff::default());
+    }
+
+    /// The point of the LCS: inserting one line must report one added line, not
+    /// every line after it.
+    #[test]
+    fn diff_does_not_cascade_after_an_insert() {
+        let a = Entry { body: "a\nb\nc\nd".into(), ..Default::default() };
+        let b = Entry { body: "a\nb\nNEW\nc\nd".into(), ..Default::default() };
+        let (_, body) = diff_entries(&a, &b);
+        assert_eq!(body.added, vec!["NEW"]);
+        assert!(body.removed.is_empty(), "nothing was removed: {:?}", body.removed);
+    }
+
+    #[test]
+    fn diff_falls_back_on_a_body_too_large_to_align() {
+        let big: String = (0..LCS_MAX_LINES + 10).map(|i| format!("line {i}\n")).collect();
+        let a = Entry { body: big.clone(), ..Default::default() };
+        let b = Entry { body: format!("{big}extra tail\n"), ..Default::default() };
+        let (_, body) = diff_entries(&a, &b);
+        assert_eq!(body.added, vec!["extra tail"], "the fallback still finds what appeared");
+        assert!(body.removed.is_empty());
+    }
+
+}
+
+/// One scalar or list field that differs between two versions of an entry.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct FieldChange {
+    pub field: &'static str,
+    pub from: String,
+    pub to: String,
+}
+
+/// Body lines that appeared and disappeared between two versions.
+#[derive(Debug, Clone, Default, serde::Serialize, PartialEq)]
+pub struct BodyDiff {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+/// Longest common subsequence over lines, so the diff reports the lines that
+/// actually moved rather than every line after the first edit.
+///
+/// Quadratic, which is fine for entry-sized bodies. Past `LCS_MAX_LINES` it
+/// falls back to comparing line multisets: still correct about what appeared and
+/// disappeared, just blind to order. An entry that large is prose nobody diffs
+/// line by line anyway, and the alternative is an endpoint that can hang.
+const LCS_MAX_LINES: usize = 2_000;
+
+fn line_diff(from: &str, to: &str) -> BodyDiff {
+    let a: Vec<&str> = from.lines().collect();
+    let b: Vec<&str> = to.lines().collect();
+    if a.len() > LCS_MAX_LINES || b.len() > LCS_MAX_LINES {
+        let mut counts: HashMap<&str, i64> = HashMap::new();
+        for l in &a {
+            *counts.entry(l).or_default() += 1;
+        }
+        for l in &b {
+            *counts.entry(l).or_default() -= 1;
+        }
+        let mut out = BodyDiff::default();
+        for l in &a {
+            if counts.get(l).copied().unwrap_or(0) > 0 {
+                out.removed.push((*l).to_string());
+                *counts.get_mut(l).unwrap() -= 1;
+            }
+        }
+        for l in &b {
+            if counts.get(l).copied().unwrap_or(0) < 0 {
+                out.added.push((*l).to_string());
+                *counts.get_mut(l).unwrap() += 1;
+            }
+        }
+        return out;
+    }
+
+    let (n, m) = (a.len(), b.len());
+    let mut table = vec![0u32; (n + 1) * (m + 1)];
+    let at = |i: usize, j: usize| i * (m + 1) + j;
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            table[at(i, j)] = if a[i] == b[j] {
+                table[at(i + 1, j + 1)] + 1
+            } else {
+                table[at(i + 1, j)].max(table[at(i, j + 1)])
+            };
+        }
+    }
+    let mut out = BodyDiff::default();
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            i += 1;
+            j += 1;
+        } else if table[at(i + 1, j)] >= table[at(i, j + 1)] {
+            out.removed.push(a[i].to_string());
+            i += 1;
+        } else {
+            out.added.push(b[j].to_string());
+            j += 1;
+        }
+    }
+    out.removed.extend(a[i..].iter().map(|s| s.to_string()));
+    out.added.extend(b[j..].iter().map(|s| s.to_string()));
+    out
+}
+
+/// What changed between two versions of one entry.
+///
+/// `/history` answers *that* an entry changed. This answers *what* — the
+/// question an agent has when a fact it is holding turns out to have moved.
+pub fn diff_entries(from: &Entry, to: &Entry) -> (Vec<FieldChange>, BodyDiff) {
+    let join = |v: &[String]| v.join(", ");
+    let mut fields = vec![];
+    let mut scalar = |name: &'static str, a: &str, b: &str| {
+        if a != b {
+            fields.push(FieldChange { field: name, from: a.to_string(), to: b.to_string() });
+        }
+    };
+    scalar("title", &from.title, &to.title);
+    scalar("kind", &from.kind, &to.kind);
+    scalar("service", &from.service, &to.service);
+    scalar("severity", &from.severity, &to.severity);
+    scalar("status", &from.status, &to.status);
+    scalar("priority", &from.priority, &to.priority);
+    scalar("blocked_reason", &from.blocked_reason, &to.blocked_reason);
+    scalar("assignee", &from.assignee, &to.assignee);
+    scalar("parent_task", &from.parent_task, &to.parent_task);
+    scalar("resolution", &from.resolution, &to.resolution);
+    scalar("detection", &from.detection, &to.detection);
+    scalar("started_at", &from.started_at, &to.started_at);
+    scalar("detected_at", &from.detected_at, &to.detected_at);
+    scalar("mitigated_at", &from.mitigated_at, &to.mitigated_at);
+    scalar("resolved_at", &from.resolved_at, &to.resolved_at);
+    scalar("updated_at", &from.updated_at, &to.updated_at);
+    scalar("hosts", &join(&from.hosts), &join(&to.hosts));
+    scalar("tags", &join(&from.tags), &join(&to.tags));
+    scalar("refs", &join(&from.refs), &join(&to.refs));
+    scalar("knowledge", &join(&from.knowledge), &join(&to.knowledge));
+    (fields, line_diff(&from.body, &to.body))
 }

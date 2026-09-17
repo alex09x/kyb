@@ -109,6 +109,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/knowledge", post(upsert))
         .route("/knowledge/{key}", get(get_one).delete(remove))
         .route("/knowledge/{key}/history", get(history))
+        .route("/knowledge/{key}/diff", get(diff))
         .route("/incidents", post(upsert_incident).get(list_incidents))
         .route("/incidents/{key}/resolve", post(resolve_incident))
         .route("/tasks", post(upsert_task).get(list_tasks))
@@ -844,11 +845,19 @@ struct GetQ {
 /// what a `history` call just handed back, and making the caller convert a sha
 /// into a timestamp would be busywork with a rounding error in it.
 fn parse_as_of(raw: &str, st: &AppState) -> Option<i64> {
+    parse_as_of_bound(raw, st, true)
+}
+
+/// `upper` decides what a bare date means: the end of that day for an upper
+/// bound, the start of it for a lower one. So `2026-08-01,2026-08-01` is the
+/// whole of the 1st rather than an empty instant.
+fn parse_as_of_bound(raw: &str, st: &AppState, upper: bool) -> Option<i64> {
     if let Ok(t) = chrono::DateTime::parse_from_rfc3339(raw) {
         return Some(t.timestamp());
     }
     if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
-        return d.and_hms_opt(23, 59, 59).map(|dt| dt.and_utc().timestamp());
+        let t = if upper { d.and_hms_opt(23, 59, 59) } else { d.and_hms_opt(0, 0, 0) };
+        return t.map(|dt| dt.and_utc().timestamp());
     }
     st.store.rev_time(raw).ok().flatten()
 }
@@ -924,6 +933,90 @@ async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) 
     }
 }
 
+#[derive(Deserialize)]
+struct DiffQ {
+    /// Git revisions. Omit both to compare the two most recent versions -
+    /// "what just changed" is the question that gets asked most. Omit `to`
+    /// alone to compare a past version against the current one.
+    from: Option<String>,
+    to: Option<String>,
+}
+
+/// What changed between two versions of one entry.
+///
+/// `/history` reports *that* a version exists; this reports *what* moved in it.
+/// Without it, answering "where did this change" means fetching two versions
+/// with `?at=` and comparing them by hand, which is the sort of work an agent
+/// gets wrong quietly.
+async fn diff(State(st): St, Path(key): Path<String>, Query(q): Query<DiffQ>) -> Reply {
+    if let Some(r) = bad_key(&key) {
+        return r;
+    }
+    let versions = match st.store.history(&key) {
+        Err(e) => return err500(e),
+        Ok(v) if v.is_empty() => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("no history for '{key}'")})),
+            )
+        }
+        Ok(v) => v,
+    };
+    // history is newest-first
+    let pick = |o: &Option<String>, fallback: Option<&str>| -> Option<String> {
+        o.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| fallback.map(str::to_string))
+    };
+    let to_rev = pick(&q.to, versions.first().map(|v| v.sha.as_str()));
+    let from_rev = pick(&q.from, versions.get(1).map(|v| v.sha.as_str()));
+    let (Some(from_rev), Some(to_rev)) = (from_rev, to_rev) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("'{key}' has only one version; pass ?from=<rev>&to=<rev> explicitly")
+            })),
+        );
+    };
+
+    let mut sides = vec![];
+    for rev in [&from_rev, &to_rev] {
+        match st.store.get_at(&key, rev) {
+            Err(e) => return err500(e),
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": format!("'{key}' does not exist at revision '{rev}'")})),
+                )
+            }
+            Ok(Some(entry)) => {
+                let at = st.store.rev_time(rev).ok().flatten().map(iso_secs).unwrap_or_default();
+                sides.push((entry, at));
+            }
+        }
+    }
+    let (to_entry, to_at) = sides.pop().expect("two sides pushed");
+    let (from_entry, from_at) = sides.pop().expect("two sides pushed");
+    let (fields, body) = model::diff_entries(&from_entry, &to_entry);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "key": key,
+            "from": {"rev": from_rev, "committed_at": from_at},
+            "to": {"rev": to_rev, "committed_at": to_at},
+            "changed": !fields.is_empty() || !body.added.is_empty() || !body.removed.is_empty(),
+            "fields": fields,
+            "body": body,
+        })),
+    )
+}
+
+fn iso_secs(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0).map(|t| t.to_rfc3339()).unwrap_or_default()
+}
+
 async fn history(State(st): St, Path(key): Path<String>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
@@ -946,6 +1039,11 @@ struct SearchQ {
     /// then. A bare date means the END of that day, because "what did we
     /// believe on the 1st" means after the 1st happened, not before it began.
     as_of: Option<String>,
+    /// changed_between=<start>,<end>: which entries moved inside that window.
+    /// Each side takes the same three shapes as as_of; a bare start date means
+    /// the START of that day and a bare end date the END, so a single day is
+    /// written `2026-08-01,2026-08-01` and means all of it.
+    changed_between: Option<String>,
     limit: Option<usize>,
     /// sort=recent orders by commit time instead of relevance
     sort: Option<String>,
@@ -987,6 +1085,38 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
             }
         },
     };
+    let window = match p.changed_between.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(raw) => {
+            let Some((a, b)) = raw.split_once(',') else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "changed_between: expected <start>,<end>"})),
+                );
+            };
+            match (parse_as_of_bound(a.trim(), &st, false), parse_as_of_bound(b.trim(), &st, true)) {
+                (Some(lo), Some(hi)) if lo <= hi => Some((lo, hi)),
+                (Some(_), Some(_)) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "changed_between: start is after end"})),
+                    )
+                }
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "changed_between: each side must be an RFC3339 timestamp, a YYYY-MM-DD date, or a git revision that resolves"})),
+                    )
+                }
+            }
+        }
+    };
+    if as_of.is_some() && window.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "as_of and changed_between ask different questions; pass one"})),
+        );
+    }
     // Semantic retrieval covers current knowledge only - the vector index holds
     // one vector per key, for the head version. A history or as_of question is
     // about a specific past version, which no head vector can represent, so
@@ -994,6 +1124,7 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
     let want_semantic = !recent
         && !history
         && as_of.is_none()
+        && window.is_none()
         && !q.trim().is_empty()
         && st.semantic.is_some()
         && p.semantic != Some(false);
@@ -1003,6 +1134,7 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
         tags: tags.clone(),
         history,
         as_of,
+        changed_between: window,
         limit: if want_semantic { limit.max(24) } else { limit },
         recent,
         kind: norm(&p.kind),
@@ -1343,6 +1475,108 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn diff_endpoint() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+
+        // one version: there is nothing to compare it against, and saying so
+        // beats inventing an empty diff
+        let (st, v) = call(&app, "GET", "/knowledge/svc/diff", None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(v["error"].as_str().unwrap().contains("only one version"));
+
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 9090"))).await;
+
+        // no revisions: the two most recent, which is "what just changed"
+        let (st, v) = call(&app, "GET", "/knowledge/svc/diff", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["changed"], true);
+        assert_eq!(v["body"]["removed"][0], "the port is 8080");
+        assert_eq!(v["body"]["added"][0], "the port is 9090");
+
+        // explicit revisions, and a version compared with itself changes nothing
+        let (_, h) = call(&app, "GET", "/knowledge/svc/history", None).await;
+        let newest = h["versions"][0]["sha"].as_str().unwrap().to_string();
+        let oldest = h["versions"][1]["sha"].as_str().unwrap().to_string();
+        let (st, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from={oldest}&to={newest}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["body"]["added"][0], "the port is 9090");
+        let (_, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from={newest}&to={newest}"), None).await;
+        assert_eq!(v["changed"], false);
+        assert!(v["fields"].as_array().unwrap().is_empty());
+
+        // reversing the pair reverses the diff
+        let (_, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from={newest}&to={oldest}"), None).await;
+        assert_eq!(v["body"]["removed"][0], "the port is 9090");
+        assert_eq!(v["body"]["added"][0], "the port is 8080");
+
+        // an unresolvable revision is a 404, never a 500
+        let (st, _) = call(&app, "GET", "/knowledge/svc/diff?from=zzz&to=zzz", None).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = call(&app, "GET", "/knowledge/nope/diff", None).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn search_changed_between() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+
+        // a window that contains today catches it; one in the past does not
+        let (st, v) =
+            call(&app, "GET", "/search?q=port&changed_between=2000-01-01,2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["semantic"], false, "a window question is not a head question");
+
+        let (_, v) =
+            call(&app, "GET", "/search?q=port&changed_between=2000-01-01,2000-12-31", None).await;
+        assert_eq!(v["count"], 0);
+
+        // a busy key still reports once
+        for body in ["revision a", "revision b", "revision c"] {
+            call(&app, "POST", "/knowledge", Some(upsert_body("busy", body))).await;
+        }
+        let (_, v) =
+            call(&app, "GET", "/search?q=revision&changed_between=2000-01-01,2999-01-01", None).await;
+        assert_eq!(v["count"], 1, "one row per key that moved");
+        assert!(v["hits"][0]["body"].as_str().unwrap().contains("revision c"));
+    }
+
+    #[rstest]
+    #[case("2026-08-01", "expected <start>,<end>")]
+    #[case("nonsense,2026-08-02", "must be an RFC3339")]
+    #[case("2026-08-05,2026-08-01", "start is after end")]
+    #[tokio::test]
+    async fn search_changed_between_rejects_garbage(#[case] value: &str, #[case] hint: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "body"))).await;
+        let (st, v) = call(&app, "GET", &format!("/search?changed_between={value}"), None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{value} must be refused, got {v}");
+        assert!(v["error"].as_str().unwrap().contains(hint), "{v}");
+    }
+
+    /// One instant and one window are different questions; answering both at
+    /// once would silently pick one.
+    #[tokio::test]
+    async fn as_of_and_changed_between_are_mutually_exclusive() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "body"))).await;
+        let (st, v) = call(
+            &app,
+            "GET",
+            "/search?as_of=2026-08-01&changed_between=2026-08-01,2026-08-02",
+            None,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(v["error"].as_str().unwrap().contains("different questions"));
     }
 
     #[tokio::test]

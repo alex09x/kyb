@@ -29,13 +29,14 @@ usage() {
   local status="${1:-1}"
   cat >&2 <<'EOF'
 kyb — Know Your Business (our infrastructure knowledge base)
-  kyb query "text" [--tag a,b] [--history] [--as-of DATE|SHA] [--recent] [--limit N]
+  kyb query "text" [--tag a,b] [--history] [--as-of DATE|SHA] [--changed-between A,B] [--recent] [--limit N]
             [--kind knowledge|incident|task] [--status S] [--service X]
             [--priority P] [--assignee A] [--parent task-<slug>]
   kyb tags                                          (which topics the base covers)
   kyb add --key <slug> --title "..." [--tags a,b] [--refs r1,r2]   (body on stdin)
   kyb get <key> [--at <sha>]
   kyb history <key>
+  kyb diff <key> [--from REV] [--to REV]
   kyb rm <key>
   kyb reindex
   kyb health
@@ -86,13 +87,14 @@ case "$cmd" in
     ;;
   query|q)
     text="${1:-}"; [ $# -gt 0 ] && shift || true
-    tag=""; history="false"; as_of=""; limit="10"; sort=""; kind=""; status=""; service=""
+    tag=""; history="false"; as_of=""; changed=""; limit="10"; sort=""; kind=""; status=""; service=""
     priority=""; assignee=""; parent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --tag|--tags) tag="$2"; shift 2 ;;
         --history) history="true"; shift ;;
         --as-of) as_of="${2:-}"; shift 2 ;;
+        --changed-between) changed="${2:-}"; shift 2 ;;
         --limit) limit="$2"; shift 2 ;;
         --recent) sort="recent"; shift ;;
         --kind) kind="$2"; shift 2 ;;
@@ -104,7 +106,7 @@ case "$cmd" in
         *) die "query: unknown flag $1" ;;
       esac
     done
-    kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&as_of=$(urlenc "$as_of")&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")" | pretty
+    kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&as_of=$(urlenc "$as_of")&changed_between=$(urlenc "$changed")&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")" | pretty
     ;;
   tags)
     kyb_curl "$BASE/tags" | pretty
@@ -348,6 +350,20 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     q=""; [ -n "$at" ] && q="?at=$(urlenc "$at")"
     kyb_curl "$BASE/knowledge/$key$q" | pretty
     ;;
+  diff)
+    key="${1:-}"; shift || true
+    [ -n "$key" ] || die "diff: <key> required"
+    from=""; to=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --from) from="${2:-}"; shift 2 ;;
+        --to) to="${2:-}"; shift 2 ;;
+        *) die "diff: unknown option $1" ;;
+      esac
+    done
+    kyb_curl "$BASE/knowledge/$key/diff?from=$(urlenc "$from")&to=$(urlenc "$to")" | pretty
+    ;;
+
   history)
     key="${1:-}"; [ -n "$key" ] || usage
     kyb_curl "$BASE/knowledge/$key/history" | pretty

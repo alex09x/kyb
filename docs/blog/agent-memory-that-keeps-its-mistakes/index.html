@@ -239,15 +239,16 @@ inc-2026-05-14-checkout-timeouts  ·  resolved  ·  semantic hit ✓</code></pre
     <div class="note">
       <p><strong>Being straight about the gap.</strong> Half of the temporal query layer exists.
       The other half does not, and the roadmap is not written in the present tense here.</p>
-      <p><em>What works.</em> <code>--as-of</code> answers "what did we believe on 1 August": it
-      searches the versions under a time bound and collapses to one row per key — the value that was
-      current then, not today's. It takes a date, an RFC3339 instant, or a commit sha.</p>
-      <p><em>What does not.</em> There is no diff endpoint, so <code>/history</code> tells you
-      <em>that</em> an entry changed, not <em>what</em> changed in it, and "where did this change"
-      still means fetching two versions and comparing them yourself. There is no way to ask what
-      moved across a window — the question an agent taking over from another actually has. And
-      <code>--as-of</code> is lexical: the vector index holds one vector per key for the head
-      version, so a question about a past version has nothing to match against semantically.</p>
+      <p><em>What works.</em> Three questions, three answers. <code>--as-of</code> gives the base as
+      it stood at a moment — one row per key, the value that was current then, not today's.
+      <code>--changed-between</code> gives what moved inside a window, which is the question an agent
+      taking over from another actually has. <code>/diff</code> says what moved <em>inside</em> one
+      entry, field by field and line by line, instead of leaving you to fetch two versions and
+      compare them by hand.</p>
+      <p><em>What does not.</em> All three are lexical. The vector index holds one vector per key,
+      for the head version, so a question about a past version has nothing to match against
+      semantically — ask it in words the old entry did not use and the search will not find it.
+      Extending the vectors to every version is small and is the next thing.</p>
       <p>One more honest limit: git stamps whole seconds, so two versions written inside the same
       second cannot be told apart by <code>--as-of</code>, and the later one wins.</p>
     </div>
