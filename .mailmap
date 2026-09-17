@@ -1,0 +1,28 @@
+# One author, seven identities.
+#
+# The history carries four addresses for alex09x/Alex plus a second GitHub
+# account (dip-labs), all the same person. Without this file `git shortlog -sne`
+# reports 56 commits split across six identities, which reads as a team that
+# never existed - and that reading has to be explained away to a journal editor
+# and to anyone auditing authorship.
+#
+# .mailmap fixes how git *reports* history. It does not rewrite commit objects
+# and it is not read by Zenodo or by GitHub's citation box - CITATION.cff is
+# what those consume. Both must be correct before a DOI is minted, because a
+# Zenodo deposition is an immutable archive: mint first and the split authorship
+# is preserved permanently.
+#
+# The canonical address below is a controlled domain rather than a GitHub
+# noreply address, which is not a durable citation contact. Changing the
+# canonical name or address is a one-line edit here and in CITATION.cff - do it
+# before the deposition, not after.
+#
+# Verify with:  git shortlog -sne HEAD   ->  a single line.
+
+alex09x <big@prod.codes> <5381530+alex09x@users.noreply.github.com>
+alex09x <big@prod.codes> <alex09x@users.noreply.github.com>
+alex09x <big@prod.codes> <git@prod.codes>
+alex09x <big@prod.codes> <lol@lol.lol>
+alex09x <big@prod.codes> <306900425+dip-labs@users.noreply.github.com>
+alex09x <big@prod.codes> Alex <git@prod.codes>
+alex09x <big@prod.codes> dip-labs <306900425+dip-labs@users.noreply.github.com>

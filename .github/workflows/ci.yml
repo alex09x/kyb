@@ -14,12 +14,26 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # Full history: the authorship check below reads `git shortlog`, and on the
+      # default shallow clone it would see one commit and pass vacuously.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
       - name: Refuse to publish internal infrastructure data
         run: bash scripts/check-no-internal-data.sh
+      - name: Validate citation metadata
+        run: bash scripts/test-citation.sh
+      - name: Verify authorship collapses to one identity
+        run: |
+          identities=$(git shortlog -sne HEAD | wc -l | tr -d ' ')
+          git shortlog -sne HEAD
+          if [ "$identities" -ne 1 ]; then
+            echo "::error::.mailmap must collapse the history to one identity, got $identities" >&2
+            exit 1
+          fi
       - name: Validate and install agent skill
         run: bash scripts/test-skill-install.sh
       - name: Verify safe Docker Compose bind

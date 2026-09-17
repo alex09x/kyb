@@ -1,0 +1,46 @@
+# Citation metadata. This is the file Zenodo reads when a release is archived and
+# the file GitHub renders as "Cite this repository". .mailmap only normalises how
+# git reports history; it is not read here.
+#
+# BEFORE MINTING A DOI - two fields are deliberately provisional, because a
+# Zenodo deposition is an immutable archive and whatever stands here is preserved
+# permanently:
+#
+#   1. The author is recorded as an entity (the handle). For a scholarly record
+#      it should be a person: replace the `- name:` entry with
+#          - given-names: ...
+#            family-names: ...
+#            email: big@prod.codes
+#            orcid: "https://orcid.org/0000-0000-0000-0000"
+#      using the name that is to stand in the citation record for good.
+#   2. ORCID is required in practice by SoftwareX and is free to obtain. Add it
+#      above at the same time.
+#
+# Neither is invented here on the author's behalf. Both are one edit away.
+
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "KYB — Know Your Business"
+abstract: >-
+  A git-backed, searchable knowledge base and incident tracker for fleets of AI
+  agents. Every entry is a markdown file and every change a commit, so superseded
+  versions stay retrievable and searchable rather than being overwritten. Search
+  is hybrid: BM25 fused by reciprocal rank with a multilingual embedding model
+  running locally on CPU.
+type: software
+authors:
+  - name: "alex09x"
+    email: big@prod.codes
+repository-code: "https://github.com/alex09x/kyb"
+url: "https://kybmemory.com"
+license: MIT
+version: 0.2.1
+keywords:
+  - agent memory
+  - knowledge base
+  - incident tracking
+  - hybrid search
+  - information retrieval
+  - provenance
+  - version control
+  - rust
