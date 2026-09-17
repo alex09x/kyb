@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 site = Path(sys.argv[1])
 required = {
     "index.html",
+    "404.html",
     "favicon.svg",
     "og.png",
     "robots.txt",
@@ -88,14 +89,20 @@ for page in pages:
     if parser.runtime_scripts:
         raise SystemExit(f"{where}: the static site must not contain runtime scripts")
 
-    marker = '<script type="application/ld+json">'
-    start = page_html.find(marker)
-    end = page_html.find("</script>", start)
-    if start < 0 or end < 0:
-        raise SystemExit(f"{where}: JSON-LD metadata is missing")
-    json.loads(page_html[start + len(marker):end])
+    if page.name != "404.html":
+        marker = '<script type="application/ld+json">'
+        start = page_html.find(marker)
+        end = page_html.find("</script>", start)
+        if start < 0 or end < 0:
+            raise SystemExit(f"{where}: JSON-LD metadata is missing")
+        json.loads(page_html[start + len(marker):end])
 
-    if f'rel="canonical" href="https://kybmemory.com/' not in page_html:
+    if page.name == "404.html":
+        # The error page must never be indexed, and a self-canonical on a 404 is
+        # meaningless - so it is the one page exempt from the canonical rule.
+        if 'name="robots" content="noindex' not in page_html:
+            raise SystemExit(f"{where}: the 404 page must be noindex")
+    elif f'rel="canonical" href="https://kybmemory.com/' not in page_html:
         raise SystemExit(f"{where}: canonical URL must point at kybmemory.com")
 
     ids += len(parser.ids)
@@ -103,7 +110,16 @@ for page in pages:
     assets += len(set(parser.local_assets))
 
 ElementTree.parse(site / "favicon.svg")
-ElementTree.parse(site / "sitemap.xml")
+sitemap = ElementTree.parse(site / "sitemap.xml")
+locs = [el.text or "" for el in sitemap.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]
+if any("404" in loc for loc in locs):
+    raise SystemExit("the 404 page must not be listed in sitemap.xml")
+for page in pages:
+    if page.name == "404.html":
+        continue
+    served = "https://kybmemory.com/" + str(page.relative_to(site)).replace("index.html", "")
+    if served not in locs:
+        raise SystemExit(f"sitemap.xml does not list {served}")
 
 with (site / "og.png").open("rb") as image:
     header = image.read(24)
