@@ -149,14 +149,33 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-/// Identity of the model that produced a vector: a git blob id over the two
-/// files that define it.
+/// Everything that decides what a vector comes out as, other than the text
+/// itself.
 ///
-/// Vectors from different models are not comparable - a cosine between them is
-/// a number with no meaning - and a cache that never invalidates would never
-/// throw the old ones out. The index would quietly become a mixture, search
-/// would keep returning results, and nothing would fail. So the fingerprint is
-/// stored with the cache and a mismatch discards it wholesale.
+/// Weights are the obvious half: vectors from different models are not
+/// comparable, a cosine between them is a number with no meaning, and a cache
+/// that never invalidates would never throw the old ones out. The index would
+/// quietly become a mixture, search would keep returning results, and nothing
+/// would fail.
+///
+/// The recipe is the half that is easy to miss. The cache is keyed by the text
+/// of an entry, but the model is not handed that text - it is handed the text
+/// with a prefix on the front, truncated to a token budget. Change either and
+/// the same key now stands for a different input, with the same weights and the
+/// same fingerprint. That is the identical failure one level down, and the only
+/// way to see it would be search quietly getting worse.
+///
+/// QUERY_PREFIX belongs here too even though no passage vector is built with it:
+/// a query embedded under a different instruction is not comparable with the
+/// passages it is scored against.
+fn embedding_recipe() -> String {
+    format!("q={QUERY_PREFIX}|p={PASSAGE_PREFIX}|max_tokens={MAX_TOKENS}")
+}
+
+fn fingerprint_of(weights: &str, recipe: &str) -> String {
+    format!("{weights}|{recipe}")
+}
+
 fn model_fingerprint(dir: &Path) -> Result<String> {
     let mut parts = vec![];
     for name in ["model.onnx", "tokenizer.json"] {
@@ -165,7 +184,7 @@ fn model_fingerprint(dir: &Path) -> Result<String> {
             .map_err(|e| anyhow!("fingerprint {name}: {e}"))?;
         parts.push(oid.to_string());
     }
-    Ok(parts.join("-"))
+    Ok(fingerprint_of(&parts.join("-"), &embedding_recipe()))
 }
 
 /// Content-addressed vector cache on disk.
@@ -532,6 +551,34 @@ mod tests {
     #[test]
     fn fusion_without_semantics_preserves_lexical_order() {
         assert_eq!(fuse_lists(&keys(&["a", "b", "c"]), &[], 0.6), keys(&["a", "b", "c"]));
+    }
+
+    #[test]
+    /// The cache is keyed by an entry's text, but the model is handed that text
+    /// with a prefix and a token budget applied. Those are part of what produced
+    /// the vector, so they are part of what identifies it.
+    #[test]
+    fn the_fingerprint_covers_the_recipe_not_only_the_weights() {
+        let weights = "same-weights";
+        let base = fingerprint_of(weights, &embedding_recipe());
+
+        for changed in [
+            "q=query: |p=passage: |max_tokens=1024",      // a different token budget
+            "q=query: |p=represent: |max_tokens=512",     // a different passage prefix
+            "q=search: |p=passage: |max_tokens=512",      // a different query prefix
+        ] {
+            assert_ne!(
+                base,
+                fingerprint_of(weights, changed),
+                "changing the embedding recipe must invalidate the cache: {changed}"
+            );
+        }
+
+        // and the recipe actually names the three inputs it claims to cover
+        let recipe = embedding_recipe();
+        assert!(recipe.contains(QUERY_PREFIX), "{recipe}");
+        assert!(recipe.contains(PASSAGE_PREFIX), "{recipe}");
+        assert!(recipe.contains(&MAX_TOKENS.to_string()), "{recipe}");
     }
 
     #[test]
