@@ -18,6 +18,8 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+      - name: Refuse to publish internal infrastructure data
+        run: bash scripts/check-no-internal-data.sh
       - name: Validate and install agent skill
         run: bash scripts/test-skill-install.sh
       - name: Verify safe Docker Compose bind
