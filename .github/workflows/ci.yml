@@ -48,6 +48,34 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
 
+  # The golden-vector test skips when no model is present, which would make it a
+  # gate that never fires. This job gives it one - cached, so the 120 MB download
+  # happens once rather than on every run. Same model the Dockerfile bakes in.
+  embedding-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache the embedding model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: model
+          key: e5-small-int8-Xenova-multilingual-e5-small-v1
+      - name: Fetch the embedding model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          repo=Xenova/multilingual-e5-small
+          mkdir -p model
+          curl -fsSL -o model/model.onnx \
+            "https://huggingface.co/${repo}/resolve/main/onnx/model_quantized.onnx"
+          curl -fsSL -o model/tokenizer.json \
+            "https://huggingface.co/${repo}/resolve/main/tokenizer.json"
+      - name: The embedding pipeline still produces the recorded vector
+        run: cargo test --locked golden_vector -- --nocapture
+
   e2e-macos:
     runs-on: macos-14
     env:

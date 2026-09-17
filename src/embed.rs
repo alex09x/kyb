@@ -558,6 +558,115 @@ mod tests {
     /// with a prefix and a token budget applied. Those are part of what produced
     /// the vector, so they are part of what identifies it.
     #[test]
+    /// A recorded vector for a fixed string, compared on every run.
+    ///
+    /// The fingerprint names the inputs that happen to be CONSTANTS - prefixes,
+    /// the token budget. It cannot name what is code: mean pooling instead of
+    /// CLS, the L2 normalisation, the quantisation the weights were exported
+    /// with, the ORT build underneath. Change any of those and the fingerprint
+    /// is unmoved while the geometry is different, and the cache goes on serving
+    /// yesterday's vectors against today's queries. That is the same failure
+    /// this file has now met on three separate floors, so this closes the
+    /// stairwell rather than one more landing: it cannot be bypassed by adding
+    /// an unnamed step, because it checks the output instead of the recipe.
+    ///
+    /// It fails on a legitimate model upgrade too. That is the point - the
+    /// fingerprint then gets updated deliberately, instead of the mismatch being
+    /// discovered later as search quietly getting worse.
+    ///
+    /// TWO assertions, not one. Cosine catches weights, prefix, truncation,
+    /// pooling and quantisation - but cosine is scale-invariant, so it is blind
+    /// to exactly one of the things worth catching: dropping the normalisation.
+    /// The norm is therefore checked separately.
+    ///
+    /// Regenerate deliberately, never casually:
+    ///     KYB_GOLDEN_REGEN=1 cargo test golden_vector -- --nocapture
+    #[test]
+    fn golden_vector_is_stable() {
+        // Deliberately longer than MAX_TOKENS. A short string would embed
+        // identically at any token budget, so the budget - one of the three
+        // things the recipe claims to cover - would not be checked at all.
+        let golden_text = {
+            let mut t = String::from(
+                "the checkout service moved from port 8080 to 9090 during the migration. ",
+            );
+            for i in 0..700 {
+                t.push_str(&format!("clause {i} about hosts queues retention and latency. "));
+            }
+            t
+        };
+        let golden_text = golden_text.as_str();
+        let dir = std::path::PathBuf::from(
+            std::env::var("KYB_MODEL").unwrap_or_else(|_| "./model".into()),
+        );
+        if !dir.join("model.onnx").exists() {
+            eprintln!("golden_vector_is_stable: no model at {}, skipped", dir.display());
+            return;
+        }
+        let mut embedder = Embedder::load(&dir).expect("model present but unloadable");
+        let got = embedder
+            .embed_passages(&[golden_text.to_string()])
+            .expect("embedding failed")
+            .pop()
+            .expect("no vector");
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden-vector.json");
+        if std::env::var("KYB_GOLDEN_REGEN").is_ok() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let body = serde_json::json!({
+                "text_len": golden_text.len(),
+                "recipe": embedding_recipe(),
+                "dim": got.len(),
+                "vector": got,
+            });
+            std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap()).unwrap();
+            eprintln!("golden vector written to {} ({} dims)", path.display(), got.len());
+            return;
+        }
+
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!("no golden vector at {} ({e}); regenerate with KYB_GOLDEN_REGEN=1", path.display())
+        });
+        let want: serde_json::Value = serde_json::from_str(&raw).expect("golden vector is not JSON");
+        let expected: Vec<f32> = want["vector"]
+            .as_array()
+            .expect("golden vector has no `vector`")
+            .iter()
+            .map(|v| v.as_f64().expect("not a number") as f32)
+            .collect();
+
+        assert_eq!(
+            got.len(),
+            expected.len(),
+            "embedding dimension changed: {} -> {}. A different model, and every cached \
+             vector is now incomparable.",
+            expected.len(),
+            got.len()
+        );
+
+        // scale-invariant: catches weights, prefix, truncation, pooling, quantisation
+        let sim = cosine(&got, &expected);
+        assert!(
+            sim > 0.9999,
+            "the embedding pipeline changed: cosine with the recorded vector is {sim:.6}.\n\
+             Something between the text and the stored vector moved - prefix, token budget, \
+             pooling, normalisation, quantisation, weights or runtime.\n\
+             If that was deliberate, regenerate with KYB_GOLDEN_REGEN=1 and understand that \
+             every cached vector built under the old pipeline is now incomparable."
+        );
+
+        // NOT scale-invariant, and therefore the only check that sees this one:
+        // vectors are L2-normalised before they are stored, and cosine cannot
+        // tell whether that step still happens.
+        let norm = got.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-4,
+            "vectors are supposed to be L2-normalised before storage, got norm {norm:.6}. \
+             Cosine similarity would never have noticed this."
+        );
+    }
+
+    #[test]
     fn the_fingerprint_covers_the_recipe_not_only_the_weights() {
         let weights = "same-weights";
         let base = fingerprint_of(weights, &embedding_recipe());
