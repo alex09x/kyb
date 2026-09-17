@@ -18,11 +18,23 @@ die() { echo "kyb: $*" >&2; exit 1; }
 # from "nothing changed". The server cannot fix that - only a client that checks
 # before asking can, so this refuses to send a version-dependent flag to a server
 # that does not advertise the capability.
+#
+# FAIL-CLOSED, as a decision rather than a side effect of how the errors happen to
+# be handled. Every way the check itself can fail - host unreachable, timeout, a
+# proxy answering instead, an unreadable body - refuses the command. Fail-open
+# would restore the original bug in full and add a false sense of safety on top,
+# because a check that silently passes is worse than no check: nobody looks again.
+#
+# The cost is that a network hiccup breaks --as-of against a perfectly good
+# server, so the messages separate the two causes. "I could not ask" is usually
+# transient and worth retrying; "this server cannot" is not, and needs an upgrade
+# or a different command.
 require_capability() { # require_capability <capability> <flag> <what goes wrong without it>
   local want="$1" flag="$2" why="$3" health
-  health="$(curl -sS -m 10 "$BASE/healthz" 2>/dev/null)" \
-    || die "cannot reach $ADDR to check whether it supports $flag"
-  CAP_WANT="$want" CAP_FLAG="$flag" CAP_WHY="$why" CAP_HEALTH="$health" python3 - <<'PY' || exit 1
+  health="$(curl -sS -m 10 "$BASE/healthz" 2>/dev/null)" || die \
+    "could not ask $ADDR whether it supports $flag, so $flag was NOT sent.
+     This is usually transient — retry, or check what is listening on $ADDR."
+  CAP_WANT="$want" CAP_FLAG="$flag" CAP_WHY="$why" CAP_ADDR="$ADDR" CAP_HEALTH="$health" python3 - <<'PY' || exit 1
 import json, os, sys
 
 want = os.environ["CAP_WANT"]
@@ -38,8 +50,10 @@ def refuse(*lines):
 try:
     health = json.loads(raw)
 except json.JSONDecodeError:
-    refuse(flag + " needs a server that reports its capabilities;",
-           "this one did not answer /healthz with JSON.")
+    refuse("could not read the capabilities of " + os.environ["CAP_ADDR"] + ", so "
+           + flag + " was NOT sent.",
+           "/healthz did not answer with JSON - a proxy or an error page may be",
+           "answering instead of the server. Usually transient; retry.")
 
 caps = health.get("capabilities")
 if caps is None:

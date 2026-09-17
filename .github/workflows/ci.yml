@@ -38,6 +38,8 @@ jobs:
         run: bash scripts/test-skill-install.sh
       - name: Verify safe Docker Compose bind
         run: bash scripts/test-compose-bind.sh
+      - name: Verify the CLI preflight fails closed
+        run: bash scripts/test-cli-preflight.sh
       - name: Validate static website
         run: bash scripts/test-site.sh
       - name: Check deployment script syntax
