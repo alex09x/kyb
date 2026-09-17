@@ -6,7 +6,9 @@ mod model;
 mod store;
 
 use anyhow::Result;
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::QueryRejection;
+use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::response::{IntoResponse, Response};
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::{get, post};
@@ -137,6 +139,37 @@ async fn main() -> Result<()> {
 
 fn err500(e: anyhow::Error) -> Reply {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e:#}")})))
+}
+
+/// `Query`, but rejecting in the same JSON shape as every other error here.
+///
+/// axum's own rejection is plain text, and a client that parses every other
+/// failure as `{"error": ...}` would trip over exactly the response it most
+/// needs to read - the one telling it the server does not know the parameter it
+/// just sent. Serde's message is kept verbatim: it names the offending
+/// parameter and lists the ones that exist, which is the whole answer.
+pub struct Q<T>(pub T);
+
+impl<S, T> FromRequestParts<S> for Q<T>
+where
+    Query<T>: FromRequestParts<S, Rejection = QueryRejection>,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        match Query::<T>::from_request_parts(parts, state).await {
+            Ok(Query(value)) => Ok(Q(value)),
+            Err(rejection) => Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": rejection.body_text()})),
+            )
+                .into_response()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -698,7 +731,21 @@ async fn transition_task(
     .await
 }
 
+/// `deny_unknown_fields` on every query struct, deliberately.
+///
+/// Serde ignores an unknown field by default, and for this service that is the
+/// worst available behaviour: a client that asks `?as_of=...` of a server too
+/// old to know the parameter gets today's data formatted as a normal 200, and a
+/// typo like `?knid=incident` returns the unfiltered set presented as a filtered
+/// answer. Nothing fails; the answer is merely wrong, plausibly. For a store
+/// whose entire claim is temporal correctness, silence is the one response that
+/// must not be available.
+///
+/// The cost is that an unrecognised parameter is now a 400 rather than a
+/// shrug - which is the point: it distinguishes "this server is older than your
+/// client" from "nothing changed on that date".
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IncidentsQ {
     status: Option<String>,
     service: Option<String>,
@@ -787,7 +834,7 @@ fn is_archived(st: &AppState, key: &str) -> bool {
     !matches!(st.store.get(key), Ok(Some(_)))
 }
 
-async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
+async fn list_incidents(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
     let rows = match list_kind(&st, model::KIND_INCIDENT, &model::STATUSES, &q) {
         Err(r) => return r,
         Ok(h) => h,
@@ -810,7 +857,7 @@ async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
     (StatusCode::OK, Json(json!({"count": rows.len(), "incidents": rows})))
 }
 
-async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
+async fn list_tasks(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
     let rows = match list_kind(&st, model::KIND_TASK, &model::TASK_STATUSES, &q) {
         Err(r) => return r,
         Ok(h) => h,
@@ -834,6 +881,7 @@ async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GetQ {
     at: Option<String>,
 }
@@ -905,7 +953,7 @@ fn entry_json(e: &model::Entry, archived: bool) -> Value {
     out
 }
 
-async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) -> Reply {
+async fn get_one(State(st): St, Path(key): Path<String>, Q(q): Q<GetQ>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
@@ -934,6 +982,7 @@ async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) 
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DiffQ {
     /// Git revisions. Omit both to compare the two most recent versions -
     /// "what just changed" is the question that gets asked most. Omit `to`
@@ -948,7 +997,7 @@ struct DiffQ {
 /// Without it, answering "where did this change" means fetching two versions
 /// with `?at=` and comparing them by hand, which is the sort of work an agent
 /// gets wrong quietly.
-async fn diff(State(st): St, Path(key): Path<String>, Query(q): Query<DiffQ>) -> Reply {
+async fn diff(State(st): St, Path(key): Path<String>, Q(q): Q<DiffQ>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
@@ -1031,6 +1080,7 @@ async fn history(State(st): St, Path(key): Path<String>) -> Reply {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SearchQ {
     q: Option<String>,
     tag: Option<String>,
@@ -1060,7 +1110,7 @@ struct SearchQ {
     parent_task: Option<String>,
 }
 
-async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
+async fn search(State(st): St, Q(p): Q<SearchQ>) -> Reply {
     let tags: Vec<String> = p
         .tag
         .map(|t| t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
@@ -1483,6 +1533,45 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    /// The failure this prevents is not a crash - it is a plausible answer.
+    /// `?knid=incident` used to return the unfiltered set as though it had been
+    /// filtered, and `?as_of=...` against a server too old to know the parameter
+    /// used to return today's data as a normal 200.
+    #[rstest]
+    #[case("/search?q=x&knid=incident", "knid")]
+    #[case("/search?q=x&zzz_nonsense=1", "zzz_nonsense")]
+    #[case("/search?q=x&as_off=2026-08-01", "as_off")]
+    #[case("/knowledge/demo?att=abc", "att")]
+    #[case("/knowledge/demo/diff?frm=a", "frm")]
+    #[case("/incidents?statuss=open", "statuss")]
+    #[case("/tasks?priorty=high", "priorty")]
+    #[tokio::test]
+    async fn unknown_query_parameters_are_refused(#[case] uri: &str, #[case] offender: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("demo", "body"))).await;
+        let (st, v) = call(&app, "GET", uri, None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{uri} must be refused, got {v}");
+        let msg = v["error"].as_str().unwrap_or_default();
+        assert!(msg.contains(offender), "the error must name the parameter: {msg}");
+    }
+
+    /// A silent ignore and a real answer have to be distinguishable, so the
+    /// parameters that DO exist must keep working unchanged.
+    #[rstest]
+    #[case("/search?q=x&kind=knowledge")]
+    #[case("/search?q=x&as_of=2999-01-01")]
+    #[case("/search?q=x&changed_between=2000-01-01,2999-01-01")]
+    #[case("/knowledge/demo")]
+    #[case("/incidents?status=open")]
+    #[case("/tasks?priority=high")]
+    #[tokio::test]
+    async fn known_query_parameters_still_pass(#[case] uri: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("demo", "body"))).await;
+        let (st, v) = call(&app, "GET", uri, None).await;
+        assert_eq!(st, StatusCode::OK, "{uri} must still work, got {v}");
     }
 
     #[tokio::test]
