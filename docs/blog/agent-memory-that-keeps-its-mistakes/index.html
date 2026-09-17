@@ -237,15 +237,19 @@ inc-2026-05-14-checkout-timeouts  ·  resolved  ·  semantic hit ✓</code></pre
     <h2>What it does not do yet</h2>
 
     <div class="note">
-      <p><strong>Being straight about the gap.</strong> The storage keeps every version and the
-      index holds every version — but the query layer cannot address <em>time</em> yet.</p>
-      <p>Today <code>--history</code> searches all versions at once, ranked by relevance rather than
-      scoped to a moment. Point-in-time retrieval exists only as <code>kyb get &lt;key&gt; --at
-      &lt;sha&gt;</code>, which needs a commit sha you already have. And there is no diff endpoint:
-      history tells you <em>that</em> an entry changed, not <em>what</em> changed in it.</p>
-      <p>So "what did we believe on 1 August" and "where did this change" are not one call yet. The
-      substrate is there and the commit timestamps are already indexed; the addressing is what is
-      being built next. We would rather say that than describe a roadmap in the present tense.</p>
+      <p><strong>Being straight about the gap.</strong> Half of the temporal query layer exists.
+      The other half does not, and the roadmap is not written in the present tense here.</p>
+      <p><em>What works.</em> <code>--as-of</code> answers "what did we believe on 1 August": it
+      searches the versions under a time bound and collapses to one row per key — the value that was
+      current then, not today's. It takes a date, an RFC3339 instant, or a commit sha.</p>
+      <p><em>What does not.</em> There is no diff endpoint, so <code>/history</code> tells you
+      <em>that</em> an entry changed, not <em>what</em> changed in it, and "where did this change"
+      still means fetching two versions and comparing them yourself. There is no way to ask what
+      moved across a window — the question an agent taking over from another actually has. And
+      <code>--as-of</code> is lexical: the vector index holds one vector per key for the head
+      version, so a question about a past version has nothing to match against semantically.</p>
+      <p>One more honest limit: git stamps whole seconds, so two versions written inside the same
+      second cannot be told apart by <code>--as-of</code>, and the later one wins.</p>
     </div>
 
     <h2>The skill is the delivery mechanism</h2>
