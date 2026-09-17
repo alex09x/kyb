@@ -628,6 +628,34 @@ mod tests {
             panic!("no golden vector at {} ({e}); regenerate with KYB_GOLDEN_REGEN=1", path.display())
         });
         let want: serde_json::Value = serde_json::from_str(&raw).expect("golden vector is not JSON");
+        // The recipe is already in the file; reading it turns detection into
+        // diagnosis. A recipe mismatch is checked FIRST and names the component
+        // that moved, because "the geometry differs" sends someone looking at
+        // weights when the answer is a constant three lines away. And when the
+        // recipe matches while the vector does not, that itself is the useful
+        // half of the bisection: the change is in code, not in a constant.
+        let recorded_recipe = want["recipe"].as_str().unwrap_or("<absent>");
+        let current_recipe = embedding_recipe();
+        if recorded_recipe != current_recipe {
+            let moved: Vec<String> = current_recipe
+                .split('|')
+                .zip(recorded_recipe.split('|'))
+                .filter(|(now, before)| now != before)
+                .map(|(now, before)| format!("{before} -> {now}"))
+                .collect();
+            panic!(
+                "the embedding recipe changed: {}.\n\
+                 Every vector in every cache was built under the old one and is not \
+                 comparable with what this build produces.\n\
+                 If deliberate: regenerate with KYB_GOLDEN_REGEN=1.",
+                if moved.is_empty() {
+                    format!("{recorded_recipe} -> {current_recipe}")
+                } else {
+                    moved.join(", ")
+                }
+            );
+        }
+
         let expected: Vec<f32> = want["vector"]
             .as_array()
             .expect("golden vector has no `vector`")
@@ -649,8 +677,9 @@ mod tests {
         assert!(
             sim > 0.9999,
             "the embedding pipeline changed: cosine with the recorded vector is {sim:.6}.\n\
-             Something between the text and the stored vector moved - prefix, token budget, \
-             pooling, normalisation, quantisation, weights or runtime.\n\
+             The recipe is UNCHANGED ({current_recipe}), so this is not a prefix or a token \
+             budget - it is code or weights: pooling, normalisation, quantisation, the model \
+             file, or the ONNX runtime under it.\n\
              If that was deliberate, regenerate with KYB_GOLDEN_REGEN=1 and understand that \
              every cached vector built under the old pipeline is now incomparable."
         );
