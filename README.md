@@ -21,7 +21,7 @@ truth that survives between sessions and across machines.
 
 <br/>
 
-[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Incidents**](#incident-reports) · [**Agent skill**](#the-agent-skill) · [**HTTP API**](#http-api)
+[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Incidents**](#incident-reports) · [**Agent skill**](#the-agent-skill) · [**HTTP API**](#http-api) · [**Citation**](#citation)
 
 </div>
 
@@ -134,15 +134,23 @@ which status, at any point in time.
 ## Quick start
 
 ```bash
+# install the server binary from crates.io
+cargo install knowyourbusiness --locked
+
+# run natively — reindexes from git on start, listens on 127.0.0.1:9310
+kyb-server
+
+# or build and run from source
+cargo run --release
+
 # docker — data (git canon + index) lives in ./data
 docker compose up -d
 
 # remote private-network clients: bind one exact interface, never every NIC
 KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
-
-# or natively — reindexes from git on start, listens on 127.0.0.1:9310
-cargo run --release
 ```
+
+> **Note:** `cargo install knowyourbusiness --locked` installs the `kyb-server` binary. The separate `kyb` client CLI (`skills/kyb/bin/kyb` via `bash skills/install.sh`) and model setup for hybrid search remain separate steps (see [CLI](#cli), [The agent skill](#the-agent-skill), and [Search quality](#search-quality)).
 
 <details>
 <summary><b>Configuration</b> — env, all optional</summary>
@@ -263,6 +271,28 @@ cargo test        # 321 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.
+
+---
+
+## Citation
+
+For academic or archival reference, cite the archived v0.2.1 release:
+
+```bibtex
+@misc{https://doi.org/10.5281/zenodo.22850724,
+  doi = {10.5281/zenodo.22850724},
+  url = {https://zenodo.org/doi/10.5281/zenodo.22850724},
+  author = {Panasenko, Alexander},
+  keywords = {knowledge base, AI agents, incident management, hybrid search, Git, Rust},
+  language = {en},
+  title = {KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents},
+  publisher = {Zenodo},
+  year = {2026},
+  copyright = {MIT License}
+}
+```
+
+- Alexander Panasenko. *KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents* (v0.2.1). Zenodo. https://doi.org/10.5281/zenodo.22850724
 
 ---
 

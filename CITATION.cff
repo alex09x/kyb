@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Panasenko
+    given-names: Alexander
+title: "knowyourbusiness"
+version: 0.2.2
+license: MIT
+repository-code: "https://github.com/alex09x/kyb"
+repository: "https://github.com/alex09x/kyb"
+url: "https://kybmemory.com"
