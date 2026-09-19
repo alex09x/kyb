@@ -1,10 +1,14 @@
 [package]
 name = "knowyourbusiness"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
+authors = ["Alexander Panasenko"]
 description = "Git-backed, searchable knowledge base and incident tracker for AI agent fleets"
-license = "MIT"
+homepage = "https://kybmemory.com"
 repository = "https://github.com/alex09x/kyb"
+license = "MIT"
+keywords = ["knowledge-base", "ai-agents", "incident-management", "hybrid-search", "search"]
+categories = ["command-line-utilities", "development-tools", "web-programming::http-server"]
 
 [[bin]]
 name = "kyb-server"
