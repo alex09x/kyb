@@ -6,11 +6,19 @@
 # never existed - and that reading has to be explained away to a journal editor
 # and to anyone auditing authorship.
 #
-# .mailmap fixes how git *reports* history. It does not rewrite commit objects
-# and it is not read by Zenodo or by GitHub's citation box - CITATION.cff is
-# what those consume. Both must be correct before a DOI is minted, because a
-# Zenodo deposition is an immutable archive: mint first and the split authorship
-# is preserved permanently.
+# .mailmap fixes how git *reports* history: git log, git shortlog, git blame. It
+# does not rewrite commit objects, and NOTHING else reads it.
+#
+# In particular it does not reach GitHub, which attributes a commit by the e-mail
+# on the object. With this file in place `git shortlog -sne` shows one identity
+# while the repository's contributors list still shows three - and GitHub is the
+# view an outside reader actually looks at. Measured 2026-09-18; the addresses,
+# what each one can be re-attributed with, and what cannot be moved at all are in
+# the knowledge base under kyb-authorship-git-vs-github.
+#
+# Citation metadata is a third, separate thing: Zenodo and GitHub's "Cite this
+# repository" box read CITATION.cff. All of it must be settled before a DOI is
+# minted, because a Zenodo deposition is an immutable archive.
 #
 # The canonical address below is a controlled domain rather than a GitHub
 # noreply address, which is not a durable citation contact. Changing the
