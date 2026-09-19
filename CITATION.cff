@@ -1,11 +1,11 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
+type: software
 authors:
   - family-names: Panasenko
     given-names: Alexander
-title: "knowyourbusiness"
+title: "KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents"
 version: 0.2.2
 license: MIT
 repository-code: "https://github.com/alex09x/kyb"
-repository: "https://github.com/alex09x/kyb"
 url: "https://kybmemory.com"
