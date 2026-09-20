@@ -68,15 +68,15 @@ reports**: what broke, the impact, how to live with it, and how it ended.
 
 ### Architecture
 
-<p align="center">
-  <a href="docs/assets/kyb-architecture.png" target="_blank" rel="noopener noreferrer">
-    <img src="docs/assets/kyb-architecture.png" alt="KYB system architecture diagram showing AI agents connecting via HTTP to the Rust axum server, which manages durable Git storage and derived in-memory Tantivy and ONNX vector search" width="1586" height="992" />
-  </a>
-  <br />
-  <small><a href="docs/assets/kyb-architecture.png" target="_blank" rel="noopener noreferrer">View full size diagram</a></small>
-</p>
+[![KYB architecture: AI agents, Rust server, Git history and derived BM25 plus optional vector search](docs/assets/kyb-architecture.png)](docs/assets/kyb-architecture.png)
 
-Agents interact with KYB using the `kyb` CLI over HTTP. The Rust/axum server writes Markdown files and history directly to Git, serving as the durable source of truth without an external database. All search state is derived: Tantivy supplies BM25 lexical indexing across head and historical commits, while an optional multilingual-e5-small ONNX model embedded in the server process provides in-memory vector representations. Reciprocal rank fusion combines lexical and semantic candidates into final ranked results; when the ONNX model is absent, search seamlessly operates in lexical-only mode. All logical search modules run entirely within the server process rather than as external services.
+[View the full-size diagram](docs/assets/kyb-architecture.png).
+
+Agents use the `kyb` CLI over HTTP. The Rust/axum server stores Markdown and history in Git,
+then builds search state from that history. Tantivy provides BM25 search; an optional
+multilingual-e5-small ONNX model supplies in-memory vectors. Reciprocal rank fusion combines
+lexical and semantic candidates. All search modules run inside the server. Without a model,
+lexical search still works.
 
 ---
 

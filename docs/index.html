@@ -224,10 +224,10 @@
 
     <figure style="margin: 0; padding: 0; border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); overflow: hidden;">
       <a href="assets/kyb-architecture.png" target="_blank" rel="noopener noreferrer" style="display: block;">
-        <img src="assets/kyb-architecture.png" alt="KYB system architecture showing AI agents communicating with the Rust axum server, backed by durable Git storage and derived in-memory Tantivy and ONNX vector search" width="1586" height="992" loading="lazy" decoding="async" style="display: block; width: 100%; height: auto; border-bottom: 1px solid var(--border);">
+        <img src="assets/kyb-architecture.png" alt="KYB architecture: AI agents, Rust server, Git history and derived BM25 plus optional vector search" width="1586" height="992" loading="lazy" decoding="async" style="display: block; width: 100%; height: auto; border-bottom: 1px solid var(--border);">
       </a>
       <figcaption style="padding: 16px 22px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; color: var(--muted); background: var(--panel);">
-        <span>Durable Git storage acts as the single source of truth, while fast search is derived on the fly with optional hybrid BM25 and vector ranking.</span>
+        <span>Git keeps the durable history. The server rebuilds search state from Git and combines BM25 with optional vector search. Without a model, lexical search still works.</span>
         <a href="assets/kyb-architecture.png" target="_blank" rel="noopener noreferrer" style="font-family: 'IBM Plex Mono'; font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap;">View full size ↗</a>
       </figcaption>
     </figure>
