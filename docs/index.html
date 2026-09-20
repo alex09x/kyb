@@ -218,35 +218,19 @@
   </section>
 
   <!-- ===================== ARCHITECTURE ===================== -->
-  <section style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+  <section id="architecture" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
     <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Architecture</div>
     <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 34px;">Git in, ranked answers out.</h2>
 
-    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 38px 30px;">
-      <div style="display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 8px;">
-        <div style="flex: 1; min-width: 220px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel); padding: 22px;">
-          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 8px;">01 · SOURCE OF TRUTH</div>
-          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 20px; margin: 0 0 8px;">Git canon</h3>
-          <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;">Markdown + YAML frontmatter, one commit per change.</p>
-          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">nats-streams.md → sha 1163de8f</div>
-        </div>
-        <div style="display: grid; place-items: center; padding: 0 4px; min-width: 46px;"><span style="font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 26px;">→</span></div>
-        <div style="flex: 1; min-width: 220px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel); padding: 22px;">
-          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 8px;">02 · DISPOSABLE CACHE</div>
-          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 20px; margin: 0 0 8px;">Tantivy index</h3>
-          <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;">Rebuilt from git on every start — covers head <em>and</em> all history.</p>
-          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">BM25 terms + e5 int8 vectors</div>
-        </div>
-        <div style="display: grid; place-items: center; padding: 0 4px; min-width: 46px;"><span style="font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 26px;">→</span></div>
-        <div style="flex: 1; min-width: 220px; border-radius: 13px; border: 1px solid var(--border); background: var(--panel); padding: 22px;">
-          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 8px;">03 · QUERY TIME</div>
-          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 20px; margin: 0 0 8px;">Hybrid search</h3>
-          <p style="margin: 0 0 12px; color: var(--muted); font-size: 14px;">Reciprocal-rank fusion of lexical + vector, filtered by tag / kind / status.</p>
-          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;">ranked hits · ~6 ms</div>
-        </div>
-      </div>
-      <div style="margin-top: 20px; text-align: center; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint);">↺  no model on disk → the service degrades gracefully to lexical-only</div>
-    </div>
+    <figure style="margin: 0; padding: 0; border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); overflow: hidden;">
+      <a href="assets/kyb-architecture.png" target="_blank" rel="noopener noreferrer" style="display: block;">
+        <img src="assets/kyb-architecture.png" alt="KYB architecture: AI agents, Rust server, Git history and derived BM25 plus optional vector search" width="1586" height="992" loading="lazy" decoding="async" style="display: block; width: 100%; height: auto; border-bottom: 1px solid var(--border);">
+      </a>
+      <figcaption style="padding: 16px 22px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; color: var(--muted); background: var(--panel);">
+        <span>Git keeps the durable history. The server rebuilds search state from Git and combines BM25 with optional vector search. Without a model, lexical search still works.</span>
+        <a href="assets/kyb-architecture.png" target="_blank" rel="noopener noreferrer" style="font-family: 'IBM Plex Mono'; font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap;">View full size ↗</a>
+      </figcaption>
+    </figure>
   </section>
 
   <!-- ===================== THREE KINDS ===================== -->

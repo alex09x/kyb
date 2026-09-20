@@ -68,13 +68,15 @@ reports**: what broke, the impact, how to live with it, and how it ended.
 
 ### Architecture
 
-```mermaid
-flowchart LR
-    A["📁 Git canon<br/>markdown + frontmatter<br/>1 commit = 1 version"]
-      -->|reindex on start| B["🗂️ Tantivy index<br/>head + all history<br/>disposable cache"]
-    B --> C["🔎 Hybrid search<br/>BM25 ⊕ e5 vectors<br/>ranked hits · ~6ms"]
-    M["🧠 e5-small int8<br/>(optional, on CPU)"] -.->|absent = lexical-only| B
-```
+[![KYB architecture: AI agents, Rust server, Git history and derived BM25 plus optional vector search](docs/assets/kyb-architecture.png)](docs/assets/kyb-architecture.png)
+
+[View the full-size diagram](docs/assets/kyb-architecture.png).
+
+Agents use the `kyb` CLI over HTTP. The Rust/axum server stores Markdown and history in Git,
+then builds search state from that history. Tantivy provides BM25 search; an optional
+multilingual-e5-small ONNX model supplies in-memory vectors. Reciprocal rank fusion combines
+lexical and semantic candidates. All search modules run inside the server. Without a model,
+lexical search still works.
 
 ---
 
