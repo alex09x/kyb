@@ -6,7 +6,9 @@ mod model;
 mod store;
 
 use anyhow::Result;
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::QueryRejection;
+use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::response::{IntoResponse, Response};
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::{get, post};
@@ -89,9 +91,14 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
     let (heads, hist) = index.reindex(&mut writer, &store)?;
     eprintln!("kyb: reindex on start — {heads} head entries, {hist} history versions");
     let audit = audit::Audit::open(&cfg.audit_path)?;
-    let semantic = match embed::Semantic::load(&cfg.model_dir) {
+    let model_start = std::time::Instant::now();
+    let semantic = match embed::Semantic::load(&cfg.model_dir, cfg.index_dir.join("vectors.cache")) {
         Ok(s) => {
-            eprintln!("kyb: semantic search on ({})", cfg.model_dir.display());
+            eprintln!(
+                "kyb: semantic search on ({}) — model loaded in {:.1}s",
+                cfg.model_dir.display(),
+                model_start.elapsed().as_secs_f64()
+            );
             Some(s)
         }
         Err(e) => {
@@ -109,6 +116,7 @@ fn build_app(state: Arc<AppState>) -> Router {
         .route("/knowledge", post(upsert))
         .route("/knowledge/{key}", get(get_one).delete(remove))
         .route("/knowledge/{key}/history", get(history))
+        .route("/knowledge/{key}/diff", get(diff))
         .route("/incidents", post(upsert_incident).get(list_incidents))
         .route("/incidents/{key}/resolve", post(resolve_incident))
         .route("/tasks", post(upsert_task).get(list_tasks))
@@ -123,11 +131,32 @@ fn build_app(state: Arc<AppState>) -> Router {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Timed and logged on EVERY start, not measured once.
+    //
+    // The whole point of the finding is that this grows with the base's age:
+    // the index and the vectors are rebuilt from git each time, so a restart is
+    // a window in which the fleet has no shared memory at all. A single
+    // measurement gives today's number and says nothing about the trend, and
+    // until now nothing recorded the duration - so the symptom was
+    // indistinguishable from "the service is still coming up", which it is.
+    //
+    // The split matters as much as the total: when this gets slow again, the log
+    // already says whether it was the embeddings (cached, so probably not) or
+    // the per-document indexing that is linear in history.
+    let boot = std::time::Instant::now();
     let cfg = config::Config::from_env();
     let state = build_state(&cfg)?;
+    let indexed = boot.elapsed();
     rebuild_vectors(&state).await;
+    let ready = boot.elapsed();
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
+    eprintln!(
+        "kyb: ready in {:.1}s (canon, index and model load {:.1}s, embeddings {:.1}s)",
+        ready.as_secs_f64(),
+        indexed.as_secs_f64(),
+        (ready - indexed).as_secs_f64()
+    );
     eprintln!("kyb: listening on http://{}", cfg.addr);
     // ConnectInfo so the audit log sees the real client IP
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
@@ -136,6 +165,37 @@ async fn main() -> Result<()> {
 
 fn err500(e: anyhow::Error) -> Reply {
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("{e:#}")})))
+}
+
+/// `Query`, but rejecting in the same JSON shape as every other error here.
+///
+/// axum's own rejection is plain text, and a client that parses every other
+/// failure as `{"error": ...}` would trip over exactly the response it most
+/// needs to read - the one telling it the server does not know the parameter it
+/// just sent. Serde's message is kept verbatim: it names the offending
+/// parameter and lists the ones that exist, which is the whole answer.
+pub struct Q<T>(pub T);
+
+impl<S, T> FromRequestParts<S> for Q<T>
+where
+    Query<T>: FromRequestParts<S, Rejection = QueryRejection>,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        match Query::<T>::from_request_parts(parts, state).await {
+            Ok(Query(value)) => Ok(Q(value)),
+            Err(rejection) => Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": rejection.body_text()})),
+            )
+                .into_response()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -211,6 +271,10 @@ fn commit_locked(
         return ((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))), None);
     }
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    // Asked before the write, while "absent from the tree but present in
+    // history" is still distinguishable from "just created".
+    let had_history = matches!(st.store.get(&entry.key), Ok(None))
+        && st.store.history(&entry.key).map(|v| !v.is_empty()).unwrap_or(false);
     let (c, action) = match st.store.upsert(entry, &today) {
         Err(e) => return (err500(e), None),
         Ok(store::UpsertOutcome::Unchanged(entry)) => {
@@ -231,6 +295,31 @@ fn commit_locked(
         );
     }
     let mut resp = json!({"key": c.entry.key, "sha": c.sha, "changed": true, "action": action});
+    // Only on a create, and only as information. Two near-identical keys split
+    // one topic in half while both entries answer and nothing fails - the
+    // author is the only one who can tell a family apart from a slip.
+    if action == "created" {
+        // Every key that ever existed, not only the live ones. A retracted entry
+        // leaves the working tree, so comparing against the tree alone would be
+        // silent about the worst case: re-creating a key somebody deliberately
+        // took away. That is not an accidental twin - it is a decision being
+        // undone by someone who cannot see that it was made.
+        let mut known = st.store.all_keys_ever().unwrap_or_default();
+        known.extend(st.store.list_head().unwrap_or_default().into_iter().map(|e| e.key));
+        let similar = model::similar_keys(&c.entry.key, known.iter().map(String::as_str));
+        if !similar.is_empty() {
+            resp["similar"] = json!(similar);
+        }
+        // An exact match is a different message: not "looks like a neighbour"
+        // but "this existed and was withdrawn - read why before continuing".
+        if had_history {
+            resp["revived"] = json!(true);
+            resp["hint"] = json!(format!(
+                "'{}' existed before and was retracted; see `kyb history {}` for why",
+                c.entry.key, c.entry.key
+            ));
+        }
+    }
     if let (Some(obj), Some(add)) = (resp.as_object_mut(), extra.as_object()) {
         obj.extend(add.clone());
     }
@@ -697,7 +786,21 @@ async fn transition_task(
     .await
 }
 
+/// `deny_unknown_fields` on every query struct, deliberately.
+///
+/// Serde ignores an unknown field by default, and for this service that is the
+/// worst available behaviour: a client that asks `?as_of=...` of a server too
+/// old to know the parameter gets today's data formatted as a normal 200, and a
+/// typo like `?knid=incident` returns the unfiltered set presented as a filtered
+/// answer. Nothing fails; the answer is merely wrong, plausibly. For a store
+/// whose entire claim is temporal correctness, silence is the one response that
+/// must not be available.
+///
+/// The cost is that an unrecognised parameter is now a 400 rather than a
+/// shrug - which is the point: it distinguishes "this server is older than your
+/// client" from "nothing changed on that date".
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct IncidentsQ {
     status: Option<String>,
     service: Option<String>,
@@ -786,7 +889,7 @@ fn is_archived(st: &AppState, key: &str) -> bool {
     !matches!(st.store.get(key), Ok(Some(_)))
 }
 
-async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
+async fn list_incidents(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
     let rows = match list_kind(&st, model::KIND_INCIDENT, &model::STATUSES, &q) {
         Err(r) => return r,
         Ok(h) => h,
@@ -809,7 +912,7 @@ async fn list_incidents(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
     (StatusCode::OK, Json(json!({"count": rows.len(), "incidents": rows})))
 }
 
-async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
+async fn list_tasks(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
     let rows = match list_kind(&st, model::KIND_TASK, &model::TASK_STATUSES, &q) {
         Err(r) => return r,
         Ok(h) => h,
@@ -833,8 +936,33 @@ async fn list_tasks(State(st): St, Query(q): Query<IncidentsQ>) -> Reply {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GetQ {
     at: Option<String>,
+}
+
+/// `as_of` in the three shapes an agent actually has to hand.
+///
+/// A bare date resolves to the END of that day: "what did we believe on the 1st"
+/// means once the 1st had happened. A git revision is accepted because that is
+/// what a `history` call just handed back, and making the caller convert a sha
+/// into a timestamp would be busywork with a rounding error in it.
+fn parse_as_of(raw: &str, st: &AppState) -> Option<i64> {
+    parse_as_of_bound(raw, st, true)
+}
+
+/// `upper` decides what a bare date means: the end of that day for an upper
+/// bound, the start of it for a lower one. So `2026-08-01,2026-08-01` is the
+/// whole of the 1st rather than an empty instant.
+fn parse_as_of_bound(raw: &str, st: &AppState, upper: bool) -> Option<i64> {
+    if let Ok(t) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Some(t.timestamp());
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        let t = if upper { d.and_hms_opt(23, 59, 59) } else { d.and_hms_opt(0, 0, 0) };
+        return t.map(|dt| dt.and_utc().timestamp());
+    }
+    st.store.rev_time(raw).ok().flatten()
 }
 
 fn bad_key(key: &str) -> Option<Reply> {
@@ -880,7 +1008,7 @@ fn entry_json(e: &model::Entry, archived: bool) -> Value {
     out
 }
 
-async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) -> Reply {
+async fn get_one(State(st): St, Path(key): Path<String>, Q(q): Q<GetQ>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
@@ -908,6 +1036,91 @@ async fn get_one(State(st): St, Path(key): Path<String>, Query(q): Query<GetQ>) 
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiffQ {
+    /// Git revisions. Omit both to compare the two most recent versions -
+    /// "what just changed" is the question that gets asked most. Omit `to`
+    /// alone to compare a past version against the current one.
+    from: Option<String>,
+    to: Option<String>,
+}
+
+/// What changed between two versions of one entry.
+///
+/// `/history` reports *that* a version exists; this reports *what* moved in it.
+/// Without it, answering "where did this change" means fetching two versions
+/// with `?at=` and comparing them by hand, which is the sort of work an agent
+/// gets wrong quietly.
+async fn diff(State(st): St, Path(key): Path<String>, Q(q): Q<DiffQ>) -> Reply {
+    if let Some(r) = bad_key(&key) {
+        return r;
+    }
+    let versions = match st.store.history(&key) {
+        Err(e) => return err500(e),
+        Ok(v) if v.is_empty() => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("no history for '{key}'")})),
+            )
+        }
+        Ok(v) => v,
+    };
+    // history is newest-first
+    let pick = |o: &Option<String>, fallback: Option<&str>| -> Option<String> {
+        o.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| fallback.map(str::to_string))
+    };
+    let to_rev = pick(&q.to, versions.first().map(|v| v.sha.as_str()));
+    let from_rev = pick(&q.from, versions.get(1).map(|v| v.sha.as_str()));
+    let (Some(from_rev), Some(to_rev)) = (from_rev, to_rev) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("'{key}' has only one version; pass ?from=<rev>&to=<rev> explicitly")
+            })),
+        );
+    };
+
+    let mut sides = vec![];
+    for rev in [&from_rev, &to_rev] {
+        match st.store.get_at(&key, rev) {
+            Err(e) => return err500(e),
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": format!("'{key}' does not exist at revision '{rev}'")})),
+                )
+            }
+            Ok(Some(entry)) => {
+                let at = st.store.rev_time(rev).ok().flatten().map(iso_secs).unwrap_or_default();
+                sides.push((entry, at));
+            }
+        }
+    }
+    let (to_entry, to_at) = sides.pop().expect("two sides pushed");
+    let (from_entry, from_at) = sides.pop().expect("two sides pushed");
+    let (fields, body) = model::diff_entries(&from_entry, &to_entry);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "key": key,
+            "from": {"rev": from_rev, "committed_at": from_at},
+            "to": {"rev": to_rev, "committed_at": to_at},
+            "changed": !fields.is_empty() || !body.added.is_empty() || !body.removed.is_empty(),
+            "fields": fields,
+            "body": body,
+        })),
+    )
+}
+
+fn iso_secs(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0).map(|t| t.to_rfc3339()).unwrap_or_default()
+}
+
 async fn history(State(st): St, Path(key): Path<String>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
@@ -922,10 +1135,20 @@ async fn history(State(st): St, Path(key): Path<String>) -> Reply {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SearchQ {
     q: Option<String>,
     tag: Option<String>,
     history: Option<bool>,
+    /// as_of=<RFC3339 | YYYY-MM-DD | git revision>: answer as the base stood
+    /// then. A bare date means the END of that day, because "what did we
+    /// believe on the 1st" means after the 1st happened, not before it began.
+    as_of: Option<String>,
+    /// changed_between=<start>,<end>: which entries moved inside that window.
+    /// Each side takes the same three shapes as as_of; a bare start date means
+    /// the START of that day and a bare end date the END, so a single day is
+    /// written `2026-08-01,2026-08-01` and means all of it.
+    changed_between: Option<String>,
     limit: Option<usize>,
     /// sort=recent orders by commit time instead of relevance
     sort: Option<String>,
@@ -942,7 +1165,7 @@ struct SearchQ {
     parent_task: Option<String>,
 }
 
-async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
+async fn search(State(st): St, Q(p): Q<SearchQ>) -> Reply {
     let tags: Vec<String> = p
         .tag
         .map(|t| t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
@@ -955,15 +1178,76 @@ async fn search(State(st): St, Query(p): Query<SearchQ>) -> Reply {
     // and listings read newest first
     let recent = sort == Some("recent") || (q.trim().is_empty() && sort.is_none());
     let history = p.history.unwrap_or(false);
-    // Semantic retrieval covers current knowledge only: history questions are
-    // "what did this say back then", which is a lexical, not a fuzzy, ask.
-    let want_semantic =
-        !recent && !history && !q.trim().is_empty() && st.semantic.is_some() && p.semantic != Some(false);
+    let as_of = match p.as_of.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(raw) => match parse_as_of(raw, &st) {
+            Some(t) => Some(t),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "as_of: expected an RFC3339 timestamp, a YYYY-MM-DD date, or a git revision that resolves"})),
+                )
+            }
+        },
+    };
+    let window = match p.changed_between.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(raw) => {
+            let Some((a, b)) = raw.split_once(',') else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "changed_between: expected <start>,<end>"})),
+                );
+            };
+            match (parse_as_of_bound(a.trim(), &st, false), parse_as_of_bound(b.trim(), &st, true)) {
+                (Some(lo), Some(hi)) if lo <= hi => Some((lo, hi)),
+                (Some(_), Some(_)) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "changed_between: start is after end"})),
+                    )
+                }
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "changed_between: each side must be an RFC3339 timestamp, a YYYY-MM-DD date, or a git revision that resolves"})),
+                    )
+                }
+            }
+        }
+    };
+    if as_of.is_some() && window.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "as_of and changed_between ask different questions; pass one"})),
+        );
+    }
+    // Semantic retrieval covers current knowledge only - the vector index holds
+    // one vector per key, for the head version. A history, as_of or
+    // changed_between question is about a specific past version, which no head
+    // vector can represent, so those queries stay lexical rather than silently
+    // matching today's text.
+    //
+    // PROVISIONAL, and tied to exactly one fact: vectors are head-only. Extend
+    // the vector index to (key, sha) and this restriction has no remaining
+    // justification - it must be revisited in the same change, not left to
+    // outlive the reason it was written for. It is also the reason a versioned
+    // search is lexical while a current-state search is hybrid, which is a
+    // difference no benchmark comparing the two can be allowed to inherit.
+    let want_semantic = !recent
+        && !history
+        && as_of.is_none()
+        && window.is_none()
+        && !q.trim().is_empty()
+        && st.semantic.is_some()
+        && p.semantic != Some(false);
     // an empty ?kind= from the CLI is "no filter", not "match nothing"
     let norm = |o: &Option<String>| o.clone().filter(|s| !s.trim().is_empty());
     let opts = index::SearchOpts {
         tags: tags.clone(),
         history,
+        as_of,
+        changed_between: window,
         limit: if want_semantic { limit.max(24) } else { limit },
         recent,
         kind: norm(&p.kind),
@@ -1142,6 +1426,19 @@ async fn reindex(State(st): St) -> Reply {
     }
 }
 
+/// What this build can answer, for a client to check BEFORE it asks.
+///
+/// `deny_unknown_fields` protects a server that has it. The configuration that
+/// will actually be common after a release is the opposite one - a CLI updated
+/// through brew talking to a server nobody has redeployed yet - and that server
+/// cannot object to a parameter it has never heard of. It will answer a question
+/// about the past with today's data and a 200.
+///
+/// So the check has to happen on the client, before the request, against a list
+/// the server publishes. Names match the query parameters exactly; entries are
+/// only ever added, never renamed, because an older CLI matches on the string.
+const CAPABILITIES: [&str; 3] = ["as_of", "changed_between", "diff"];
+
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
     let open_incidents =
@@ -1159,6 +1456,8 @@ async fn healthz(State(st): St) -> Reply {
             "open_tasks": open_tasks,
             "index_docs": index_docs,
             "last_commit": last.map(|(sha, time)| json!({"sha": sha, "time": time})),
+            "version": env!("CARGO_PKG_VERSION"),
+            "capabilities": CAPABILITIES,
         })),
     )
 }
@@ -1172,7 +1471,7 @@ mod api_tests {
     use rstest::rstest;
     use tower::util::ServiceExt;
 
-    async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+    pub(super) async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
         let b = Request::builder().method(method).uri(uri);
         let req = match body {
             Some(v) => b
@@ -1190,7 +1489,7 @@ mod api_tests {
 
     // The title is Russian on purpose: one API-level ru-stem check below
     // searches «стримах» and must match «стримы» from this title.
-    fn upsert_body(key: &str, body: &str) -> Value {
+    pub(super) fn upsert_body(key: &str, body: &str) -> Value {
         json!({"key": key, "title": "NATS стримы", "body": body, "tags": ["nats"]})
     }
 
@@ -1211,7 +1510,7 @@ mod api_tests {
         (build_app(state.clone()), state, data, idx)
     }
 
-    fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
+    pub(super) fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
         let (app, _state, data, idx) = app_with_state();
         (app, data, idx)
     }
@@ -1304,6 +1603,248 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn healthz_advertises_version_and_capabilities() {
+        let (app, _data, _idx) = app_with_tmp();
+        let (st, v) = call(&app, "GET", "/healthz", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        let caps: Vec<&str> =
+            v["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap()).collect();
+        for want in ["as_of", "changed_between", "diff"] {
+            assert!(caps.contains(&want), "healthz must advertise {want}, got {caps:?}");
+        }
+    }
+
+    /// The failure this prevents is not a crash - it is a plausible answer.
+    /// `?knid=incident` used to return the unfiltered set as though it had been
+    /// filtered, and `?as_of=...` against a server too old to know the parameter
+    /// used to return today's data as a normal 200.
+    #[rstest]
+    #[case("/search?q=x&knid=incident", "knid")]
+    #[case("/search?q=x&zzz_nonsense=1", "zzz_nonsense")]
+    #[case("/search?q=x&as_off=2026-08-01", "as_off")]
+    #[case("/knowledge/demo?att=abc", "att")]
+    #[case("/knowledge/demo/diff?frm=a", "frm")]
+    #[case("/incidents?statuss=open", "statuss")]
+    #[case("/tasks?priorty=high", "priorty")]
+    #[tokio::test]
+    async fn unknown_query_parameters_are_refused(#[case] uri: &str, #[case] offender: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("demo", "body"))).await;
+        let (st, v) = call(&app, "GET", uri, None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{uri} must be refused, got {v}");
+        let msg = v["error"].as_str().unwrap_or_default();
+        assert!(msg.contains(offender), "the error must name the parameter: {msg}");
+    }
+
+    /// A silent ignore and a real answer have to be distinguishable, so the
+    /// parameters that DO exist must keep working unchanged.
+    #[rstest]
+    #[case("/search?q=x&kind=knowledge")]
+    #[case("/search?q=x&as_of=2999-01-01")]
+    #[case("/search?q=x&changed_between=2000-01-01,2999-01-01")]
+    #[case("/knowledge/demo")]
+    #[case("/incidents?status=open")]
+    #[case("/tasks?priority=high")]
+    #[tokio::test]
+    async fn known_query_parameters_still_pass(#[case] uri: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("demo", "body"))).await;
+        let (st, v) = call(&app, "GET", uri, None).await;
+        assert_eq!(st, StatusCode::OK, "{uri} must still work, got {v}");
+    }
+
+    /// Re-creating a key somebody deliberately retracted is worse than an
+    /// accidental twin: a decision is being undone by someone who cannot see it
+    /// was made. The tree has forgotten the key; history has not.
+    #[tokio::test]
+    async fn a_retracted_key_is_flagged_when_it_comes_back() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("withdrawn", "the first take"))).await;
+        call(&app, "DELETE", "/knowledge/withdrawn", None).await;
+        assert_eq!(call(&app, "GET", "/knowledge/withdrawn", None).await.0, StatusCode::NOT_FOUND);
+
+        let (st, v) =
+            call(&app, "POST", "/knowledge", Some(upsert_body("withdrawn", "a second take"))).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["action"], "created", "the tree has forgotten it");
+        assert_eq!(v["revived"], true, "history has not, and says so");
+        assert!(v["hint"].as_str().unwrap().contains("retracted"), "{v}");
+
+        // a plain create carries neither flag
+        let (_, v) = call(&app, "POST", "/knowledge", Some(upsert_body("brand-new", "x"))).await;
+        assert!(v["revived"].is_null());
+        assert!(v["hint"].is_null());
+    }
+
+    /// The twin check looks past the working tree too: a near-twin of a
+    /// retracted key is exactly the case a tree-only comparison would miss.
+    #[tokio::test]
+    async fn a_twin_of_a_retracted_key_is_still_surfaced() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("rule-name-your-comparison-baseline", "x")))
+            .await;
+        call(&app, "DELETE", "/knowledge/rule-name-your-comparison-baseline", None).await;
+
+        let (_, v) =
+            call(&app, "POST", "/knowledge", Some(upsert_body("rule-name-your-comparison-base", "y")))
+                .await;
+        let similar: Vec<&str> =
+            v["similar"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+        assert!(
+            similar.contains(&"rule-name-your-comparison-baseline"),
+            "a retracted near-twin must still be surfaced, got {v}"
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_endpoint() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+
+        // one version: there is nothing to compare it against, and saying so
+        // beats inventing an empty diff
+        let (st, v) = call(&app, "GET", "/knowledge/svc/diff", None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(v["error"].as_str().unwrap().contains("only one version"));
+
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 9090"))).await;
+
+        // no revisions: the two most recent, which is "what just changed"
+        let (st, v) = call(&app, "GET", "/knowledge/svc/diff", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["changed"], true);
+        assert_eq!(v["body"]["removed"][0], "the port is 8080");
+        assert_eq!(v["body"]["added"][0], "the port is 9090");
+
+        // explicit revisions, and a version compared with itself changes nothing
+        let (_, h) = call(&app, "GET", "/knowledge/svc/history", None).await;
+        let newest = h["versions"][0]["sha"].as_str().unwrap().to_string();
+        let oldest = h["versions"][1]["sha"].as_str().unwrap().to_string();
+        let (st, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from={oldest}&to={newest}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["body"]["added"][0], "the port is 9090");
+        let (_, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from={newest}&to={newest}"), None).await;
+        assert_eq!(v["changed"], false);
+        assert!(v["fields"].as_array().unwrap().is_empty());
+
+        // reversing the pair reverses the diff
+        let (_, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from={newest}&to={oldest}"), None).await;
+        assert_eq!(v["body"]["removed"][0], "the port is 9090");
+        assert_eq!(v["body"]["added"][0], "the port is 8080");
+
+        // an unresolvable revision is a 404, never a 500
+        let (st, _) = call(&app, "GET", "/knowledge/svc/diff?from=zzz&to=zzz", None).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        let (st, _) = call(&app, "GET", "/knowledge/nope/diff", None).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn search_changed_between() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+
+        // a window that contains today catches it; one in the past does not
+        let (st, v) =
+            call(&app, "GET", "/search?q=port&changed_between=2000-01-01,2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1);
+        assert_eq!(v["semantic"], false, "a window question is not a head question");
+
+        let (_, v) =
+            call(&app, "GET", "/search?q=port&changed_between=2000-01-01,2000-12-31", None).await;
+        assert_eq!(v["count"], 0);
+
+        // a busy key still reports once
+        for body in ["revision a", "revision b", "revision c"] {
+            call(&app, "POST", "/knowledge", Some(upsert_body("busy", body))).await;
+        }
+        let (_, v) =
+            call(&app, "GET", "/search?q=revision&changed_between=2000-01-01,2999-01-01", None).await;
+        assert_eq!(v["count"], 1, "one row per key that moved");
+        assert!(v["hits"][0]["body"].as_str().unwrap().contains("revision c"));
+    }
+
+    #[rstest]
+    #[case("2026-08-01", "expected <start>,<end>")]
+    #[case("nonsense,2026-08-02", "must be an RFC3339")]
+    #[case("2026-08-05,2026-08-01", "start is after end")]
+    #[tokio::test]
+    async fn search_changed_between_rejects_garbage(#[case] value: &str, #[case] hint: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "body"))).await;
+        let (st, v) = call(&app, "GET", &format!("/search?changed_between={value}"), None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{value} must be refused, got {v}");
+        assert!(v["error"].as_str().unwrap().contains(hint), "{v}");
+    }
+
+    /// One instant and one window are different questions; answering both at
+    /// once would silently pick one.
+    #[tokio::test]
+    async fn as_of_and_changed_between_are_mutually_exclusive() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "body"))).await;
+        let (st, v) = call(
+            &app,
+            "GET",
+            "/search?as_of=2026-08-01&changed_between=2026-08-01,2026-08-02",
+            None,
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(v["error"].as_str().unwrap().contains("different questions"));
+    }
+
+    #[tokio::test]
+    async fn search_as_of_over_http() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 9090"))).await;
+
+        // a date in the past: the entry did not exist yet
+        let (st, v) = call(&app, "GET", "/search?q=port&as_of=2000-01-01", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 0);
+
+        // a date in the future: one row, the current value, and never semantic -
+        // the vector index holds head vectors only
+        let (st, v) = call(&app, "GET", "/search?q=port&as_of=2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1, "as_of returns one version per key");
+        assert_eq!(v["semantic"], false, "as_of must not be answered from head vectors");
+        assert!(v["hits"][0]["body"].as_str().unwrap().contains("9090"));
+
+        // a git revision is accepted: it is what /history just handed back
+        let (_, h) = call(&app, "GET", "/knowledge/svc/history", None).await;
+        let sha = h["versions"][0]["sha"].as_str().unwrap().to_string();
+        let (st, v) = call(&app, "GET", &format!("/search?q=port&as_of={sha}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1);
+
+        // an RFC3339 instant is accepted too
+        let (st, _) =
+            call(&app, "GET", "/search?q=port&as_of=2026-08-01T12%3A00%3A00Z", None).await;
+        assert_eq!(st, StatusCode::OK);
+    }
+
+    #[rstest]
+    #[case("not-a-date")]
+    #[case("2026-13-99")]
+    #[case("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")]
+    #[tokio::test]
+    async fn search_as_of_rejects_garbage(#[case] value: &str) {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "body"))).await;
+        let (st, v) = call(&app, "GET", &format!("/search?as_of={value}"), None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "as_of={value} must be refused, got {v}");
+        assert!(v["error"].as_str().unwrap().contains("as_of"));
     }
 
     #[tokio::test]
@@ -2644,5 +3185,162 @@ mod api_tests {
         let (_, v) = call(&app, "GET", "/tasks?all=true", None).await;
         assert_eq!(v["count"], 1, "and stay in the record: {v}");
         assert_eq!(v["tasks"][0]["assignee"], "agent-b");
+    }
+}
+
+/// Published claims, checked against the software that is supposed to back them.
+///
+/// A section that says what a system does NOT do is the only part of a document
+/// invalidated by our own progress, so it rots fastest and exactly when nobody
+/// is rereading it. "Remember to check it last" is an intention; this is a gate.
+///
+/// Each claim below pairs a sentence that must still be present in a published
+/// file with a check of the behaviour it describes. It fails in both directions
+/// on purpose:
+///
+///   - the sentence is there but the behaviour contradicts it -> the text lies;
+///   - the sentence is gone -> the table is stale, and whoever rewrote the
+///     paragraph has to say what the new claim is and how it is checked.
+///
+/// The second direction is the one that matters. Without it, a rewrite silently
+/// disables the gate.
+#[cfg(test)]
+mod published_claims {
+    use super::api_tests::*;
+    use axum::http::StatusCode;
+
+    const BLOG: &str = "docs/blog/agent-memory-that-keeps-its-mistakes/index.html";
+
+    fn published(rel: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"))
+    }
+
+    fn claims(rel: &str, phrase: &str) {
+        assert!(
+            published(rel).contains(phrase),
+            "{rel} no longer contains the claim {phrase:?}.\n\
+             The published text changed but this check did not. Update the claim \
+             and its check together, or the gate stops guarding anything."
+        );
+    }
+
+    /// The post says as_of, changed_between and /diff work. They must.
+    #[tokio::test]
+    async fn the_post_promises_three_temporal_questions_and_gets_them() {
+        claims(BLOG, "<code>--as-of</code> gives the base as");
+        claims(BLOG, "<code>--changed-between</code> gives what moved inside a window");
+        claims(BLOG, "<code>/diff</code> says what moved <em>inside</em> one");
+
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 9090"))).await;
+
+        let (st, v) = call(&app, "GET", "/search?q=port&as_of=2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK, "the post promises --as-of");
+        assert_eq!(v["count"], 1, "as_of returns one version per key, as the post says");
+
+        let (st, v) =
+            call(&app, "GET", "/search?q=port&changed_between=2000-01-01,2999-01-01", None).await;
+        assert_eq!(st, StatusCode::OK, "the post promises --changed-between");
+        assert_eq!(v["count"], 1);
+
+        let (st, v) = call(&app, "GET", "/knowledge/svc/diff", None).await;
+        assert_eq!(st, StatusCode::OK, "the post promises /diff");
+        assert_eq!(v["changed"], true);
+    }
+
+    /// The post says all three are lexical, and explains why: one vector per key,
+    /// for the head version.
+    ///
+    /// This one is checked at the source rather than through a response, because
+    /// the test app runs without an embedding model and reports semantic=false
+    /// for every query - which would make a behavioural assertion pass while
+    /// proving nothing. The guard below IS the claim, and removing it is exactly
+    /// the change (vectors keyed by version) that makes the sentence false.
+    #[test]
+    fn the_post_says_the_temporal_questions_are_lexical_and_the_guard_is_still_there() {
+        claims(BLOG, "All three are lexical");
+        claims(BLOG, "one vector per key,");
+
+        let src = published("src/main.rs");
+        let guard = src
+            .split("let want_semantic")
+            .nth(1)
+            .and_then(|tail| tail.split(';').next())
+            .unwrap_or_default()
+            .to_string();
+        for needed in ["!history", "as_of.is_none()", "window.is_none()"] {
+            assert!(
+                guard.contains(needed),
+                "want_semantic no longer excludes {needed}, so a versioned query can now be \
+                 answered semantically - which makes {BLOG} wrong where it says the temporal \
+                 questions are lexical. Update both together."
+            );
+        }
+    }
+
+    /// The post states the second-granularity limit. The behaviour behind it is
+    /// covered by index::tests::as_of_is_second_granular; here the sentence is
+    /// tied to the constant that keeps it true.
+    #[tokio::test]
+    async fn the_post_states_the_second_granularity_limit() {
+        claims(BLOG, "two versions written inside the same
+      second cannot be told apart");
+
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "value one"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "value two"))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/svc/history", None).await;
+        let older = h["versions"][1]["sha"].as_str().unwrap().to_string();
+        let (st, v) = call(&app, "GET", &format!("/search?q=value&as_of={older}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["count"], 1, "one row per key even when the bound cannot separate versions");
+    }
+
+    /// The capability list is a promise to clients that check it before asking.
+    /// Every name on it must be backed by an endpoint, and the CLI must gate the
+    /// same names - a rename on one side and not the other turns the preflight
+    /// into a permanent refusal or a silent pass.
+    #[tokio::test]
+    async fn every_advertised_capability_is_backed_and_gated() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "one"))).await;
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "two"))).await;
+
+        let probes = [
+            ("as_of", "/search?q=one&as_of=2999-01-01"),
+            ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
+            ("diff", "/knowledge/svc/diff"),
+        ];
+        assert_eq!(probes.len(), super::CAPABILITIES.len(), "a capability was added without a probe");
+
+        let cli = published("skills/kyb/bin/kyb");
+        for (cap, uri) in probes {
+            assert!(super::CAPABILITIES.contains(&cap), "{cap} is probed but not advertised");
+            let (st, v) = call(&app, "GET", uri, None).await;
+            assert_eq!(st, StatusCode::OK, "advertised {cap} but {uri} answered {st}: {v}");
+            assert!(
+                cli.contains(&format!("require_capability {cap} ")),
+                "the CLI does not gate {cap}, so it would send it to a server that cannot honour it"
+            );
+        }
+    }
+
+    /// README and the agent skill document the same three commands. An agent
+    /// that reads the skill and finds a command that does not exist is worse off
+    /// than one that never read it.
+    #[tokio::test]
+    async fn the_skill_and_readme_document_commands_that_exist() {
+        for doc in ["README.md", "skills/kyb/SKILL.md"] {
+            claims(doc, "--as-of");
+            claims(doc, "--changed-between");
+            claims(doc, "kyb diff");
+        }
+        let cli = published("skills/kyb/bin/kyb");
+        for flag in ["--as-of", "--changed-between"] {
+            assert!(cli.contains(flag), "the docs promise {flag} but the CLI does not parse it");
+        }
+        assert!(cli.contains("  diff)"), "the docs promise `kyb diff` but the CLI has no such verb");
     }
 }

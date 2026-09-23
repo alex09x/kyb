@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found — KYB</title>
+<meta name="description" content="That page does not exist on kybmemory.com.">
+<meta name="robots" content="noindex, follow">
+<meta name="theme-color" content="#131720">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    --bg: oklch(0.148 0.012 260);
+    --panel: oklch(0.207 0.014 260);
+    --border: oklch(0.315 0.016 260);
+    --text: oklch(0.935 0.006 260);
+    --muted: oklch(0.685 0.013 260);
+    --faint: oklch(0.64 0.012 260);
+    --accent: oklch(0.76 0.132 196);
+    --accent-dim: oklch(0.40 0.07 196);
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 17px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .card { max-width: 560px; padding: 0 28px; text-align: center; }
+  .code { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--faint); letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 14px; }
+  h1 { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; font-size: clamp(28px, 5vw, 38px); margin: 0 0 14px; line-height: 1.2; }
+  p { color: var(--muted); margin: 0 0 26px; text-wrap: pretty; }
+  .links { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+  .links a { display: inline-flex; align-items: center; padding: 9px 17px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 14.5px; font-weight: 600; }
+  .links a:hover { border-color: var(--accent-dim); text-decoration: none; }
+  .mark { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 17px; color: oklch(0.15 0.01 260); margin: 0 auto 22px; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark">K</div>
+    <p class="code">404 — not found</p>
+    <h1>Nothing lives at this address</h1>
+    <p>The page you asked for does not exist. It may have moved, or the link may be wrong.</p>
+    <div class="links">
+      <a href="/">Home</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://github.com/alex09x/kyb">GitHub</a>
+    </div>
+  </main>
+</body>
+</html>

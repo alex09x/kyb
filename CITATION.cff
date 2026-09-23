@@ -1,11 +1,38 @@
+# Citation metadata. Zenodo reads this file when a release is archived, and GitHub
+# renders it as "Cite this repository". .mailmap only normalises how git reports
+# history; nothing reads it here.
+#
+# `version` must match Cargo.toml - scripts/test-citation.sh fails the build on
+# drift, because a deposition archived under the wrong version cannot be corrected
+# by editing the source afterwards.
+#
+# ORCID is still missing. SoftwareX expects one in practice and it is free to
+# obtain; it is not invented here on the author's behalf.
+
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
+title: "KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents"
+abstract: >-
+  A git-backed, searchable knowledge base and incident tracker for fleets of AI
+  agents. Every entry is a markdown file and every change a commit, so superseded
+  versions stay retrievable and searchable rather than being overwritten. Search
+  is hybrid: BM25 fused by reciprocal rank with a multilingual embedding model
+  running locally on CPU.
 type: software
 authors:
   - family-names: Panasenko
     given-names: Alexander
-title: "KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents"
+    email: big@prod.codes
 version: 0.2.2
 license: MIT
 repository-code: "https://github.com/alex09x/kyb"
 url: "https://kybmemory.com"
+keywords:
+  - agent memory
+  - knowledge base
+  - incident tracking
+  - hybrid search
+  - information retrieval
+  - provenance
+  - version control
+  - rust

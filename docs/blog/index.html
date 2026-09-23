@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blog — KYB</title>
+<meta name="description" content="Notes on building shared memory for fleets of AI agents: design decisions, trade-offs and what does not work yet.">
+<link rel="canonical" href="https://kybmemory.com/blog/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#131720">
+<meta name="author" content="KYB">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="KYB — Know Your Business">
+<meta property="og:title" content="KYB Blog">
+<meta property="og:description" content="Notes on building shared memory for fleets of AI agents: design decisions, trade-offs and what does not work yet.">
+<meta property="og:url" content="https://kybmemory.com/blog/">
+<meta property="og:image" content="https://kybmemory.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="KYB — git-backed shared memory and incident tracker for AI agent fleets">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="KYB Blog">
+<meta name="twitter:description" content="Notes on building shared memory for fleets of AI agents.">
+<meta name="twitter:image" content="https://kybmemory.com/og.png">
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/favicon.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Blog","name":"KYB Blog","url":"https://kybmemory.com/blog/","description":"Notes on building shared memory for fleets of AI agents: design decisions, trade-offs and what does not work yet.","inLanguage":"en","blogPost":[{"@type":"BlogPosting","headline":"Agent memory that keeps its mistakes","url":"https://kybmemory.com/blog/agent-memory-that-keeps-its-mistakes/","datePublished":"2026-09-17"}]}
+</script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    --bg: oklch(0.148 0.012 260);
+    --bg2: oklch(0.185 0.014 260);
+    --panel: oklch(0.207 0.014 260);
+    --border: oklch(0.315 0.016 260);
+    --text: oklch(0.935 0.006 260);
+    --muted: oklch(0.685 0.013 260);
+    --faint: oklch(0.64 0.012 260);
+    --accent: oklch(0.76 0.132 196);
+    --accent-dim: oklch(0.40 0.07 196);
+    --incident: oklch(0.77 0.13 62);
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 17px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1 { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.02em; font-size: clamp(30px, 4.6vw, 42px); margin: 0 0 12px; line-height: 1.2; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+  .post { display: block; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 24px 26px; margin: 0 0 16px; color: var(--text); }
+  .post:hover { text-decoration: none; border-color: var(--accent-dim); }
+  .post h2 { font-family: 'Space Grotesk', sans-serif; font-size: 22px; letter-spacing: -0.015em; margin: 0 0 8px; line-height: 1.3; }
+  .post p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .meta { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--faint); margin: 0 0 10px; }
+</style>
+</head>
+<body>
+<div id="top">
+
+  <nav aria-label="Primary" style="position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: oklch(0.148 0.012 260 / 0.72); border-bottom: 1px solid var(--border);">
+    <div style="max-width: 1120px; margin: 0 auto; padding: 14px 28px; display: flex; align-items: center; gap: 20px;">
+      <a href="/" style="display: flex; align-items: center; gap: 11px; color: var(--text);">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 15px; color: oklch(0.15 0.01 260); box-shadow: 0 0 0 1px oklch(0.76 0.132 196 / 0.4);">K</span>
+        <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 17px; letter-spacing: -0.01em;">KYB</span>
+      </a>
+      <div style="flex: 1;"></div>
+      <div style="display: flex; align-items: center; gap: 24px; font-size: 14px; font-weight: 500;">
+        <a href="/#how" style="color: var(--muted);">How it works</a>
+        <a href="/blog/" style="color: var(--text);">Blog</a>
+        <a href="/#install" style="color: var(--muted);">Install</a>
+      </div>
+      <a href="https://github.com/alex09x/kyb" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 15px; border-radius: 9px; background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 13.5px; font-weight: 600;">
+        <span style="color: var(--incident);">★</span> Star on GitHub
+      </a>
+    </div>
+  </nav>
+
+  <main class="wrap" style="padding-top: 64px; padding-bottom: 20px;">
+    <h1>Blog</h1>
+    <p style="color: var(--muted); margin: 0 0 36px;">Design decisions behind KYB, the trade-offs they
+    cost, and the parts that do not work yet.</p>
+
+    <a class="post" href="/blog/agent-memory-that-keeps-its-mistakes/">
+      <p class="meta"><time datetime="2026-09-17">17 September 2026</time> · 9 min</p>
+      <h2>Agent memory that keeps its mistakes</h2>
+      <p>An overwriting memory can only answer what is true now. The failure that costs you is an
+      answer that used to be true — and nothing in it says so.</p>
+    </a>
+  </main>
+
+  <footer style="max-width: 1120px; margin: 40px auto 0; padding: 34px 28px 60px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 20px; align-items: center;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(140deg, var(--accent), var(--accent-dim)); display: grid; place-items: center; font-family: 'Space Grotesk'; font-weight: 700; font-size: 13px; color: oklch(0.15 0.01 260);">K</span>
+      <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">KYB — Know Your Business</span>
+    </div>
+    <div style="flex: 1;"></div>
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; font-family: 'IBM Plex Mono'; font-size: 13px; align-items: center;">
+      <a href="https://kybmemory.com" style="color: var(--accent);">kybmemory.com</a>
+      <a href="https://github.com/alex09x/kyb" style="color: var(--muted);">GitHub</a>
+      <span style="color: var(--faint);">MIT © 2026</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

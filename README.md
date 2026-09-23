@@ -184,6 +184,14 @@ KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
 
 ```bash
 kyb query "nats streams" [--tag infra] [--history] [--recent] [--kind incident] [--status open] [--service X]
+kyb query "nats streams" --as-of 2026-08-01      # the base as it stood then: one version per key,
+                                                 # the value that was current, not today's
+kyb query "" --changed-between 2026-08-01,2026-08-07   # what moved while you were away
+kyb diff nats-streams [--from <rev>] [--to <rev>]      # what changed in it (defaults to the two newest)
+
+# The three above ask a server-version-dependent question, so the CLI checks
+# /healthz first and refuses rather than let an older server answer a question
+# about the past with today's data.  Plain queries are unaffected.
 kyb tags                                    # which topics the base covers
 kyb add --key nats-streams --title "..." --tags nats,infra <<< "body"    # upsert by key
 kyb get nats-streams [--at <sha>]           # current or any historical version

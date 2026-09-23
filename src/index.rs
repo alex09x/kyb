@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tantivy::collector::TopDocs;
-use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, TermQuery};
+use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, FAST, INDEXED, STORED,
     STRING,
@@ -16,6 +16,13 @@ use tantivy::{Index, IndexReader, IndexWriter, Order, TantivyDocument, Term};
 /// Russian stemmer: bodies are mostly Russian; latin identifiers
 /// (CreateOrUpdateStream, NATS) pass through unchanged after lowercasing.
 const ANALYZER: &str = "ru_stem";
+
+/// How many history documents an as_of query collects before collapsing to one
+/// per key. The base is designed for hundreds to thousands of entries, so this
+/// covers the whole matching set rather than a sliding window - a key with a
+/// long revision history must not be able to crowd the result with its own
+/// superseded versions.
+const AS_OF_CANDIDATES: usize = 10_000;
 
 pub struct Fields {
     doc_id: Field,
@@ -131,6 +138,17 @@ pub struct Hit {
 pub struct SearchOpts {
     pub tags: Vec<String>,
     pub history: bool,
+    /// Unix seconds: answer as the base stood at that instant. Searches history
+    /// and collapses to the newest version of each key committed at or before
+    /// it, so a superseded value is returned when - and only when - it was still
+    /// the current one. `history` is about *all* versions; this is about *one*
+    /// moment, and they are different questions.
+    pub as_of: Option<i64>,
+    /// Unix seconds, inclusive: which entries moved inside this window. Answers
+    /// "what changed while I was away", which is the question an agent taking
+    /// over from another actually has - and which neither `history` (all time)
+    /// nor `as_of` (one instant) can express.
+    pub changed_between: Option<(i64, i64)>,
     pub limit: usize,
     /// Order by commit time instead of relevance ("what changed lately").
     pub recent: bool,
@@ -461,7 +479,14 @@ impl SearchIndex {
         // HEAD slice. Filter strictly by one of the two worlds, otherwise a
         // history search duplicates the current version (head + history doc
         // sharing one sha).
-        let head_val = if opts.history { 0 } else { 1 };
+        // as_of is a history question - it asks for a version, not for the head -
+        // so it selects the history world the same way --history does.
+        let as_of = opts.as_of;
+        let window = opts.changed_between;
+        // Both read versions rather than the head slice; both collapse to one
+        // row per key afterwards.
+        let versioned = opts.history || as_of.is_some() || window.is_some();
+        let head_val = if versioned { 0 } else { 1 };
         clauses.push((
             Occur::Must,
             Box::new(TermQuery::new(
@@ -469,6 +494,24 @@ impl SearchIndex {
                 IndexRecordOption::Basic,
             )),
         ));
+        if let Some(at) = as_of {
+            clauses.push((
+                Occur::Must,
+                Box::new(RangeQuery::new_i64(
+                    "committed_at".to_string(),
+                    i64::MIN..at.saturating_add(1),
+                )),
+            ));
+        }
+        if let Some((lo, hi)) = window {
+            clauses.push((
+                Occur::Must,
+                Box::new(RangeQuery::new_i64(
+                    "committed_at".to_string(),
+                    lo..hi.saturating_add(1),
+                )),
+            ));
+        }
         for t in &opts.tags {
             clauses.push((
                 Occur::Must,
@@ -500,26 +543,81 @@ impl SearchIndex {
         }
         let query = BooleanQuery::new(clauses);
         let limit = opts.limit.max(1);
+        // An as_of answer is one document per key, and which one wins is decided
+        // after retrieval - so the top-k must be taken from the whole matching
+        // set, not from a k-sized window that a single busy key could fill with
+        // its own superseded versions. The corpus is hundreds to thousands of
+        // entries by design (see the README), so collecting every match and
+        // collapsing in memory is both exact and cheap.
+        let collapse = as_of.is_some() || window.is_some();
+        let fetch = if collapse { limit.max(AS_OF_CANDIDATES) } else { limit };
         let top: Vec<(f32, tantivy::DocAddress)> = if opts.recent {
             // seq, not committed_at: git time is 1s-granular and a write burst
             // ties on it, turning "latest first" into segment-order roulette
             searcher
                 .search(
                     &query,
-                    &TopDocs::with_limit(limit).order_by_fast_field::<u64>("seq", Order::Desc),
+                    &TopDocs::with_limit(fetch).order_by_fast_field::<u64>("seq", Order::Desc),
                 )?
                 .into_iter()
                 // ordering by a fast field skips scoring; report 0 rather than a fake score
                 .map(|(_seq, addr)| (0.0f32, addr))
                 .collect()
         } else {
-            searcher.search(&query, &TopDocs::with_limit(limit))?
+            searcher.search(&query, &TopDocs::with_limit(fetch))?
+        };
+        let top = if collapse {
+            self.collapse_to_latest_per_key(&searcher, top, limit)?
+        } else {
+            top
         };
         let mut hits = vec![];
         for (score, addr) in top {
             hits.push(self.to_hit(&searcher, addr, score)?);
         }
         Ok(hits)
+    }
+
+    /// One document per key: the newest version that survived the as_of bound.
+    ///
+    /// Ordering is by `seq`, the chronological walk position assigned when the
+    /// index was built, never by `committed_at` - git timestamps are 1s-granular
+    /// and a burst of writes ties on them, which would make "newest" depend on
+    /// segment order. Relevance order among the survivors is preserved: the
+    /// caller asked for the best answers, not the most recent ones.
+    fn collapse_to_latest_per_key(
+        &self,
+        searcher: &tantivy::Searcher,
+        top: Vec<(f32, tantivy::DocAddress)>,
+        limit: usize,
+    ) -> Result<Vec<(f32, tantivy::DocAddress)>> {
+        let mut best: HashMap<String, (u64, usize)> = HashMap::new();
+        let mut rows: Vec<(f32, tantivy::DocAddress)> = Vec::with_capacity(top.len());
+        for (score, addr) in top {
+            let doc: TantivyDocument = searcher.doc(addr)?;
+            let key = doc
+                .get_first(self.fields.key)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let seq = doc.get_first(self.fields.seq).and_then(|v| v.as_u64()).unwrap_or(0);
+            let idx = rows.len();
+            rows.push((score, addr));
+            match best.get(&key) {
+                Some((prev_seq, _)) if *prev_seq >= seq => {}
+                _ => {
+                    best.insert(key, (seq, idx));
+                }
+            }
+        }
+        let keep: HashSet<usize> = best.values().map(|(_, idx)| *idx).collect();
+        Ok(rows
+            .into_iter()
+            .enumerate()
+            .filter(|(idx, _)| keep.contains(idx))
+            .map(|(_, row)| row)
+            .take(limit)
+            .collect())
     }
 
     fn to_hit(
@@ -871,6 +969,118 @@ mod tests {
         let hits = index.search("terraform", &o(false)).unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].key, "in-title", "title hit must rank first");
+    }
+
+    #[test]
+    fn as_of_returns_the_version_that_was_current_then() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+
+        store.upsert(entry("svc", "Service", "the port is 8080"), "2026-07-19").unwrap();
+        // git timestamps are whole seconds, so two versions written inside one
+        // second are genuinely indistinguishable by time - see as_of_is_second_granular.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let mid = chrono::Utc::now().timestamp();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        store.upsert(entry("svc", "Service", "the port is 9090"), "2026-07-21").unwrap();
+
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        // head: today's answer
+        let hits = index.search("port", &o(false)).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].body.contains("9090"), "head must be current: {}", hits[0].body);
+
+        // as_of before the change: the value that was true then, exactly one doc
+        let opts = SearchOpts { as_of: Some(mid), limit: 10, ..Default::default() };
+        let hits = index.search("port", &opts).unwrap();
+        assert_eq!(hits.len(), 1, "as_of must collapse to one version per key");
+        assert!(hits[0].body.contains("8080"), "as_of must be the superseded value: {}", hits[0].body);
+        assert!(!hits[0].is_head);
+
+        // as_of after everything: back to the current value, still one doc
+        let opts = SearchOpts {
+            as_of: Some(chrono::Utc::now().timestamp() + 60),
+            limit: 10,
+            ..Default::default()
+        };
+        let hits = index.search("port", &opts).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].body.contains("9090"));
+    }
+
+    #[test]
+    fn as_of_before_an_entry_existed_does_not_find_it() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        let before = chrono::Utc::now().timestamp() - 3600;
+        store.upsert(entry("svc", "Service", "the port is 8080"), "2026-07-19").unwrap();
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        let opts = SearchOpts { as_of: Some(before), limit: 10, ..Default::default() };
+        assert!(index.search("port", &opts).unwrap().is_empty(), "an entry cannot predate itself");
+    }
+
+    /// A key with a long history must not crowd the result with its own
+    /// superseded versions - that is the whole reason the collapse exists.
+    #[test]
+    fn as_of_collapses_a_busy_key_to_one_row() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        for i in 0..8 {
+            store
+                .upsert(entry("busy", "Busy", &format!("shared token, revision {i}")), "2026-07-20")
+                .unwrap();
+        }
+        store.upsert(entry("other", "Other", "shared token, elsewhere"), "2026-07-20").unwrap();
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        let opts = SearchOpts {
+            as_of: Some(chrono::Utc::now().timestamp() + 60),
+            limit: 10,
+            ..Default::default()
+        };
+        let hits = index.search("shared token", &opts).unwrap();
+        let keys: Vec<&str> = hits.iter().map(|h| h.key.as_str()).collect();
+        assert_eq!(hits.len(), 2, "one row per key, got {keys:?}");
+        assert!(keys.contains(&"busy") && keys.contains(&"other"), "{keys:?}");
+        let busy = hits.iter().find(|h| h.key == "busy").unwrap();
+        assert!(busy.body.contains("revision 7"), "newest surviving version wins: {}", busy.body);
+    }
+
+    /// Honest about the resolution of the thing: git commits carry whole
+    /// seconds, so two versions written inside one second cannot be told apart
+    /// by as_of, and the later one wins. Benchmarks built on as_of must skip
+    /// transitions whose neighbours share a timestamp.
+    #[test]
+    fn as_of_is_second_granular() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        store.upsert(entry("svc", "Service", "value one"), "2026-07-19").unwrap();
+        store.upsert(entry("svc", "Service", "value two"), "2026-07-20").unwrap();
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        let versions = store.history("svc").unwrap();
+        let opts = SearchOpts {
+            as_of: Some(store.rev_time(&versions[0].sha).unwrap().unwrap()),
+            limit: 10,
+            ..Default::default()
+        };
+        let hits = index.search("value", &opts).unwrap();
+        assert_eq!(hits.len(), 1, "still exactly one row per key");
+        assert!(hits[0].body.contains("value two"), "a tie resolves to the later version");
     }
 
     #[test]

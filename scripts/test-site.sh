@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 site = Path(sys.argv[1])
 required = {
     "index.html",
+    "404.html",
     "favicon.svg",
     "og.png",
     "robots.txt",
@@ -51,32 +52,74 @@ class SiteParser(HTMLParser):
             self.runtime_scripts += 1
 
 
+def resolve(link):
+    """A root-relative link as served: "/" and "/blog/" are directories with an
+    index.html, everything else is the file itself."""
+    rel = link.lstrip("/")
+    if link.endswith("/") or not rel:
+        return site / rel / "index.html"
+    return site / rel
+
+
 html = (site / "index.html").read_text(encoding="utf-8")
 if "kyb-memory.com" in html:
     raise SystemExit("obsolete kyb-memory.com domain remains in index.html")
 if "https://kybmemory.com/" not in html:
     raise SystemExit("canonical kybmemory.com URL is missing")
 
-parser = SiteParser()
-parser.feed(html)
-missing_anchors = sorted(set(parser.anchors) - parser.ids)
-if missing_anchors:
-    raise SystemExit(f"missing anchor targets: {', '.join(missing_anchors)}")
-missing_assets = sorted({asset for asset in parser.local_assets if not (site / asset.lstrip("/")).is_file()})
-if missing_assets:
-    raise SystemExit(f"missing local assets: {', '.join(missing_assets)}")
-if parser.runtime_scripts:
-    raise SystemExit("the static site must not contain runtime scripts")
+# Every published page is checked, not only the landing page: a blog post with a
+# dead link or a runtime script ships just as publicly as index.html does.
+pages = sorted(site.rglob("*.html"))
+if not pages:
+    raise SystemExit("no HTML pages found")
 
-marker = '<script type="application/ld+json">'
-start = html.find(marker)
-end = html.find("</script>", start)
-if start < 0 or end < 0:
-    raise SystemExit("JSON-LD metadata is missing")
-json.loads(html[start + len(marker):end])
+ids = anchors = assets = 0
+for page in pages:
+    where = page.relative_to(site)
+    page_html = page.read_text(encoding="utf-8")
+    parser = SiteParser()
+    parser.feed(page_html)
+
+    missing_anchors = sorted(set(parser.anchors) - parser.ids)
+    if missing_anchors:
+        raise SystemExit(f"{where}: missing anchor targets: {', '.join(missing_anchors)}")
+    missing_assets = sorted({a for a in parser.local_assets if not resolve(a).is_file()})
+    if missing_assets:
+        raise SystemExit(f"{where}: missing local assets: {', '.join(missing_assets)}")
+    if parser.runtime_scripts:
+        raise SystemExit(f"{where}: the static site must not contain runtime scripts")
+
+    if page.name != "404.html":
+        marker = '<script type="application/ld+json">'
+        start = page_html.find(marker)
+        end = page_html.find("</script>", start)
+        if start < 0 or end < 0:
+            raise SystemExit(f"{where}: JSON-LD metadata is missing")
+        json.loads(page_html[start + len(marker):end])
+
+    if page.name == "404.html":
+        # The error page must never be indexed, and a self-canonical on a 404 is
+        # meaningless - so it is the one page exempt from the canonical rule.
+        if 'name="robots" content="noindex' not in page_html:
+            raise SystemExit(f"{where}: the 404 page must be noindex")
+    elif f'rel="canonical" href="https://kybmemory.com/' not in page_html:
+        raise SystemExit(f"{where}: canonical URL must point at kybmemory.com")
+
+    ids += len(parser.ids)
+    anchors += len(parser.anchors)
+    assets += len(set(parser.local_assets))
 
 ElementTree.parse(site / "favicon.svg")
-ElementTree.parse(site / "sitemap.xml")
+sitemap = ElementTree.parse(site / "sitemap.xml")
+locs = [el.text or "" for el in sitemap.iter("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]
+if any("404" in loc for loc in locs):
+    raise SystemExit("the 404 page must not be listed in sitemap.xml")
+for page in pages:
+    if page.name == "404.html":
+        continue
+    served = "https://kybmemory.com/" + str(page.relative_to(site)).replace("index.html", "")
+    if served not in locs:
+        raise SystemExit(f"sitemap.xml does not list {served}")
 
 with (site / "og.png").open("rb") as image:
     header = image.read(24)
@@ -95,7 +138,7 @@ if (site / "_redirects").exists():
     raise SystemExit("www-to-apex redirects belong in Cloudflare Redirect Rules, not Pages _redirects")
 
 print(
-    f"Static site checks passed: {len(parser.ids)} ids, "
-    f"{len(parser.anchors)} anchor links, {len(set(parser.local_assets))} local assets"
+    f"Static site checks passed: {len(pages)} pages, {ids} ids, "
+    f"{anchors} anchor links, {assets} local assets"
 )
 PY

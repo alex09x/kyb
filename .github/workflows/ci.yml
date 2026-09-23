@@ -14,14 +14,32 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # Full history: the authorship check below reads `git shortlog`, and on the
+      # default shallow clone it would see one commit and pass vacuously.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+      - name: Refuse to publish internal infrastructure data
+        run: bash scripts/check-no-internal-data.sh
+      - name: Validate citation metadata
+        run: bash scripts/test-citation.sh
+      - name: Verify authorship collapses to one identity
+        run: |
+          identities=$(git shortlog -sne HEAD | wc -l | tr -d ' ')
+          git shortlog -sne HEAD
+          if [ "$identities" -ne 1 ]; then
+            echo "::error::.mailmap must collapse the history to one identity, got $identities" >&2
+            exit 1
+          fi
       - name: Validate and install agent skill
         run: bash scripts/test-skill-install.sh
       - name: Verify safe Docker Compose bind
         run: bash scripts/test-compose-bind.sh
+      - name: Verify the CLI preflight fails closed
+        run: bash scripts/test-cli-preflight.sh
       - name: Validate static website
         run: bash scripts/test-site.sh
       - name: Check deployment script syntax
@@ -29,6 +47,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
+
+  # The golden-vector test skips when no model is present, which would make it a
+  # gate that never fires. This job gives it one - cached, so the 120 MB download
+  # happens once rather than on every run. Same model the Dockerfile bakes in.
+  embedding-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache the embedding model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: model
+          key: e5-small-int8-Xenova-multilingual-e5-small-v1
+      - name: Fetch the embedding model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          repo=Xenova/multilingual-e5-small
+          mkdir -p model
+          curl -fsSL -o model/model.onnx \
+            "https://huggingface.co/${repo}/resolve/main/onnx/model_quantized.onnx"
+          curl -fsSL -o model/tokenizer.json \
+            "https://huggingface.co/${repo}/resolve/main/tokenizer.json"
+      - name: The embedding pipeline still produces the recorded vector
+        run: cargo test --locked golden_vector -- --nocapture
 
   e2e-macos:
     runs-on: macos-14
