@@ -30,9 +30,10 @@ regex = "1"
 ort = { version = "2.0.0-rc.10", features = ["ndarray"] }
 tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 ndarray = "0.17"
+# /mcp replays a tool call through the same Router that serves the public API
+tower = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
 tempfile = "3"
-tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 rstest = "0.26.1"

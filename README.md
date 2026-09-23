@@ -25,7 +25,7 @@ truth that survives between sessions and across machines.
 
 <br/>
 
-[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Incidents**](#incident-reports) · [**Agent skill**](#the-agent-skill) · [**HTTP API**](#http-api) · [**Citation**](#citation)
+[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Incidents**](#incident-reports) · [**Agent skill**](#the-agent-skill) · [**MCP**](#mcp) · [**HTTP API**](#http-api) · [**Citation**](#citation)
 
 </div>
 
@@ -221,7 +221,7 @@ kyb done task-raise-log-retention <<< "what came of it"         # or --status dr
 
 `bash skills/install.sh` installs, for **every agent found on the machine**:
 
-- the CLI (one copy on PATH),
+- the CLI and the MCP bridge (one copy of each on PATH),
 - the manual `SKILL.md`,
 - a **pointer section in each agent's always-loaded global instructions** — a skill an agent
   never opens is a skill it never uses.
@@ -236,6 +236,41 @@ Idempotent: sections are delimited by markers and updated in place. The skill en
 governance that keeps a shared base alive — always query before adding, overwrite the same
 key instead of inventing synonyms, only verified facts, English entries, file incidents when
 something breaks and fold the lesson back into knowledge after resolving.
+
+---
+
+## MCP
+
+The server speaks MCP itself, at `POST /mcp`. Nothing is installed on the client:
+
+```sh
+claude mcp add --transport http kyb http://<host>:9310/mcp
+```
+
+That is the whole setup. The tool list comes from the server, so upgrading the server is how
+every connected agent gets new tools — there is no client to update, and no version of a
+client that can disagree with the server about what exists.
+
+A tool call is replayed through the same router that serves the public API, so there is one
+implementation of what `POST /knowledge` means, the audit log records MCP-driven writes like
+any other write, and a route that changes changes here with it.
+
+It is stateless: no sessions, no server-initiated stream, `GET` and `DELETE` answer `405` and
+say so. Batches work. `?readonly=1` on the URL drops the six writing tools for that
+registration — a guard rail for an agent, not a security boundary, since nothing stops a
+caller from omitting it.
+
+`rm` and `reindex` are not exposed over MCP at all: retracting an entry and rebuilding the
+index should not be something an agent reaches for mid-thought.
+
+**This adds no reach that the API did not already have.** `POST /knowledge` and
+`DELETE /knowledge/{key}` already answer unauthenticated on this port; `/mcp` is exactly as
+open as they are and no more. Bind accordingly — see the note in `src/config.rs`.
+
+### It does not replace the CLI
+
+A deploy script, an `ssh` one-liner on a fleet node, `cron` and a person at a terminal all
+need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses `kyb`.
 
 ---
 

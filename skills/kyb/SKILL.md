@@ -17,7 +17,8 @@ infra: **ask the base first**, and **write back everything you learned** while w
 the same base. The CLI **`kyb`** is on PATH; it finds the server via `KYB_HOST`/`KYB_ADDR` env
 or `~/.config/kyb/host` (written by the installer) and acts only as an HTTP client. If the
 server is unavailable it reports the address and stops; it never opens SSH or attempts remote
-repair. Every response is JSON. The canon is a git repo on the server: one md file per entry
+repair. Every response is JSON. **If your client already lists `kyb_*` tools, use those** — they
+are the same service over MCP, and this manual still describes what each one means. The canon is a git repo on the server: one md file per entry
 (`knowledge/`, `incidents/`, `tasks/` by kind), one commit per change, **commit sha = version
 id** — nothing is ever lost.
 
@@ -374,6 +375,14 @@ kyb reindex        # full index rebuild from git (the service also does it on ev
 kyb health         # {"ok","entries","open_incidents","open_tasks","index_docs","last_commit"}
                    # open_tasks = open + in_progress + blocked (every task still in flight)
 ```
+
+For a client that speaks MCP, the server serves it directly — nothing to install:
+
+    claude mcp add --transport http kyb http://<host>:9310/mcp
+
+The tool list comes from the server, so it always matches the routes that actually exist, and
+upgrading the server is how agents get new tools. `?readonly=1` drops the writing tools.
+`kyb rm` and `kyb reindex` are not on the MCP surface; they stay CLI-only.
 
 ---
 

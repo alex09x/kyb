@@ -2,6 +2,7 @@ mod audit;
 mod config;
 mod embed;
 mod index;
+mod mcp;
 mod model;
 mod store;
 
@@ -111,6 +112,13 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
 
 // No auth on purpose: we listen on 127.0.0.1 / the internal network only
 fn build_app(state: Arc<AppState>) -> Router {
+    let api = api_router(state);
+    // /mcp serves the same routes to an MCP client, by replaying tool calls
+    // through this very router - one implementation, not two.
+    api.clone().merge(mcp::router(api))
+}
+
+fn api_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/knowledge", post(upsert))

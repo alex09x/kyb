@@ -102,6 +102,7 @@ jobs:
           if [ -f skills/kyb/bin/kyb ]; then
             bash skills/kyb/bin/kyb tags || true
           fi
+          bash scripts/test-mcp-endpoint.sh http://127.0.0.1:9310
           kill $SERVER_PID
 
   # Tag builds only. Branch and PR runs are untouched by this job.
