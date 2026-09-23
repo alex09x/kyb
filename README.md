@@ -266,16 +266,31 @@ method, path, query, status, duration.
 
 ## Search quality
 
-`scripts/eval-search.sh [addr] [--lexical]` measures retrieval — cross-language questions
-against a real base, top-1 / top-3 hit rate:
+`scripts/eval-search.sh [addr] [--lexical]` measures retrieval: paraphrase questions that
+share few or no tokens with the entries they should land on, scored top-1 / top-3.
+
+Measured 2026-09-22 against a 643-entry base, e5-small int8, round trip over LAN:
 
 | setup | top-1 | top-3 | latency |
 |---|:---:|:---:|:---:|
-| lexical only | 2/14 | 3/14 | ~2 ms |
-| **+ e5-small int8** (118 MB, shipped) | **9/14** | **12/14** | ~6 ms |
-| + e5-base int8 (266 MB) | 10/14 | 12/14 | ~10 ms |
+| lexical only | 1/14 | 2/14 | ~7 ms |
+| **+ e5-small int8** (118 MB, shipped) | **3/14** | **4/14** | ~9 ms |
 
-e5-small ships in the Docker image (`MODEL_REPO` build arg to swap).
+Read the absolute numbers with care and the comparison as the point. **The fourteen
+questions that ship in the script are examples written against a different base** — three
+of the keys they expect do not exist in the base measured above, so those cases cannot be
+hit by either mode and the ceiling is well under 14/14. What the run does establish, on
+identical cases against an identical base, is that the vector side roughly doubles the hit
+rate over BM25 alone.
+
+Replace `CASES` in the script with questions and keys from your own base before drawing any
+conclusion about your own setup. An earlier edition of this table reported 9/14 and 12/14
+for the hybrid row; those numbers came from the base the example questions were written
+for and do not reproduce elsewhere, which is exactly the trap this paragraph exists to
+flag.
+
+e5-small ships in the Docker image (`MODEL_REPO` build arg to swap). Without a model on
+disk the service degrades to lexical-only by design.
 
 ---
 
