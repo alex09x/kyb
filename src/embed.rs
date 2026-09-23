@@ -553,11 +553,6 @@ mod tests {
         assert_eq!(fuse_lists(&keys(&["a", "b", "c"]), &[], 0.6), keys(&["a", "b", "c"]));
     }
 
-    #[test]
-    /// The cache is keyed by an entry's text, but the model is handed that text
-    /// with a prefix and a token budget applied. Those are part of what produced
-    /// the vector, so they are part of what identifies it.
-    #[test]
     /// A recorded vector for a fixed string, compared on every run.
     ///
     /// The fingerprint names the inputs that happen to be CONSTANTS - prefixes,
@@ -672,14 +667,30 @@ mod tests {
             got.len()
         );
 
-        // scale-invariant: catches weights, prefix, truncation, pooling, quantisation
+        // Scale-invariant: catches weights, pooling and quantisation. Prefix and
+        // token budget are caught exactly, above, by comparing the recipe string.
+        //
+        // THE THRESHOLD IS MEASURED, NOT CHOSEN. int8 kernels differ between CPU
+        // architectures, so the same code over the same model file does not produce
+        // the same floats everywhere. Both ends were measured on 2026-09-23 with
+        // this vector, recorded on aarch64-apple-darwin:
+        //
+        //     noise   same code on x86_64-linux        cosine 0.999563  (4.4e-4 off)
+        //     signal  mean pooling swapped for CLS     cosine 0.891519  (1.1e-1 off)
+        //
+        // A factor of 250 between them, so the threshold can sit far from both.
+        // 0.9999 - the value this started with - is BELOW the noise floor, which is
+        // why it failed on Linux CI while passing on the machine that recorded the
+        // vector. 0.998 leaves 4.5x headroom over the observed spread and still
+        // catches the pooling change by a factor of 54.
         let sim = cosine(&got, &expected);
         assert!(
-            sim > 0.9999,
+            sim > 0.998,
             "the embedding pipeline changed: cosine with the recorded vector is {sim:.6}.\n\
              The recipe is UNCHANGED ({current_recipe}), so this is not a prefix or a token \
-             budget - it is code or weights: pooling, normalisation, quantisation, the model \
-             file, or the ONNX runtime under it.\n\
+             budget - it is code or weights: pooling, quantisation, the model file, or the \
+             ONNX runtime under it. The threshold already tolerates the spread between CPU \
+             architectures, so this is a real change and not a different machine.\n\
              If that was deliberate, regenerate with KYB_GOLDEN_REGEN=1 and understand that \
              every cached vector built under the old pipeline is now incomparable."
         );
@@ -695,6 +706,9 @@ mod tests {
         );
     }
 
+    /// The cache is keyed by an entry's text, but the model is handed that text
+    /// with a prefix and a token budget applied. Those are part of what produced
+    /// the vector, so they are part of what identifies it.
     #[test]
     fn the_fingerprint_covers_the_recipe_not_only_the_weights() {
         let weights = "same-weights";

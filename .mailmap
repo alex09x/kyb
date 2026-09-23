@@ -20,17 +20,21 @@
 # repository" box read CITATION.cff. All of it must be settled before a DOI is
 # minted, because a Zenodo deposition is an immutable archive.
 #
-# The canonical address below is a controlled domain rather than a GitHub
-# noreply address, which is not a durable citation contact. Changing the
-# canonical name or address is a one-line edit here and in CITATION.cff - do it
-# before the deposition, not after.
+# The canonical NAME matches CITATION.cff, deliberately: git shortlog, the
+# citation record and the package metadata should not disagree about who wrote
+# this. The canonical ADDRESS is a controlled domain rather than a GitHub noreply
+# address, which is not a durable citation contact. Changing either is a one-line
+# edit here and in CITATION.cff - do it before the deposition, not after.
 #
 # Verify with:  git shortlog -sne HEAD   ->  a single line.
 
-alex09x <big@prod.codes> <5381530+alex09x@users.noreply.github.com>
-alex09x <big@prod.codes> <alex09x@users.noreply.github.com>
-alex09x <big@prod.codes> <git@prod.codes>
-alex09x <big@prod.codes> <lol@lol.lol>
-alex09x <big@prod.codes> <306900425+dip-labs@users.noreply.github.com>
-alex09x <big@prod.codes> Alex <git@prod.codes>
-alex09x <big@prod.codes> dip-labs <306900425+dip-labs@users.noreply.github.com>
+Alexander Panasenko <big@prod.codes> <5381530+alex09x@users.noreply.github.com>
+Alexander Panasenko <big@prod.codes> <alex09x@users.noreply.github.com>
+Alexander Panasenko <big@prod.codes> <git@prod.codes>
+Alexander Panasenko <big@prod.codes> <lol@lol.lol>
+Alexander Panasenko <big@prod.codes> <306900425+dip-labs@users.noreply.github.com>
+Alexander Panasenko <big@prod.codes> Alex <git@prod.codes>
+Alexander Panasenko <big@prod.codes> dip-labs <306900425+dip-labs@users.noreply.github.com>
+Alexander Panasenko <big@prod.codes> <alexsandr.panasenko@gmail.com>
+Alexander Panasenko <big@prod.codes> <alex@prod.codes>
+Alexander Panasenko <big@prod.codes> <big@prod.codes>
