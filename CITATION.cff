@@ -23,7 +23,7 @@ authors:
   - family-names: Panasenko
     given-names: Alexander
     email: big@prod.codes
-version: 0.2.2
+version: 0.2.3
 license: MIT
 repository-code: "https://github.com/alex09x/kyb"
 url: "https://kybmemory.com"

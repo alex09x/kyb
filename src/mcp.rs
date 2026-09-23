@@ -369,6 +369,8 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             push(&mut query, "parent_task", text_arg(args, "parent_task"));
             push(&mut query, "limit", text_arg(args, "limit"));
             push(&mut query, "history", flag_arg(args, "history"));
+            push(&mut query, "as_of", text_arg(args, "as_of"));
+            push(&mut query, "changed_between", text_arg(args, "changed_between"));
             if flag_arg(args, "recent").is_some() {
                 query.push(("sort", "recent".into()));
             }
@@ -384,6 +386,18 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             Call {
                 method: "GET",
                 path: format!("/knowledge/{}", text_arg(args, "key").unwrap_or_default()),
+                query,
+                body: None,
+            }
+        }
+        "kyb_diff" => {
+            require(args, &["key"])?;
+            let mut query = Vec::new();
+            push(&mut query, "from", text_arg(args, "from"));
+            push(&mut query, "to", text_arg(args, "to"));
+            Call {
+                method: "GET",
+                path: format!("/knowledge/{}/diff", text_arg(args, "key").unwrap_or_default()),
                 query,
                 body: None,
             }
@@ -585,6 +599,11 @@ instead of the current state; hits then carry is_head=false when they come from 
 useful to prove a match is literal rather than by meaning"},
                 "recent": {"type": "boolean", "description": "order by commit time, not relevance"},
                 "limit": int_t,
+                "as_of": {"type": "string", "description": "what the base said at this moment \
+rather than what it says now - an RFC3339 timestamp, a YYYY-MM-DD date, or any git revision. \
+A bare date means the end of that day."},
+                "changed_between": {"type": "string", "description": "only entries that changed \
+inside this window: two dates or revisions separated by a comma."},
             }},
         }),
         json!({
@@ -603,6 +622,18 @@ then'.",
 timestamp of each change. Use it to see when a fact moved, then pass a sha to kyb_get.",
             "inputSchema": {"type": "object", "required": ["key"],
                             "properties": {"key": str_t}},
+        }),
+        json!({
+            "name": "kyb_diff",
+            "description": "What changed in an entry between two revisions: which fields moved, \
+and which body lines were added or removed. With no revisions it compares the two most recent \
+versions - 'what just changed' is the question asked most. Give `from` alone to compare a past \
+version against the current one.",
+            "inputSchema": {"type": "object", "required": ["key"], "properties": {
+                "key": str_t,
+                "from": {"type": "string", "description": "revision to compare from"},
+                "to": {"type": "string", "description": "revision to compare to; absent means current"},
+            }},
         }),
         json!({
             "name": "kyb_tags",
@@ -837,7 +868,7 @@ mod mcp_tests {
         let tools = resp["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
-        assert_eq!(names.len(), 13, "got {names:?}");
+        assert_eq!(names.len(), 14, "got {names:?}");
         let unique: HashSet<&&str> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate tool name in {names:?}");
         for tool in tools {
@@ -847,10 +878,11 @@ mod mcp_tests {
         // retracting an entry and rebuilding the index stay off this surface
         assert!(!names.contains(&"kyb_rm"));
         assert!(!names.contains(&"kyb_reindex"));
-        // no diff and no as_of on this build, because the routes do not exist here
-        assert!(!names.contains(&"kyb_diff"));
+        // the temporal layer is in this build, so it is advertised
+        assert!(names.contains(&"kyb_diff"));
         let query = tools.iter().find(|t| t["name"] == "kyb_query").unwrap();
-        assert!(query["inputSchema"]["properties"]["as_of"].is_null());
+        assert!(query["inputSchema"]["properties"]["as_of"].is_object());
+        assert!(query["inputSchema"]["properties"]["changed_between"].is_object());
     }
 
     #[tokio::test]
@@ -1017,7 +1049,7 @@ mod mcp_tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 7, "{names:?}");
+        assert_eq!(names.len(), 8, "{names:?}");
         for write in WRITE_TOOLS {
             assert!(!names.contains(&write), "{write} must not be advertised read-only");
         }
@@ -1034,6 +1066,37 @@ mod mcp_tests {
 
         let got = rpc(&app, call("kyb_get", json!({"key": "k"}))).await;
         assert!(errored(&got), "a read-only refusal must not have written anything");
+    }
+
+    #[tokio::test]
+    async fn diff_reports_what_moved_between_two_versions() {
+        let (app, _d, _i, _a) = test_app();
+        for body in ["Runs on node-7, port 8080.", "Runs on node-7, port 9090."] {
+            rpc(&app, call("kyb_add", json!({"key": "orders-api", "title": "Orders API",
+                                             "body": body}))).await;
+        }
+        let resp = rpc(&app, call("kyb_diff", json!({"key": "orders-api"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let text = tool_body(&resp);
+        // the superseded line left, the new one arrived
+        assert!(text.contains("8080"), "{text}");
+        assert!(text.contains("9090"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn as_of_asks_the_route_about_the_past_rather_than_the_present() {
+        let (app, _d, _i, audit_path) = test_app();
+        rpc(&app, call("kyb_add", json!({"key": "orders-api", "title": "Orders API",
+                                         "body": "port 8080"}))).await;
+        let resp = rpc(&app, call("kyb_query",
+                                  json!({"q": "orders", "as_of": "2020-01-01"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        // a date before anything existed must not answer with today's entry
+        let parsed: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(parsed["count"], 0, "as_of was ignored: {parsed}");
+        // and the parameter really travelled, rather than being silently dropped
+        let log = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(log.contains("as_of"), "as_of never reached the route: {log}");
     }
 
     #[tokio::test]
