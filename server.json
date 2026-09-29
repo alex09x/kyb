@@ -1,0 +1,12 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.alex09x/kyb",
+  "title": "KYB (Know Your Business)",
+  "description": "Git-backed knowledge base and incident tracker for AI agent fleets: hybrid BM25 + dense embedding retrieval, immutable version history, and stateless MCP tools.",
+  "repository": {
+    "url": "https://github.com/alex09x/kyb",
+    "source": "github"
+  },
+  "websiteUrl": "https://kybmemory.com",
+  "version": "0.2.3"
+}
