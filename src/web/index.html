@@ -2560,43 +2560,55 @@
         const visibleLinks = App.graphLinks.filter(l => visibleNodeSet.has(l.source) && visibleNodeSet.has(l.target));
 
         if (App.graphPhysics) {
-          // Repulsion
+          // Repulsion (Coulomb with normalized vector)
           for (let i = 0; i < visibleNodes.length; i++) {
             for (let j = i + 1; j < visibleNodes.length; j++) {
               const dx = visibleNodes[j].x - visibleNodes[i].x;
               const dy = visibleNodes[j].y - visibleNodes[i].y;
               const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-              const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 260 : 180;
+              const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 180 : 100;
               if (dist < minDist) {
-                const f = (minDist - dist) / dist * 0.08;
-                if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= dx * f; visibleNodes[i].vy -= dy * f; }
-                if (!visibleNodes[j].pinned) { visibleNodes[j].vx += dx * f; visibleNodes[j].vy += dy * f; }
+                const repForce = Math.min(10, (minDist - dist) / dist * 1.5);
+                const fx = (dx / dist) * repForce;
+                const fy = (dy / dist) * repForce;
+                if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= fx; visibleNodes[i].vy -= fy; }
+                if (!visibleNodes[j].pinned) { visibleNodes[j].vx += fx; visibleNodes[j].vy += fy; }
               }
             }
           }
 
-          // Attraction
+          // Attraction (Hooke's law with linear normalized unit vector & damping)
           visibleLinks.forEach(l => {
             const dx = l.target.x - l.source.x;
             const dy = l.target.y - l.source.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const idealDist = (l.source.isHub || l.target.isHub) ? 130 : 80;
-            const f = (dist - idealDist) * 0.005;
-            if (!l.source.pinned) { l.source.vx += dx * f; l.source.vy += dy * f; }
-            if (!l.target.pinned) { l.target.vx -= dx * f; l.target.vy -= dy * f; }
+            const idealDist = (l.source.isHub || l.target.isHub) ? 130 : 75;
+            const displacement = dist - idealDist;
+            const force = Math.max(-8, Math.min(8, displacement * 0.02));
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+
+            if (!l.source.pinned) { l.source.vx += fx; l.source.vy += fy; }
+            if (!l.target.pinned) { l.target.vx -= fx; l.target.vy -= fy; }
           });
 
-          // Center gravity
+          // Center gravity and velocity damping with hard speed cap
           const cx = width / 2;
           const cy = height / 2;
+          const maxSpeed = 7;
           visibleNodes.forEach(n => {
             if (!n.pinned) {
-              n.vx += (cx - n.x) * 0.001;
-              n.vy += (cy - n.y) * 0.001;
-              n.vx *= 0.88;
-              n.vy *= 0.88;
-              n.x += n.vx;
-              n.y += n.vy;
+              n.vx += (cx - n.x) * 0.0015;
+              n.vy += (cy - n.y) * 0.0015;
+              n.vx *= 0.86;
+              n.vy *= 0.86;
+              const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy) || 1;
+              if (speed > maxSpeed) {
+                n.vx = (n.vx / speed) * maxSpeed;
+                n.vy = (n.vy / speed) * maxSpeed;
+              }
+              if (!isNaN(n.vx)) n.x += n.vx;
+              if (!isNaN(n.vy)) n.y += n.vy;
             }
           });
         }
