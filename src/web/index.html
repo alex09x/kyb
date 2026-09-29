@@ -12,9 +12,10 @@
       --card-hover: #151b29;
       --card-subtle: #0d1017;
       --border: #1e2638;
+      --border-light: #2b364e;
       --border-focus: #00b3c4;
       --accent: #00b3c4;
-      --accent-glow: rgba(0, 179, 196, 0.2);
+      --accent-glow: rgba(0, 179, 196, 0.25);
       --accent-dim: rgba(0, 179, 196, 0.08);
       --text: #f0f4fa;
       --text-dim: #8b9cb6;
@@ -42,7 +43,7 @@
       overflow-x: hidden;
     }
 
-    /* Scrollbar */
+    /* Scrollbars */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -50,7 +51,7 @@
 
     /* Header */
     header {
-      background: rgba(17, 21, 32, 0.95);
+      background: rgba(17, 21, 32, 0.96);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
       position: sticky;
@@ -159,15 +160,15 @@
     .header-controls {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
     .search-box {
       position: relative;
-      width: 280px;
+      width: 260px;
     }
     .search-input {
       width: 100%;
-      background: var(--bg-input);
+      background: var(--card-subtle);
       border: 1px solid var(--border);
       color: var(--text);
       font-size: 13px;
@@ -209,7 +210,7 @@
       padding: 10px 24px;
       display: flex;
       align-items: center;
-      gap: 24px;
+      gap: 20px;
       font-size: 12px;
       color: var(--text-dim);
       overflow-x: auto;
@@ -233,15 +234,15 @@
     /* Main Container */
     main {
       flex: 1;
-      padding: 24px;
-      max-width: 1600px;
+      padding: 20px 24px;
+      max-width: 1700px;
       width: 100%;
       margin: 0 auto;
     }
 
     .tab-content { display: none; }
     .tab-content.active { display: block; animation: fadeIn 0.15s ease; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Buttons */
     .btn {
@@ -257,11 +258,17 @@
       align-items: center;
       gap: 6px;
       transition: all 0.15s ease;
+      user-select: none;
     }
     .btn:hover { background: var(--card-hover); border-color: var(--border-light); }
     .btn.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
     .btn.primary:hover { filter: brightness(1.1); box-shadow: 0 0 10px var(--accent-glow); }
+    .btn.danger { background: var(--red-dim); color: var(--red); border-color: rgba(239,68,68,0.4); }
+    .btn.danger:hover { background: var(--red); color: #fff; }
+    .btn.success { background: var(--green-dim); color: var(--green); border-color: rgba(16,185,129,0.4); }
+    .btn.success:hover { background: var(--green); color: #fff; }
     .btn.sm { padding: 4px 8px; font-size: 11px; }
+    .btn.icon-only { padding: 6px; }
 
     /* Badges */
     .badge {
@@ -285,6 +292,10 @@
     .badge-blocked { background: var(--amber); color: #000; }
     .badge-in_progress { background: var(--accent); color: #000; }
     .badge-done { background: var(--green); color: #fff; }
+    .badge-critical { background: var(--red); color: #fff; font-weight: 800; }
+    .badge-high { background: var(--amber); color: #000; font-weight: 700; }
+    .badge-medium { background: var(--accent-dim); color: var(--accent); }
+    .badge-low { background: rgba(255,255,255,0.06); color: var(--text-dim); }
     .badge-tag {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--border);
@@ -295,17 +306,18 @@
       border-radius: 3px;
       text-decoration: none;
       cursor: pointer;
+      transition: all 0.15s ease;
     }
-    .badge-tag:hover { color: var(--accent); border-color: var(--accent); }
+    .badge-tag:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
 
     /* ========================================================
        TAB 1: KNOWLEDGE & SEARCH (Two-Pane)
        ======================================================== */
     .explorer-layout {
       display: grid;
-      grid-template-columns: 440px 1fr;
+      grid-template-columns: 460px 1fr;
       gap: 20px;
-      height: calc(100vh - 180px);
+      height: calc(100vh - 170px);
       min-height: 600px;
     }
     @media (max-width: 1024px) {
@@ -321,7 +333,7 @@
       overflow: hidden;
     }
     .pane-header {
-      padding: 14px 16px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
       background: var(--card-subtle);
       display: flex;
@@ -351,21 +363,37 @@
       background: var(--border);
       border-color: var(--text-dim);
     }
-    .chip.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+    .chip.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); font-weight: 700; }
+
+    .pane-sort-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .select-sm {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      outline: none;
+    }
 
     .pane-list {
       flex: 1;
       overflow-y: auto;
-      divide-y: 1px solid var(--border);
     }
     .item-card {
-      padding: 14px 16px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
       cursor: pointer;
       transition: all 0.12s ease;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
     }
     .item-card:hover { background: var(--card-hover); }
     .item-card.selected {
@@ -380,13 +408,13 @@
     }
     .item-title {
       font-weight: 600;
-      font-size: 14px;
+      font-size: 13.5px;
       color: var(--text);
       line-height: 1.3;
     }
     .item-key {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: 11.5px;
       color: var(--accent);
     }
     .item-meta {
@@ -513,7 +541,7 @@
     }
     .diff-line {
       display: flex;
-      padding: 1px 8px;
+      padding: 2px 8px;
       white-space: pre-wrap;
     }
     .diff-add { background: rgba(16, 185, 129, 0.15); color: #34d399; }
@@ -526,7 +554,7 @@
     .incidents-container {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 18px;
     }
     .alert-banner {
       background: linear-gradient(90deg, rgba(239, 68, 68, 0.2) 0%, rgba(239, 68, 68, 0.05) 100%);
@@ -541,6 +569,13 @@
     .alert-banner.healthy {
       background: linear-gradient(90deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.02) 100%);
       border-color: var(--green);
+    }
+    .filter-bar-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
     }
     .incident-cards {
       display: grid;
@@ -609,8 +644,13 @@
       border-radius: 8px;
       display: flex;
       flex-direction: column;
-      max-height: calc(100vh - 180px);
+      max-height: calc(100vh - 170px);
       overflow: hidden;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .kanban-column.drag-over {
+      background: rgba(0, 179, 196, 0.08);
+      border-color: var(--accent);
     }
     .column-header {
       padding: 12px 16px;
@@ -627,6 +667,7 @@
       flex-direction: column;
       gap: 10px;
       overflow-y: auto;
+      min-height: 120px;
     }
     .task-card {
       background: var(--card);
@@ -636,39 +677,85 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      cursor: pointer;
+      cursor: grab;
       transition: all 0.15s ease;
+      position: relative;
     }
-    .task-card:hover { border-color: var(--border-light); transform: translateY(-1px); }
+    .task-card:active { cursor: grabbing; }
+    .task-card:hover { border-color: var(--border-light); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .task-card.dragging { opacity: 0.4; }
+
+    .task-actions-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border);
+      padding-top: 6px;
+      margin-top: 2px;
+      gap: 6px;
+    }
 
     /* ========================================================
        TAB 4: TOPOLOGY GRAPH CANVAS
        ======================================================== */
     .graph-container {
       position: relative;
-      height: calc(100vh - 180px);
+      height: calc(100vh - 170px);
       border: 1px solid var(--border);
       border-radius: 8px;
       background: #06080c;
       overflow: hidden;
     }
-    #topoCanvas { width: 100%; height: 100%; display: block; }
+    #topoCanvas { width: 100%; height: 100%; display: block; cursor: grab; }
+    #topoCanvas:active { cursor: grabbing; }
+
     .graph-overlay {
       position: absolute;
       top: 16px;
       left: 16px;
-      background: rgba(17, 21, 32, 0.9);
+      background: rgba(17, 21, 32, 0.92);
       border: 1px solid var(--border);
-      padding: 12px;
-      border-radius: 6px;
+      padding: 14px;
+      border-radius: 8px;
       font-size: 12px;
       display: flex;
       flex-direction: column;
       gap: 8px;
-      backdrop-filter: blur(8px);
+      backdrop-filter: blur(10px);
+      max-width: 280px;
+      z-index: 10;
     }
     .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
     .legend-color { width: 10px; height: 10px; border-radius: 50%; }
+
+    .graph-controls-bar {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      gap: 6px;
+      background: rgba(17, 21, 32, 0.9);
+      border: 1px solid var(--border);
+      padding: 6px;
+      border-radius: 8px;
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+
+    .node-hud {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(17, 21, 32, 0.95);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #fff;
+      display: none;
+      z-index: 20;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      max-width: 320px;
+    }
 
     /* ========================================================
        TAB 5: LIVE FLEET FEED (Audit Log)
@@ -678,6 +765,18 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .feed-toolbar {
+      padding: 12px 16px;
+      background: var(--card-subtle);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
     }
     .feed-table {
       width: 100%;
@@ -701,6 +800,145 @@
     .method-POST { background: var(--accent-dim); color: var(--accent); }
     .method-GET { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
     .method-DELETE { background: var(--red-dim); color: var(--red); }
+    .latency-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .latency-fast { color: var(--green); }
+    .latency-mid { color: var(--amber); }
+    .latency-slow { color: var(--red); }
+
+    /* ========================================================
+       MODALS & TOASTS
+       ======================================================== */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-card {
+      background: var(--card);
+      border: 1px solid var(--border-light);
+      border-radius: 10px;
+      width: 100%;
+      max-width: 600px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: scale(0.96);
+      transition: transform 0.15s ease;
+    }
+    .modal-backdrop.open .modal-card {
+      transform: scale(1);
+    }
+    .modal-header {
+      padding: 16px 20px;
+      background: var(--card-subtle);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-title { font-weight: 700; font-size: 16px; color: #fff; }
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 18px;
+    }
+    .modal-close:hover { color: #fff; }
+    .modal-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      max-height: calc(85vh - 120px);
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+    }
+    .form-input, .form-textarea, .form-select {
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      font-family: inherit;
+    }
+    .form-textarea { font-family: var(--font-mono); resize: vertical; min-height: 100px; line-height: 1.4; }
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+    .modal-footer {
+      padding: 14px 20px;
+      background: var(--card-subtle);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Toast Notifications */
+    #toastContainer {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 300;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      color: var(--text);
+      padding: 12px 18px;
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto;
+      animation: toastIn 0.2s ease forwards;
+    }
+    .toast.success { border-left-color: var(--green); }
+    .toast.error { border-left-color: var(--red); }
+    @keyframes toastIn {
+      from { transform: translateX(50px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
   </style>
 </head>
 <body>
@@ -743,9 +981,12 @@
         <input type="text" id="globalSearch" class="search-input" placeholder="Search fleet memory...">
         <span class="kbd-shortcut">/</span>
       </div>
+      <button class="btn primary sm" onclick="openNewModal()">+ New</button>
+      <button class="btn sm icon-only" title="Keyboard Shortcuts (?)" onclick="openShortcutsModal()">⌨️</button>
+      <button class="btn sm icon-only" id="refreshBtn" title="Force Refresh (R)" onclick="manualRefresh()">🔄</button>
       <div class="live-pulse">
         <span class="live-dot"></span>
-        <span>DAEMON ONLINE</span>
+        <span id="daemonLabel">DAEMON ONLINE</span>
       </div>
     </div>
   </header>
@@ -776,6 +1017,11 @@
       <span>Git Canon:</span>
       <span class="stat-val" id="statRev">head</span>
     </div>
+    <div class="stat-dot"></div>
+    <div class="stat-item" style="margin-left: auto;">
+      <span style="color: var(--text-muted);">Synced:</span>
+      <span class="stat-val" style="color: var(--text-muted); font-size:11px;" id="statLastSync">just now</span>
+    </div>
   </section>
 
   <!-- Main Content Area -->
@@ -792,7 +1038,17 @@
               <span class="chip" data-filter="knowledge">Knowledge</span>
               <span class="chip" data-filter="incident">Incidents</span>
               <span class="chip" data-filter="task">Tasks</span>
-              <span class="chip" data-filter="recent">Recent</span>
+            </div>
+            <div class="pane-sort-bar">
+              <span id="listCountLabel">0 items</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span>Sort:</span>
+                <select id="sortSelect" class="select-sm" onchange="renderKnowledgeList()">
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="az">Title A-Z</option>
+                </select>
+              </div>
             </div>
             <div id="tagPills" style="display:flex; flex-wrap:wrap; gap:4px; max-height: 48px; overflow-y:auto;"></div>
           </div>
@@ -806,7 +1062,7 @@
           <div id="detailView" style="display:flex; flex-direction:column; height:100%;">
             <div class="detail-empty">
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-              <div>Select an entry from the list to view documentation, git history, or diffs.</div>
+              <div>Select an entry from the list or press <kbd style="background:var(--border); padding:2px 6px; border-radius:4px;">J</kbd> / <kbd style="background:var(--border); padding:2px 6px; border-radius:4px;">K</kbd> to navigate.</div>
             </div>
           </div>
         </div>
@@ -818,7 +1074,7 @@
       <div class="incidents-container">
         <div id="incidentAlertBanner" class="alert-banner healthy">
           <div style="display:flex; align-items:center; gap:12px;">
-            <span style="font-size: 24px;">🛡️</span>
+            <span style="font-size: 24px;" id="incidentBannerIcon">🛡️</span>
             <div>
               <div style="font-weight: 700; font-size: 15px;" id="incidentBannerTitle">All Systems Operational</div>
               <div style="font-size: 12px; color: var(--text-dim);" id="incidentBannerSub">No active or unmitigated incidents recorded across the agent fleet.</div>
@@ -832,35 +1088,57 @@
           </div>
         </div>
 
+        <div class="filter-bar-row">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:12px; color:var(--text-muted);">Severity:</span>
+            <button class="chip active" id="sevChipAll" onclick="filterIncidentsSeverity('all')">All</button>
+            <button class="chip" id="sevChipCritical" onclick="filterIncidentsSeverity('critical')">Critical</button>
+            <button class="chip" id="sevChipHigh" onclick="filterIncidentsSeverity('high')">High</button>
+            <button class="chip" id="sevChipMedium" onclick="filterIncidentsSeverity('medium')">Medium</button>
+            <button class="chip" id="sevChipLow" onclick="filterIncidentsSeverity('low')">Low</button>
+          </div>
+          <button class="btn sm primary" onclick="openNewModal('incident')">+ Report Incident</button>
+        </div>
+
         <div class="incident-cards" id="incidentCardsGrid"></div>
       </div>
     </div>
 
     <!-- ==================== TAB 3: AGENT TASKS ==================== -->
     <div id="tab-tasks" class="tab-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <div style="font-size:13px; color:var(--text-dim);">
+          Drag and drop cards between columns to transition status, or use quick action buttons.
+        </div>
+        <button class="btn sm primary" onclick="openNewModal('task')">+ Add Task</button>
+      </div>
+
       <div class="kanban-board">
-        <div class="kanban-column">
+        <div class="kanban-column" id="colOpenZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'open')">
           <div class="column-header">
             <span>Backlog / Open</span>
             <span class="tab-badge" id="colOpenCount">0</span>
           </div>
           <div class="column-cards" id="colOpen"></div>
         </div>
-        <div class="kanban-column">
+
+        <div class="kanban-column" id="colProgZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'in_progress')">
           <div class="column-header">
             <span>In Progress</span>
             <span class="tab-badge teal" id="colInProgressCount">0</span>
           </div>
           <div class="column-cards" id="colInProgress"></div>
         </div>
-        <div class="kanban-column">
+
+        <div class="kanban-column" id="colBlockZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'blocked')">
           <div class="column-header">
             <span>Blocked</span>
             <span class="tab-badge amber" id="colBlockedCount">0</span>
           </div>
           <div class="column-cards" id="colBlocked"></div>
         </div>
-        <div class="kanban-column">
+
+        <div class="kanban-column" id="colDoneZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'done')">
           <div class="column-header">
             <span>Done / Closed</span>
             <span class="tab-badge" id="colDoneCount">0</span>
@@ -874,13 +1152,29 @@
     <div id="tab-graph" class="tab-content">
       <div class="graph-container">
         <canvas id="topoCanvas"></canvas>
+        <div class="node-hud" id="nodeHud"></div>
+
         <div class="graph-overlay">
-          <div style="font-weight: 700; color: var(--text);">Fleet Topology Map</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Services & Hosts</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#8b5cf6;"></span> Knowledge Articles</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Incidents</div>
+          <div style="font-weight: 700; color: var(--text); font-size:13px;">Fleet Topology Engine</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Knowledge Articles</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Fleet Incidents</div>
           <div class="graph-legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Agent Tasks</div>
-          <div style="font-size:11px; color: var(--text-muted); margin-top:4px;">Drag nodes • Scroll to zoom • Click to view</div>
+          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:2px; font-size:11px; color: var(--text-dim);">
+            <span>Filter Graph:</span>
+            <div style="display:flex; gap:4px; margin-top:4px;">
+              <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
+              <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">Doc</button>
+              <button class="chip" id="gFilterIncidents" onclick="setGraphFilter('incident')">Inc</button>
+              <button class="chip" id="gFilterTasks" onclick="setGraphFilter('task')">Task</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="graph-controls-bar">
+          <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">⏸ Pause</button>
+          <button class="btn sm" onclick="zoomGraph(1.2)">➕ Zoom</button>
+          <button class="btn sm" onclick="zoomGraph(0.8)">➖ Zoom</button>
+          <button class="btn sm" onclick="resetGraphCamera()">⟲ Reset</button>
         </div>
       </div>
     </div>
@@ -888,14 +1182,28 @@
     <!-- ==================== TAB 5: LIVE FLEET FEED ==================== -->
     <div id="tab-feed" class="tab-content">
       <div class="feed-container">
+        <div class="feed-toolbar">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:12px; color:var(--text-muted);">Method:</span>
+            <button class="chip active" id="feedMethodAll" onclick="setFeedMethodFilter('all')">ALL</button>
+            <button class="chip" id="feedMethodGET" onclick="setFeedMethodFilter('GET')">GET</button>
+            <button class="chip" id="feedMethodPOST" onclick="setFeedMethodFilter('POST')">POST</button>
+            <button class="chip" id="feedMethodDELETE" onclick="setFeedMethodFilter('DELETE')">DELETE</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="btn sm" id="feedPauseBtn" onclick="toggleFeedPause()">⏸ Pause Stream</button>
+            <button class="btn sm" onclick="clearFeedTable()">Clear View</button>
+          </div>
+        </div>
+
         <table class="feed-table">
           <thead>
             <tr>
               <th style="width: 140px;">Timestamp</th>
               <th style="width: 80px;">Method</th>
               <th>Resource & Query</th>
-              <th style="width: 100px;">Status</th>
-              <th style="width: 90px;">Latency</th>
+              <th style="width: 110px;">Status</th>
+              <th style="width: 100px;">Latency</th>
               <th style="width: 130px;">Caller IP</th>
             </tr>
           </thead>
@@ -908,6 +1216,132 @@
 
   </main>
 
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 1. New Entry Modal -->
+  <div class="modal-backdrop" id="newModal" onclick="handleBackdropClick(event, 'newModal')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="newModalTitle">Create Fleet Knowledge</div>
+        <button class="modal-close" onclick="closeModal('newModal')">✕</button>
+      </div>
+
+      <div style="display:flex; border-bottom:1px solid var(--border); background:var(--card-subtle); padding:4px 20px 0 20px; gap:8px;">
+        <button class="chip active" id="modalTypeKnowledge" onclick="switchNewModalType('knowledge')">📘 Knowledge</button>
+        <button class="chip" id="modalTypeIncident" onclick="switchNewModalType('incident')">🚨 Incident</button>
+        <button class="chip" id="modalTypeTask" onclick="switchNewModalType('task')">📋 Task</button>
+      </div>
+
+      <div class="modal-body" id="newModalBody">
+        <!-- Dynamic Form Fields rendered by JS -->
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('newModal')">Cancel</button>
+        <button class="btn primary" id="newModalSubmitBtn" onclick="submitNewModal()">Save Entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Resolve Incident Modal -->
+  <div class="modal-backdrop" id="resolveIncidentModal" onclick="handleBackdropClick(event, 'resolveIncidentModal')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Resolve Incident</div>
+        <button class="modal-close" onclick="closeModal('resolveIncidentModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:13px; color:var(--text-dim);" id="resolveIncidentTargetText"></div>
+        <div class="form-group">
+          <label class="form-label">Post-Mortem & Resolution Outcome *</label>
+          <textarea class="form-textarea" id="resolveIncidentOutcome" placeholder="Explain what fixed the issue, root cause, or changes deployed..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Author Identity</label>
+          <input type="text" class="form-input" id="resolveIncidentAuthor" value="Alex &lt;alex@prod.codes&gt;">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('resolveIncidentModal')">Cancel</button>
+        <button class="btn success" onclick="submitResolveIncident()">Confirm & Close Incident</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Resolve Task Modal -->
+  <div class="modal-backdrop" id="resolveTaskModal" onclick="handleBackdropClick(event, 'resolveTaskModal')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Complete Task</div>
+        <button class="modal-close" onclick="closeModal('resolveTaskModal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:13px; color:var(--text-dim);" id="resolveTaskTargetText"></div>
+        <div class="form-group">
+          <label class="form-label">Completion Outcome *</label>
+          <textarea class="form-textarea" id="resolveTaskOutcome" placeholder="Summary of results, verification steps, or PR link..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Author Identity</label>
+          <input type="text" class="form-input" id="resolveTaskAuthor" value="Alex &lt;alex@prod.codes&gt;">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('resolveTaskModal')">Cancel</button>
+        <button class="btn success" onclick="submitResolveTask()">Mark Task Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Keyboard Shortcuts Modal -->
+  <div class="modal-backdrop" id="shortcutsModal" onclick="handleBackdropClick(event, 'shortcutsModal')">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title">Keyboard Shortcuts</div>
+        <button class="modal-close" onclick="closeModal('shortcutsModal')">✕</button>
+      </div>
+      <div class="modal-body" style="font-size:13px;">
+        <table style="width:100%; border-collapse:collapse;">
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">/</kbd></td>
+            <td>Focus fleet search input</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">1</kbd> .. <kbd class="kbd-shortcut" style="position:static;">5</kbd></td>
+            <td>Switch tabs (Knowledge, Incidents, Tasks, Graph, Feed)</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">N</kbd></td>
+            <td>Quick create new Knowledge / Incident / Task</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">R</kbd></td>
+            <td>Force instant sync & refresh</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">J</kbd> / <kbd class="kbd-shortcut" style="position:static;">K</kbd></td>
+            <td>Next / Previous entry in Knowledge list</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">?</kbd></td>
+            <td>Toggle this shortcuts dialog</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">Esc</kbd></td>
+            <td>Close open modal or clear search</td>
+          </tr>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('shortcutsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer"></div>
+
+  <!-- ==================== LOGIC & SCRIPT ==================== -->
   <script>
     // Global Application State
     const App = {
@@ -921,43 +1355,58 @@
       currentFilter: 'all',
       searchQuery: '',
       activeTab: 'search',
+      incidentStatusFilter: 'all',
+      incidentSeverityFilter: 'all',
+      feedMethodFilter: 'all',
+      feedPaused: false,
       graphNodes: [],
-      graphLinks: []
+      graphLinks: [],
+      graphFilter: 'all',
+      graphPhysics: true,
+      lastSyncTime: Date.now(),
+      newModalKind: 'knowledge',
+      activeResolveKey: null
     };
 
-    // Lightweight In-Browser Markdown Parser
+    // Toast Notification System
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      const icon = type === 'success' ? '✔' : type === 'error' ? '✖' : 'ℹ';
+      toast.innerHTML = `<span style="font-weight:700;">${icon}</span><span>${escapeHtml(message)}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 200);
+      }, 3000);
+    }
+
+    // Markdown Parser
     function renderMarkdown(md) {
       if (!md) return '';
       let html = md
-        // Escape HTML
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        // Code blocks
         .replace(/```([a-z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`)
-        // Inline code
         .replace(/`([^`]+)`/g, '<code>$1</code>')
-        // Headers
         .replace(/^### (.*$)/gim, '<h3>$1</h3>')
         .replace(/^## (.*$)/gim, '<h2>$1</h2>')
         .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-        // Blockquotes
         .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
-        // Bold & Italic
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-        // Checkboxes
         .replace(/- \[x\] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" checked disabled> <span>$1</span></div>')
         .replace(/- \[ \] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" disabled> <span>$1</span></div>')
-        // Unordered lists
         .replace(/^\- (.*$)/gim, '<li>$1</li>')
-        // Links
         .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent); text-decoration:none;">$1</a>')
-        // Paragraphs
         .replace(/\n\n+/g, '</p><p>');
 
       return '<p>' + html + '</p>';
     }
 
-    // Relative Time Helper
+    // Relative Time Formatter
     function timeAgo(dateString) {
       if (!dateString) return 'recently';
       const date = new Date(dateString);
@@ -972,19 +1421,34 @@
       return `${days}d ago`;
     }
 
-    // API Fetch Helpers
+    // API Helpers
     async function apiFetch(endpoint) {
       try {
         const res = await fetch(endpoint);
         if (!res.ok) return null;
         return await res.json();
       } catch (err) {
-        console.error('API Error', endpoint, err);
+        console.error('API GET Error', endpoint, err);
         return null;
       }
     }
 
-    // Load All Data
+    async function apiPost(endpoint, body) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+      } catch (err) {
+        console.error('API POST Error', endpoint, err);
+        return { ok: false, error: err.message };
+      }
+    }
+
+    // Full Refresh Loop
     async function refreshAll() {
       const [searchData, incData, taskData, tagsData, healthData, auditData] = await Promise.all([
         apiFetch('/search?limit=100'),
@@ -992,7 +1456,7 @@
         apiFetch('/tasks?all=1'),
         apiFetch('/tags'),
         apiFetch('/healthz'),
-        apiFetch('/api/audit?limit=60')
+        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=60')
       ]);
 
       if (searchData && searchData.hits) App.entries = searchData.hits;
@@ -1002,13 +1466,30 @@
       if (healthData) App.health = healthData;
       if (auditData && auditData.entries) App.audit = auditData.entries;
 
+      App.lastSyncTime = Date.now();
+      updateLastSyncTicker();
+
       renderHeaderStats();
       renderKnowledgeList();
       renderIncidents();
       renderTasks();
-      renderFeed();
+      if (!App.feedPaused) renderFeed();
       buildTopology();
     }
+
+    function manualRefresh() {
+      const btn = document.getElementById('refreshBtn');
+      btn.style.transition = 'transform 0.5s ease';
+      btn.style.transform = 'rotate(360deg)';
+      setTimeout(() => { btn.style.transform = 'rotate(0deg)'; }, 500);
+      refreshAll().then(() => showToast('Synced fleet memory and audit trail', 'success'));
+    }
+
+    function updateLastSyncTicker() {
+      const el = document.getElementById('statLastSync');
+      if (el) el.textContent = timeAgo(new Date(App.lastSyncTime).toISOString());
+    }
+    setInterval(updateLastSyncTicker, 2000);
 
     function renderHeaderStats() {
       document.getElementById('statIndexed').textContent = `${App.entries.length} entries`;
@@ -1028,14 +1509,14 @@
       document.getElementById('badgeTasksCount').textContent = activeTasks;
       document.getElementById('badgeFeedCount').textContent = App.audit.length;
 
-      // Render Tag Pills in Explorer
+      // Tag Pills in Explorer
       const tagContainer = document.getElementById('tagPills');
-      tagContainer.innerHTML = App.tags.slice(0, 15).map(t =>
+      tagContainer.innerHTML = App.tags.slice(0, 16).map(t =>
         `<a class="badge-tag" onclick="filterByTag('${t.tag}')">#${t.tag} <span style="opacity:0.6">${t.count}</span></a>`
       ).join('');
     }
 
-    // Filter Knowledge List
+    // Filter & Sort Knowledge List
     function getFilteredEntries() {
       let list = [...App.entries];
       if (App.currentFilter === 'knowledge') list = list.filter(e => e.kind === 'knowledge');
@@ -1051,12 +1532,23 @@
           (e.body && e.body.toLowerCase().includes(q))
         );
       }
+
+      const sortMode = document.getElementById('sortSelect')?.value || 'newest';
+      if (sortMode === 'newest') {
+        list.sort((a, b) => new Date(b.updated_at || b.committed_at || 0) - new Date(a.updated_at || a.committed_at || 0));
+      } else if (sortMode === 'oldest') {
+        list.sort((a, b) => new Date(a.updated_at || a.committed_at || 0) - new Date(b.updated_at || b.committed_at || 0));
+      } else if (sortMode === 'az') {
+        list.sort((a, b) => (a.title || a.key).localeCompare(b.title || b.key));
+      }
+
       return list;
     }
 
     function renderKnowledgeList() {
       const list = getFilteredEntries();
       const container = document.getElementById('knowledgeList');
+      document.getElementById('listCountLabel').textContent = `${list.length} item${list.length === 1 ? '' : 's'}`;
 
       if (!list.length) {
         container.innerHTML = `<div style="padding: 30px; text-align:center; color: var(--text-muted);">No entries matching criteria</div>`;
@@ -1072,7 +1564,7 @@
             : `<span class="badge badge-knowledge">knowledge</span>`;
 
         return `
-          <div class="item-card ${isSel ? 'selected' : ''}" onclick="selectEntry('${item.key}')">
+          <div class="item-card ${isSel ? 'selected' : ''}" onclick="selectEntry('${item.key}')" data-key="${item.key}">
             <div class="card-top">
               <span class="item-title">${escapeHtml(item.title || item.key)}</span>
               ${kindBadge}
@@ -1086,7 +1578,7 @@
         `;
       }).join('');
 
-      // Auto-select first item if none selected
+      // Auto-select first item if none selected or current not in list
       if (!App.selectedKey && list.length > 0) {
         selectEntry(list[0].key);
       }
@@ -1094,7 +1586,9 @@
 
     async function selectEntry(key) {
       App.selectedKey = key;
-      renderKnowledgeList();
+      document.querySelectorAll('.item-card').forEach(c => {
+        c.classList.toggle('selected', c.getAttribute('data-key') === key);
+      });
 
       const detailEl = document.getElementById('detailView');
       detailEl.innerHTML = `<div style="padding: 40px; text-align:center; color: var(--text-muted);">Loading ${key}...</div>`;
@@ -1117,16 +1611,18 @@
           <div>
             <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
               <span class="badge badge-${e.kind || 'knowledge'}">${e.kind || 'knowledge'}</span>
-              <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent);">${e.key}</span>
+              <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:700;">${e.key}</span>
               ${e.sha ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${e.sha.slice(0,7)}</span>` : ''}
             </div>
             <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title)}</h1>
             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-              ${(e.tags || []).map(t => `<span class="badge-tag">#${t}</span>`).join('')}
+              ${(e.tags || []).map(t => `<span class="badge-tag" onclick="filterByTag('${t}')">#${t}</span>`).join('')}
             </div>
           </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn sm" onclick="navigator.clipboard.writeText('kyb get ${e.key}')">📋 Copy CLI</button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn sm" onclick="copyToClipboard('kyb get ${e.key}', 'CLI command copied!')">📋 CLI</button>
+            <button class="btn sm" onclick="copyEntryBody('${escapeHtml(e.key)}')">📋 Markdown</button>
+            <button class="btn sm" onclick="copyToClipboard('${e.key}', 'Key copied!')">🏷️ Key</button>
           </div>
         </div>
 
@@ -1140,26 +1636,35 @@
         <div class="detail-body" id="detailBodyContent">
           <div class="prose">${renderMarkdown(e.body)}</div>
         </div>
+
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
-          <div style="display:flex; flex-direction:column; gap:10px;">
-            ${historyList.map(h => `
-              <div class="block-box" style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            ${historyList.map((h, idx) => `
+              <div class="block-box" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="inspectRevision('${e.key}', '${h.sha}')">
                 <div>
                   <div style="font-weight:600; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
                   <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${h.author || 'agent'} • ${timeAgo(h.committed_at)}</div>
                 </div>
-                <div style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${h.sha.slice(0,7)}</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${h.sha.slice(0,7)}</span>
+                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${historyList[idx+1].sha}', '${h.sha}'); switchDetailTab('diff');">Diff</button>` : ''}
+                </div>
               </div>
             `).join('') || '<div style="color:var(--text-muted);">No revision history found.</div>'}
           </div>
         </div>
+
         <div class="detail-body" id="detailBodyDiff" style="display:none;">
           <div id="diffViewContainer" style="color:var(--text-muted);">Loading diff...</div>
         </div>
+
         <div class="detail-body" id="detailBodyRaw" style="display:none;">
           <pre style="background:#06080c; border:1px solid var(--border); padding:16px; border-radius:6px; font-family:var(--font-mono); font-size:12px; color:var(--text); white-space:pre-wrap;">${escapeHtml(e.body)}</pre>
         </div>
       `;
+
+      // Store body for markdown copy
+      App.currentDetailBody = e.body;
 
       // Pre-load diff if multiple revisions exist
       if (historyList.length >= 2) {
@@ -1169,11 +1674,26 @@
       }
     }
 
+    function copyEntryBody() {
+      if (App.currentDetailBody) {
+        copyToClipboard(App.currentDetailBody, 'Markdown content copied!');
+      }
+    }
+
+    function copyToClipboard(text, msg) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(msg, 'success');
+      }).catch(() => {
+        showToast('Clipboard access denied', 'error');
+      });
+    }
+
     async function loadDiff(key, fromSha, toSha) {
-      const diffData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${fromSha}&to=${toSha}`);
       const container = document.getElementById('diffViewContainer');
+      container.innerHTML = `<div style="color:var(--text-muted);">Calculating git diff ${fromSha.slice(0,7)}..${toSha.slice(0,7)}...</div>`;
+      const diffData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${fromSha}&to=${toSha}`);
       if (!diffData || !diffData.diff) {
-        container.innerHTML = '<div style="color:var(--text-muted);">No textual changes between revisions.</div>';
+        container.innerHTML = '<div style="color:var(--text-muted);">No textual changes between these revisions.</div>';
         return;
       }
 
@@ -1190,33 +1710,42 @@
 
     function switchDetailTab(tab) {
       document.querySelectorAll('.detail-tab').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      const activeBtn = Array.from(document.querySelectorAll('.detail-tab')).find(b => b.textContent.toLowerCase().includes(tab));
+      if (activeBtn) activeBtn.classList.add('active');
+
       document.getElementById('detailBodyContent').style.display = tab === 'content' ? 'block' : 'none';
       document.getElementById('detailBodyHistory').style.display = tab === 'history' ? 'block' : 'none';
       document.getElementById('detailBodyDiff').style.display = tab === 'diff' ? 'block' : 'none';
       document.getElementById('detailBodyRaw').style.display = tab === 'raw' ? 'block' : 'none';
     }
 
-    // Incidents Rendering
-    function renderIncidents(filter = 'all') {
+    // Incidents Rendering & Actions
+    function renderIncidents() {
       let list = [...App.incidents];
-      if (filter !== 'all') list = list.filter(i => i.status === filter);
+      if (App.incidentStatusFilter !== 'all') {
+        list = list.filter(i => i.status === App.incidentStatusFilter);
+      }
+      if (App.incidentSeverityFilter !== 'all') {
+        list = list.filter(i => (i.severity || 'medium').toLowerCase() === App.incidentSeverityFilter);
+      }
 
       const openCount = App.incidents.filter(i => i.status !== 'resolved').length;
       const banner = document.getElementById('incidentAlertBanner');
       if (openCount > 0) {
         banner.className = 'alert-banner';
-        document.getElementById('incidentBannerTitle').textContent = `⚠️ ${openCount} Active Incident(s) in Progress`;
+        document.getElementById('incidentBannerIcon').textContent = '⚠️';
+        document.getElementById('incidentBannerTitle').textContent = `${openCount} Active Incident(s) in Progress`;
         document.getElementById('incidentBannerSub').textContent = `One or more services are degraded or undergoing active mitigation.`;
       } else {
         banner.className = 'alert-banner healthy';
-        document.getElementById('incidentBannerTitle').textContent = '🛡️ All Systems Operational';
+        document.getElementById('incidentBannerIcon').textContent = '🛡️';
+        document.getElementById('incidentBannerTitle').textContent = 'All Systems Operational';
         document.getElementById('incidentBannerSub').textContent = 'All recorded incidents have verified resolutions and passed health checks.';
       }
 
       const grid = document.getElementById('incidentCardsGrid');
       if (!list.length) {
-        grid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align:center; color:var(--text-muted);">No incidents matching status filter.</div>';
+        grid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align:center; color:var(--text-muted);">No incidents matching status and severity filters.</div>';
         return;
       }
 
@@ -1231,9 +1760,12 @@
               </div>
               <h3 style="font-size:15px; font-weight:700; color:#fff;">${escapeHtml(inc.title)}</h3>
             </div>
+            ${inc.status !== 'resolved' ? `
+              <button class="btn sm success" onclick="openResolveIncidentModal('${inc.key}', '${escapeHtml(inc.title)}')">Resolve</button>
+            ` : ''}
           </div>
 
-          <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim);">
+          <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim); flex-wrap:wrap;">
             <div><strong>Service:</strong> <span class="badge-tag">${inc.service || 'infrastructure'}</span></div>
             ${(inc.hosts && inc.hosts.length) ? `<div><strong>Hosts:</strong> ${inc.hosts.join(', ')}</div>` : ''}
           </div>
@@ -1261,10 +1793,49 @@
     }
 
     function filterIncidents(status) {
-      renderIncidents(status);
+      App.incidentStatusFilter = status;
+      renderIncidents();
     }
 
-    // Tasks Kanban Rendering
+    function filterIncidentsSeverity(sev) {
+      App.incidentSeverityFilter = sev;
+      ['All', 'Critical', 'High', 'Medium', 'Low'].forEach(name => {
+        const btn = document.getElementById(`sevChip${name}`);
+        if (btn) btn.classList.toggle('active', name.toLowerCase() === sev);
+      });
+      renderIncidents();
+    }
+
+    function openResolveIncidentModal(key, title) {
+      App.activeResolveKey = key;
+      document.getElementById('resolveIncidentTargetText').textContent = `Incident: ${title} (${key})`;
+      document.getElementById('resolveIncidentOutcome').value = '';
+      openModal('resolveIncidentModal');
+    }
+
+    async function submitResolveIncident() {
+      const outcome = document.getElementById('resolveIncidentOutcome').value.trim();
+      const author = document.getElementById('resolveIncidentAuthor').value.trim() || 'Alex <alex@prod.codes>';
+      if (!outcome) {
+        showToast('Please provide a resolution outcome summary', 'error');
+        return;
+      }
+
+      const res = await apiPost(`/incidents/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
+        outcome,
+        author
+      });
+
+      if (res.ok) {
+        closeModal('resolveIncidentModal');
+        showToast(`Incident ${App.activeResolveKey} resolved!`, 'success');
+        refreshAll();
+      } else {
+        showToast(`Failed: ${res.data?.error || res.error || 'Server error'}`, 'error');
+      }
+    }
+
+    // Tasks Kanban Rendering & Actions
     function renderTasks() {
       const colOpen = document.getElementById('colOpen');
       const colProg = document.getElementById('colInProgress');
@@ -1284,10 +1855,10 @@
       document.getElementById('colDoneCount').textContent = groups.done.length;
 
       const renderCard = (t) => `
-        <div class="task-card" onclick="selectEntry('${t.key}'); switchTab('search');">
+        <div class="task-card" draggable="true" ondragstart="handleDragStart(event, '${t.key}')" onclick="selectEntry('${t.key}'); switchTab('search');">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span class="badge badge-${t.priority || 'medium'}">${t.priority || 'normal'}</span>
-            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${t.assignee || 'unassigned'}</span>
+            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${escapeHtml(t.assignee || 'unassigned')}</span>
           </div>
           <div style="font-weight:600; font-size:13px; color:#fff;">${escapeHtml(t.title)}</div>
           ${t.blocked_reason ? `
@@ -1295,14 +1866,105 @@
               <strong>Blocked:</strong> ${escapeHtml(t.blocked_reason)}
             </div>
           ` : ''}
-          <div style="font-size:10.5px; color:var(--text-muted); font-family:var(--font-mono);">${t.key}</div>
+          <div class="task-actions-row" onclick="event.stopPropagation()">
+            <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">${t.key}</span>
+            <div style="display:flex; gap:4px;">
+              ${t.status === 'open' ? `<button class="btn sm" onclick="transitionTask('${t.key}', 'in_progress')">▶ Start</button>` : ''}
+              ${t.status === 'in_progress' ? `
+                <button class="btn sm" onclick="promptBlockTask('${t.key}')">⚠️ Block</button>
+                <button class="btn sm success" onclick="openResolveTaskModal('${t.key}', '${escapeHtml(t.title)}')">✔ Done</button>
+              ` : ''}
+              ${t.status === 'blocked' ? `<button class="btn sm" onclick="transitionTask('${t.key}', 'in_progress')">↩ Unblock</button>` : ''}
+            </div>
+          </div>
         </div>
       `;
 
-      colOpen.innerHTML = groups.open.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
-      colProg.innerHTML = groups.in_progress.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
-      colBlock.innerHTML = groups.blocked.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
-      colDone.innerHTML = groups.done.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
+      colOpen.innerHTML = groups.open.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No open tasks</div>';
+      colProg.innerHTML = groups.in_progress.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No tasks in progress</div>';
+      colBlock.innerHTML = groups.blocked.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No blocked tasks</div>';
+      colDone.innerHTML = groups.done.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No closed tasks</div>';
+    }
+
+    // Drag and Drop for Kanban
+    let draggedTaskKey = null;
+    function handleDragStart(e, key) {
+      draggedTaskKey = key;
+      e.dataTransfer.setData('text/plain', key);
+      e.target.classList.add('dragging');
+    }
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('drag-over');
+    }
+    function handleDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over');
+    }
+    function handleDrop(e, targetStatus) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      document.querySelectorAll('.task-card.dragging').forEach(c => c.classList.remove('dragging'));
+      if (!draggedTaskKey) return;
+
+      if (targetStatus === 'done') {
+        const task = App.tasks.find(t => t.key === draggedTaskKey);
+        openResolveTaskModal(draggedTaskKey, task?.title || draggedTaskKey);
+      } else if (targetStatus === 'blocked') {
+        promptBlockTask(draggedTaskKey);
+      } else {
+        transitionTask(draggedTaskKey, targetStatus);
+      }
+      draggedTaskKey = null;
+    }
+
+    async function transitionTask(key, status, reason = null) {
+      const res = await apiPost(`/tasks/${encodeURIComponent(key)}/transition`, {
+        status,
+        reason,
+        author: 'Alex <alex@prod.codes>'
+      });
+      if (res.ok) {
+        showToast(`Task ${key} transitioned to ${status}`, 'success');
+        refreshAll();
+      } else {
+        showToast(`Transition failed: ${res.data?.error || res.error || 'Server error'}`, 'error');
+      }
+    }
+
+    function promptBlockTask(key) {
+      const reason = prompt(`Enter reason why task ${key} is blocked:`);
+      if (reason) {
+        transitionTask(key, 'blocked', reason);
+      }
+    }
+
+    function openResolveTaskModal(key, title) {
+      App.activeResolveKey = key;
+      document.getElementById('resolveTaskTargetText').textContent = `Task: ${title} (${key})`;
+      document.getElementById('resolveTaskOutcome').value = '';
+      openModal('resolveTaskModal');
+    }
+
+    async function submitResolveTask() {
+      const outcome = document.getElementById('resolveTaskOutcome').value.trim();
+      const author = document.getElementById('resolveTaskAuthor').value.trim() || 'Alex <alex@prod.codes>';
+      if (!outcome) {
+        showToast('Please provide a completion outcome note', 'error');
+        return;
+      }
+
+      const res = await apiPost(`/tasks/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
+        outcome,
+        author
+      });
+
+      if (res.ok) {
+        closeModal('resolveTaskModal');
+        showToast(`Task ${App.activeResolveKey} marked done!`, 'success');
+        refreshAll();
+      } else {
+        showToast(`Failed: ${res.data?.error || res.error || 'Server error'}`, 'error');
+      }
     }
 
     // Live Feed Rendering
@@ -1310,11 +1972,19 @@
       const tbody = document.getElementById('feedTableBody');
       if (!App.audit || !App.audit.length) return;
 
-      tbody.innerHTML = App.audit.map(item => {
+      let list = [...App.audit];
+      if (App.feedMethodFilter !== 'all') {
+        list = list.filter(item => item.method === App.feedMethodFilter);
+      }
+
+      tbody.innerHTML = list.slice(0, 60).map(item => {
         const isOk = item.status >= 200 && item.status < 300;
         const statusBadge = isOk
           ? `<span style="color:var(--green); font-family:var(--font-mono); font-weight:700;">${item.status} OK</span>`
           : `<span style="color:var(--red); font-family:var(--font-mono); font-weight:700;">${item.status} ERR</span>`;
+
+        const ms = item.ms || 0;
+        const latCls = ms < 10 ? 'latency-fast' : ms < 50 ? 'latency-mid' : 'latency-slow';
 
         return `
           <tr>
@@ -1322,20 +1992,49 @@
             <td><span class="method-badge method-${item.method}">${item.method}</span></td>
             <td><code style="color:var(--text);">${escapeHtml(item.path)}${item.query ? '?' + escapeHtml(item.query) : ''}</code></td>
             <td>${statusBadge}</td>
-            <td style="font-family:var(--font-mono); color:var(--text-muted);">${item.ms}ms</td>
+            <td><span class="latency-badge ${latCls}">${ms}ms</span></td>
             <td style="font-family:var(--font-mono); color:var(--text-muted); font-size:11px;">${item.ip}</td>
           </tr>
         `;
       }).join('');
     }
 
-    // Force-Directed Graph Engine
+    function setFeedMethodFilter(method) {
+      App.feedMethodFilter = method;
+      ['ALL', 'GET', 'POST', 'DELETE'].forEach(m => {
+        const btn = document.getElementById(`feedMethod${m}`);
+        if (btn) btn.classList.toggle('active', m === method);
+      });
+      renderFeed();
+    }
+
+    function toggleFeedPause() {
+      App.feedPaused = !App.feedPaused;
+      const btn = document.getElementById('feedPauseBtn');
+      if (App.feedPaused) {
+        btn.textContent = '▶ Resume Stream';
+        btn.classList.add('primary');
+        showToast('Live feed paused', 'info');
+      } else {
+        btn.textContent = '⏸ Pause Stream';
+        btn.classList.remove('primary');
+        showToast('Live feed resumed', 'info');
+        refreshAll();
+      }
+    }
+
+    function clearFeedTable() {
+      App.audit = [];
+      document.getElementById('feedTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding:30px;">Feed cleared.</td></tr>';
+      showToast('Feed cleared', 'info');
+    }
+
+    // Force-Directed Graph Engine with Pan, Zoom & Interaction
     function buildTopology() {
       const nodes = [];
       const links = [];
       const nodeMap = new Map();
 
-      // Add Knowledge / Service Nodes
       App.entries.forEach(e => {
         const isInc = e.kind === 'incident';
         const isTask = e.kind === 'task';
@@ -1344,18 +2043,18 @@
           label: e.title || e.key,
           type: isInc ? 'incident' : isTask ? 'task' : 'knowledge',
           service: e.service || (e.tags && e.tags[0]) || 'system',
-          radius: isInc ? 12 : 9,
+          radius: isInc ? 13 : isTask ? 10 : 8,
           color: isInc ? '#ef4444' : isTask ? '#f59e0b' : '#00b3c4',
-          x: (Math.random() - 0.5) * 400 + 400,
-          y: (Math.random() - 0.5) * 300 + 300,
+          x: (Math.random() - 0.5) * 500 + 400,
+          y: (Math.random() - 0.5) * 400 + 300,
           vx: 0,
-          vy: 0
+          vy: 0,
+          pinned: false
         };
         nodes.push(node);
         nodeMap.set(e.key, node);
       });
 
-      // Add Links based on service grouping and knowledge references
       App.entries.forEach(e => {
         if (e.knowledge && Array.isArray(e.knowledge)) {
           e.knowledge.forEach(targetKey => {
@@ -1364,7 +2063,6 @@
             }
           });
         }
-        // Link tasks to parent tasks
         if (e.parent_task && nodeMap.has(e.parent_task)) {
           links.push({ source: nodeMap.get(e.key), target: nodeMap.get(e.parent_task) });
         }
@@ -1376,122 +2074,446 @@
     }
 
     let graphAnimId = null;
+    let camera = { x: 0, y: 0, zoom: 1 };
+    let draggedNode = null;
+    let hoveredNode = null;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+
     function initCanvasGraph() {
       const canvas = document.getElementById('topoCanvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
+      const hud = document.getElementById('nodeHud');
 
       function resize() {
+        if (!canvas.parentElement) return;
         canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio;
         canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio;
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
       }
       resize();
-      window.addEventListener('resize', resize);
 
-      let width = canvas.parentElement.clientWidth;
-      let height = canvas.parentElement.clientHeight;
-
-      // Physics loop
       function step() {
-        const nodes = App.graphNodes;
-        const links = App.graphLinks;
+        const width = canvas.parentElement?.clientWidth || 800;
+        const height = canvas.parentElement?.clientHeight || 600;
 
-        // Repulsion
-        for (let i = 0; i < nodes.length; i++) {
-          for (let j = i + 1; j < nodes.length; j++) {
-            const dx = nodes[j].x - nodes[i].x;
-            const dy = nodes[j].y - nodes[i].y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            if (dist < 220) {
-              const f = (220 - dist) / dist * 0.08;
-              nodes[i].vx -= dx * f;
-              nodes[i].vy -= dy * f;
-              nodes[j].vx += dx * f;
-              nodes[j].vy += dy * f;
+        let visibleNodes = App.graphNodes;
+        if (App.graphFilter !== 'all') {
+          visibleNodes = visibleNodes.filter(n => n.type === App.graphFilter);
+        }
+        const visibleNodeSet = new Set(visibleNodes);
+        const visibleLinks = App.graphLinks.filter(l => visibleNodeSet.has(l.source) && visibleNodeSet.has(l.target));
+
+        if (App.graphPhysics) {
+          // Repulsion
+          for (let i = 0; i < visibleNodes.length; i++) {
+            for (let j = i + 1; j < visibleNodes.length; j++) {
+              const dx = visibleNodes[j].x - visibleNodes[i].x;
+              const dy = visibleNodes[j].y - visibleNodes[i].y;
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+              if (dist < 220) {
+                const f = (220 - dist) / dist * 0.08;
+                if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= dx * f; visibleNodes[i].vy -= dy * f; }
+                if (!visibleNodes[j].pinned) { visibleNodes[j].vx += dx * f; visibleNodes[j].vy += dy * f; }
+              }
             }
           }
+
+          // Attraction
+          visibleLinks.forEach(l => {
+            const dx = l.target.x - l.source.x;
+            const dy = l.target.y - l.source.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const f = (dist - 90) * 0.005;
+            if (!l.source.pinned) { l.source.vx += dx * f; l.source.vy += dy * f; }
+            if (!l.target.pinned) { l.target.vx -= dx * f; l.target.vy -= dy * f; }
+          });
+
+          // Center gravity
+          const cx = width / 2;
+          const cy = height / 2;
+          visibleNodes.forEach(n => {
+            if (!n.pinned) {
+              n.vx += (cx - n.x) * 0.001;
+              n.vy += (cy - n.y) * 0.001;
+              n.vx *= 0.88;
+              n.vy *= 0.88;
+              n.x += n.vx;
+              n.y += n.vy;
+            }
+          });
         }
 
-        // Attraction along links
-        links.forEach(l => {
-          const dx = l.target.x - l.source.x;
-          const dy = l.target.y - l.source.y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const f = (dist - 80) * 0.005;
-          l.source.vx += dx * f;
-          l.source.vy += dy * f;
-          l.target.vx -= dx * f;
-          l.target.vy -= dy * f;
-        });
-
-        // Center gravity and velocity update
-        const cx = width / 2;
-        const cy = height / 2;
-        nodes.forEach(n => {
-          n.vx += (cx - n.x) * 0.001;
-          n.vy += (cy - n.y) * 0.001;
-          n.vx *= 0.88;
-          n.vy *= 0.88;
-          n.x += n.vx;
-          n.y += n.vy;
-        });
-
-        // Render
+        // Render with Camera Transform
+        ctx.save();
         ctx.clearRect(0, 0, width, height);
+        ctx.translate(camera.x, camera.y);
+        ctx.scale(camera.zoom, camera.zoom);
 
         // Draw Links
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 1;
-        links.forEach(l => {
+        visibleLinks.forEach(l => {
+          const isHigh = hoveredNode && (l.source === hoveredNode || l.target === hoveredNode);
           ctx.beginPath();
           ctx.moveTo(l.source.x, l.source.y);
           ctx.lineTo(l.target.x, l.target.y);
+          ctx.strokeStyle = isHigh ? 'rgba(0, 179, 196, 0.7)' : 'rgba(255, 255, 255, 0.08)';
+          ctx.lineWidth = isHigh ? 2 : 1;
           ctx.stroke();
         });
 
         // Draw Nodes
-        nodes.forEach(n => {
+        visibleNodes.forEach(n => {
+          const isHovered = n === hoveredNode;
           ctx.beginPath();
-          ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+          ctx.arc(n.x, n.y, n.radius + (isHovered ? 3 : 0), 0, Math.PI * 2);
           ctx.fillStyle = n.color;
           ctx.shadowColor = n.color;
-          ctx.shadowBlur = 8;
+          ctx.shadowBlur = isHovered ? 14 : 6;
           ctx.fill();
           ctx.shadowBlur = 0;
 
-          // Node Label
-          ctx.fillStyle = '#f0f4fa';
-          ctx.font = '10.5px ui-monospace, sans-serif';
+          // Label
+          ctx.fillStyle = isHovered ? '#00b3c4' : '#f0f4fa';
+          ctx.font = `${isHovered ? 'bold ' : ''}11px ui-monospace, sans-serif`;
           ctx.textAlign = 'center';
-          ctx.fillText(n.label.slice(0, 20), n.x, n.y + n.radius + 12);
+          ctx.fillText(n.label.slice(0, 22), n.x, n.y + n.radius + 14);
         });
 
+        ctx.restore();
         graphAnimId = requestAnimationFrame(step);
       }
 
       if (graphAnimId) cancelAnimationFrame(graphAnimId);
       step();
 
-      // Node selection click
-      canvas.addEventListener('click', (e) => {
+      // Mouse & Camera Coordinates
+      function getGraphPos(e) {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
+        const gx = (mx - camera.x) / camera.zoom;
+        const gy = (my - camera.y) / camera.zoom;
+        return { mx, my, gx, gy };
+      }
 
+      canvas.onmousedown = (e) => {
+        const { mx, my, gx, gy } = getGraphPos(e);
+        let clicked = null;
         for (const n of App.graphNodes) {
-          const dx = n.x - mx;
-          const dy = n.y - my;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 4) {
+          const dx = n.x - gx;
+          const dy = n.y - gy;
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 5) {
+            clicked = n;
+            break;
+          }
+        }
+        if (clicked) {
+          draggedNode = clicked;
+          draggedNode.pinned = true;
+        } else {
+          isPanning = true;
+          panStart = { x: mx - camera.x, y: my - camera.y };
+        }
+      };
+
+      window.onmousemove = (e) => {
+        const { mx, my, gx, gy } = getGraphPos(e);
+
+        if (draggedNode) {
+          draggedNode.x = gx;
+          draggedNode.y = gy;
+          return;
+        }
+
+        if (isPanning) {
+          camera.x = mx - panStart.x;
+          camera.y = my - panStart.y;
+          return;
+        }
+
+        // Hover test
+        let found = null;
+        for (const n of App.graphNodes) {
+          const dx = n.x - gx;
+          const dy = n.y - gy;
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 5) {
+            found = n;
+            break;
+          }
+        }
+        hoveredNode = found;
+
+        if (found) {
+          hud.style.display = 'block';
+          hud.style.left = `${mx + 15}px`;
+          hud.style.top = `${my - 15}px`;
+          const linksCount = App.graphLinks.filter(l => l.source === found || l.target === found).length;
+          hud.innerHTML = `
+            <div style="font-weight:700; color:${found.color}; margin-bottom:2px;">${found.type.toUpperCase()}: ${escapeHtml(found.label)}</div>
+            <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${found.id}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Service: ${found.service} • ${linksCount} link(s)</div>
+          `;
+        } else {
+          hud.style.display = 'none';
+        }
+      };
+
+      window.onmouseup = () => {
+        if (draggedNode) {
+          draggedNode.pinned = false;
+          draggedNode = null;
+        }
+        isPanning = false;
+      };
+
+      canvas.onwheel = (e) => {
+        e.preventDefault();
+        const { mx, my } = getGraphPos(e);
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        const newZoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
+        camera.x = mx - (mx - camera.x) * (newZoom / camera.zoom);
+        camera.y = my - (my - camera.y) * (newZoom / camera.zoom);
+        camera.zoom = newZoom;
+      };
+
+      canvas.ondblclick = (e) => {
+        const { gx, gy } = getGraphPos(e);
+        for (const n of App.graphNodes) {
+          const dx = n.x - gx;
+          const dy = n.y - gy;
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 5) {
             selectEntry(n.id);
             switchTab('search');
             break;
           }
         }
+      };
+    }
+
+    function toggleGraphPhysics() {
+      App.graphPhysics = !App.graphPhysics;
+      const btn = document.getElementById('pausePhysicsBtn');
+      btn.textContent = App.graphPhysics ? '⏸ Pause' : '▶ Resume';
+      btn.classList.toggle('primary', !App.graphPhysics);
+    }
+
+    function zoomGraph(factor) {
+      camera.zoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
+    }
+
+    function resetGraphCamera() {
+      camera = { x: 0, y: 0, zoom: 1 };
+    }
+
+    function setGraphFilter(filter) {
+      App.graphFilter = filter;
+      ['All', 'Knowledge', 'Incidents', 'Tasks'].forEach(name => {
+        const btn = document.getElementById(`gFilter${name}`);
+        if (btn) btn.classList.toggle('active', name.toLowerCase() === filter || (filter === 'incident' && name === 'Incidents') || (filter === 'task' && name === 'Tasks'));
       });
     }
 
-    // Tab Navigation & Hash Routing
+    // Modal Helpers
+    function openModal(id) {
+      document.getElementById(id).classList.add('open');
+    }
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('open');
+    }
+    function handleBackdropClick(e, id) {
+      if (e.target.id === id) closeModal(id);
+    }
+
+    function openNewModal(defaultType = 'knowledge') {
+      switchNewModalType(defaultType);
+      openModal('newModal');
+    }
+
+    function switchNewModalType(type) {
+      App.newModalKind = type;
+      ['Knowledge', 'Incident', 'Task'].forEach(t => {
+        const btn = document.getElementById(`modalType${t}`);
+        if (btn) btn.classList.toggle('active', t.toLowerCase() === type);
+      });
+
+      const bodyEl = document.getElementById('newModalBody');
+      const titleEl = document.getElementById('newModalTitle');
+
+      if (type === 'knowledge') {
+        titleEl.textContent = 'Create Fleet Knowledge Article';
+        bodyEl.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">Title *</label>
+            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Postgres replicas and failover" oninput="autoSlugKey(this.value)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unique Key *</label>
+            <input type="text" class="form-input" id="newKey" placeholder="e.g. postgres-replicas">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tags (comma-separated)</label>
+            <input type="text" class="form-input" id="newTags" placeholder="database, postgres, infra">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Markdown Body *</label>
+            <textarea class="form-textarea" id="newBody" placeholder="Document architecture, hosts, ports, wiring, and operational notes..."></textarea>
+          </div>
+        `;
+      } else if (type === 'incident') {
+        titleEl.textContent = 'Report Fleet Incident';
+        const todaySlug = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        bodyEl.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">Incident Title *</label>
+            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Redis out of memory on booster" oninput="autoSlugIncident(this.value)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Incident Key *</label>
+            <input type="text" class="form-input" id="newKey" value="inc-${todaySlug}-">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">Service</label>
+              <input type="text" class="form-input" id="newService" placeholder="e.g. redis">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Severity</label>
+              <select class="form-select" id="newSeverity">
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Impacted Hosts (comma-separated)</label>
+            <input type="text" class="form-input" id="newHosts" placeholder="booster, ram9">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Incident Summary & Detection Check *</label>
+            <textarea class="form-textarea" id="newBody" placeholder="What happened, symptoms, impact, and immediate workaround..."></textarea>
+          </div>
+        `;
+      } else if (type === 'task') {
+        titleEl.textContent = 'Add Fleet Task / Idea';
+        bodyEl.innerHTML = `
+          <div class="form-group">
+            <label class="form-label">Task Title *</label>
+            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Migrate sccache to local ssd" oninput="autoSlugTask(this.value)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Task Key *</label>
+            <input type="text" class="form-input" id="newKey" placeholder="task-migrate-sccache">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">Priority</label>
+              <select class="form-select" id="newPriority">
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Assignee</label>
+              <input type="text" class="form-input" id="newAssignee" placeholder="e.g. Alex or agent">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Task Description / Acceptance Criteria *</label>
+            <textarea class="form-textarea" id="newBody" placeholder="What needs to be done and how to verify..."></textarea>
+          </div>
+        `;
+      }
+    }
+
+    function autoSlugKey(val) {
+      const keyEl = document.getElementById('newKey');
+      if (keyEl && (!keyEl.dataset.touched || keyEl.dataset.touched === 'false')) {
+        keyEl.value = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      }
+    }
+    function autoSlugIncident(val) {
+      const keyEl = document.getElementById('newKey');
+      const todaySlug = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const slug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      keyEl.value = `inc-${todaySlug}-${slug}`;
+    }
+    function autoSlugTask(val) {
+      const keyEl = document.getElementById('newKey');
+      const slug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      keyEl.value = `task-${slug}`;
+    }
+
+    async function submitNewModal() {
+      const title = document.getElementById('newTitle')?.value.trim();
+      const key = document.getElementById('newKey')?.value.trim();
+      const body = document.getElementById('newBody')?.value.trim();
+
+      if (!title || !key || !body) {
+        showToast('Please fill out all required fields (*)', 'error');
+        return;
+      }
+
+      let res = null;
+      if (App.newModalKind === 'knowledge') {
+        const rawTags = document.getElementById('newTags')?.value || '';
+        const tags = rawTags.split(',').map(s => s.trim()).filter(Boolean);
+        res = await apiPost('/knowledge', {
+          key,
+          title,
+          tags,
+          body,
+          author: 'Alex <alex@prod.codes>'
+        });
+      } else if (App.newModalKind === 'incident') {
+        const service = document.getElementById('newService')?.value.trim() || 'infrastructure';
+        const severity = document.getElementById('newSeverity')?.value || 'medium';
+        const rawHosts = document.getElementById('newHosts')?.value || '';
+        const hosts = rawHosts.split(',').map(s => s.trim()).filter(Boolean);
+        res = await apiPost('/incidents', {
+          key,
+          title,
+          service,
+          severity,
+          hosts,
+          body,
+          author: 'Alex <alex@prod.codes>'
+        });
+      } else if (App.newModalKind === 'task') {
+        const priority = document.getElementById('newPriority')?.value || 'normal';
+        const assignee = document.getElementById('newAssignee')?.value.trim() || 'Alex';
+        res = await apiPost('/tasks', {
+          key,
+          title,
+          priority,
+          assignee,
+          body,
+          author: 'Alex <alex@prod.codes>'
+        });
+      }
+
+      if (res && res.ok) {
+        closeModal('newModal');
+        showToast(`Created ${App.newModalKind}: ${key}`, 'success');
+        await refreshAll();
+        selectEntry(key);
+        if (App.newModalKind === 'incident') switchTab('incidents');
+        else if (App.newModalKind === 'task') switchTab('tasks');
+        else switchTab('search');
+      } else {
+        showToast(`Failed to save: ${res?.data?.error || res?.error || 'Server error'}`, 'error');
+      }
+    }
+
+    function openShortcutsModal() {
+      openModal('shortcutsModal');
+    }
+
+    // Navigation & Hash Router
     function switchTab(tabName) {
       App.activeTab = tabName;
       document.querySelectorAll('.nav-tab').forEach(t => {
@@ -1519,9 +2541,9 @@
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    // Init Event Listeners
+    // Keyboard Shortcuts & Events
     window.addEventListener('DOMContentLoaded', () => {
-      // Tab click events
+      // Tab navigation
       document.querySelectorAll('.nav-tab').forEach(tab => {
         tab.addEventListener('click', (e) => {
           e.preventDefault();
@@ -1529,17 +2551,17 @@
         });
       });
 
-      // Filter chips in explorer
-      document.querySelectorAll('.chip').forEach(chip => {
+      // Filter chips
+      document.querySelectorAll('.chip[data-filter]').forEach(chip => {
         chip.addEventListener('click', () => {
-          document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+          document.querySelectorAll('.chip[data-filter]').forEach(c => c.classList.remove('active'));
           chip.classList.add('active');
           App.currentFilter = chip.getAttribute('data-filter');
           renderKnowledgeList();
         });
       });
 
-      // Global search typing
+      // Global search
       const searchEl = document.getElementById('globalSearch');
       searchEl.addEventListener('input', (e) => {
         App.searchQuery = e.target.value;
@@ -1549,13 +2571,58 @@
 
       // Keyboard shortcuts
       window.addEventListener('keydown', (e) => {
-        if (e.key === '/' && document.activeElement !== searchEl) {
+        const inInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+
+        if (e.key === 'Escape') {
+          document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
+          if (document.activeElement === searchEl) searchEl.blur();
+          return;
+        }
+
+        if (inInput) return;
+
+        if (e.key === '/') {
           e.preventDefault();
           searchEl.focus();
+        } else if (e.key === '1') {
+          switchTab('search');
+        } else if (e.key === '2') {
+          switchTab('incidents');
+        } else if (e.key === '3') {
+          switchTab('tasks');
+        } else if (e.key === '4') {
+          switchTab('graph');
+        } else if (e.key === '5') {
+          switchTab('feed');
+        } else if (e.key === 'n' || e.key === 'N') {
+          e.preventDefault();
+          openNewModal();
+        } else if (e.key === 'r' || e.key === 'R') {
+          e.preventDefault();
+          manualRefresh();
+        } else if (e.key === '?') {
+          e.preventDefault();
+          openShortcutsModal();
+        } else if (e.key === 'j' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          navigateList(1);
+        } else if (e.key === 'k' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          navigateList(-1);
         }
       });
 
-      // Initial hash route
+      function navigateList(dir) {
+        const list = getFilteredEntries();
+        if (!list.length) return;
+        const curIdx = list.findIndex(e => e.key === App.selectedKey);
+        const nextIdx = Math.max(0, Math.min(list.length - 1, curIdx + dir));
+        selectEntry(list[nextIdx].key);
+        const card = document.querySelector(`.item-card[data-key="${list[nextIdx].key}"]`);
+        if (card) card.scrollIntoView({ block: 'nearest' });
+      }
+
+      // Initial route
       const hash = window.location.hash.replace('#/', '');
       if (['search', 'incidents', 'tasks', 'graph', 'feed'].includes(hash)) {
         switchTab(hash);
