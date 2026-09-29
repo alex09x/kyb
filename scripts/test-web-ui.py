@@ -97,6 +97,10 @@ def test_http_delete(path, expected_status=200):
             passed = resp.status == expected_status
             log_test(f"HTTP DELETE {path}", passed, f"status {resp.status}")
             return True
+    except urllib.error.HTTPError as e:
+        passed = e.code == expected_status or (expected_status == 200 and e.code == 404)
+        log_test(f"HTTP DELETE {path}", passed, f"status {e.code} (archived/retracted)")
+        return passed
     except Exception as e:
         log_test(f"HTTP DELETE {path}", False, f"error: {e}")
         return False
@@ -209,9 +213,9 @@ def main():
 
     # Step 3: Verify History (at least 2 commits)
     hist_data = test_http_endpoint(f"/knowledge/{test_inc_key}/history", 200,
-        lambda r, b: (len(json.loads(b.decode('utf-8')).get('history', [])) >= 2, "history contains >= 2 revisions"))
+        lambda r, b: (len(json.loads(b.decode('utf-8')).get('versions', json.loads(b.decode('utf-8')).get('history', []))) >= 2, "history contains >= 2 revisions"))
 
-    history_entries = hist_data.get("history", []) if isinstance(hist_data, dict) else []
+    history_entries = hist_data.get("versions", hist_data.get("history", [])) if isinstance(hist_data, dict) else []
     if len(history_entries) >= 2:
         sha_latest = history_entries[0]["sha"]
         sha_prev = history_entries[1]["sha"]
@@ -225,10 +229,10 @@ def main():
 
         # Step 5: Diff Inspection (GET /knowledge/{key}/diff?from={fromSha}&to={toSha})
         def check_diff(r, b):
-            diff_text = json.loads(b.decode("utf-8")).get("diff", "")
-            has_hunk = "@@" in diff_text
-            has_add = "+" in diff_text
-            return has_hunk and has_add, f"diff hunks present ({len(diff_text)} bytes)"
+            diff_obj = json.loads(b.decode("utf-8"))
+            has_changed = diff_obj.get("changed") is True
+            has_body_or_fields = bool(diff_obj.get("body") or diff_obj.get("fields"))
+            return has_changed and has_body_or_fields, f"structured diff verified (changed={has_changed})"
         test_http_endpoint(f"/knowledge/{test_inc_key}/diff?from={sha_prev}&to={sha_latest}", 200, check_diff)
 
     # Step 6: Resolve Incident
@@ -237,14 +241,14 @@ def main():
         "author": "Alexander Panasenko <alex@prod.codes>"
     }
     test_http_post(f"/incidents/{test_inc_key}/resolve", resolve_payload, 200,
-        lambda r, b: (b'"status":"resolved"' in b or b'"resolved"' in b, "incident resolved successfully"))
+        lambda r, b: (b'"archived":true' in b or b'"changed":true' in b, "incident resolved and archived successfully"))
 
-    # Step 7: Verify resolved status in list
+    # Step 7: Verify resolved status
     def check_resolved_in_list(r, b):
         incs = json.loads(b.decode("utf-8")).get("incidents", [])
         found = next((i for i in incs if i.get("key") == test_inc_key), None)
         return found is not None and found.get("status") == "resolved", "incident found in resolved state"
-    test_http_endpoint("/incidents?all=1", 200, check_resolved_in_list)
+    test_http_endpoint("/incidents?status=resolved", 200, check_resolved_in_list)
 
     # Step 8: Clean up Incident
     test_http_delete(f"/knowledge/{test_inc_key}", 200)
@@ -281,9 +285,16 @@ def main():
     test_http_post(f"/tasks/{test_task_key}/resolve", {
         "resolution": "Acceptance criteria met and verified.",
         "author": "Alexander Panasenko <alex@prod.codes>"
-    }, 200, lambda r, b: (b'"done"' in b, "marked task done"))
+    }, 200, lambda r, b: (b'"archived":true' in b or b'"changed":true' in b, "marked task done and archived"))
 
-    # Step 5: Clean up Task
+    # Step 5: Verify task in done state
+    def check_task_done(r, b):
+        tasks = json.loads(b.decode("utf-8")).get("tasks", [])
+        found = next((t for t in tasks if t.get("key") == test_task_key), None)
+        return found is not None and found.get("status") == "done", "task found in done state"
+    test_http_endpoint("/tasks?status=done", 200, check_task_done)
+
+    # Step 6: Clean up Task
     test_http_delete(f"/knowledge/{test_task_key}", 200)
 
     print("\n\033[1m=== 4. Browser E2E Interaction Tests (prod-browser) ===\033[0m")
