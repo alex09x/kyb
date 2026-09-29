@@ -344,21 +344,21 @@ CI builds the image and smoke-tests that the container starts and answers `/heal
 
 ## Citation
 
-For academic or archival reference, cite the archived v0.2.1 release:
+For academic or archival reference, cite the published v0.2.3 release:
 
 ```bibtex
 @misc{panasenko2026kyb,
-  doi = {10.5281/zenodo.22850724},
-  url = {https://zenodo.org/doi/10.5281/zenodo.22850724},
+  doi = {10.5281/zenodo.23027682},
+  url = {https://zenodo.org/records/23027682},
   author = {Panasenko, Alexander},
   title = {KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents},
-  version = {0.2.1},
+  version = {0.2.3},
   publisher = {Zenodo},
   year = {2026}
 }
 ```
 
-- Alexander Panasenko. *KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents* (v0.2.1). Zenodo. https://doi.org/10.5281/zenodo.22850724
+- Alexander Panasenko. *KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents* (v0.2.3). Zenodo. https://doi.org/10.5281/zenodo.23027682 ([concept DOI: 10.5281/zenodo.22850723](https://doi.org/10.5281/zenodo.22850723))
 
 ---
 

@@ -5,10 +5,6 @@
 # `version` must match Cargo.toml - scripts/test-citation.sh fails the build on
 # drift, because a deposition archived under the wrong version cannot be corrected
 # by editing the source afterwards.
-#
-# ORCID is still missing. SoftwareX expects one in practice and it is free to
-# obtain; it is not invented here on the author's behalf.
-
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents"
@@ -22,8 +18,18 @@ type: software
 authors:
   - family-names: Panasenko
     given-names: Alexander
-    email: big@prod.codes
+    email: alex@prod.codes
+    orcid: "https://orcid.org/0009-0003-3569-6490"
 version: 0.2.3
+date-released: "2026-09-23"
+doi: 10.5281/zenodo.23027682
+identifiers:
+  - description: "The concept DOI of the work."
+    type: doi
+    value: 10.5281/zenodo.22850723
+  - description: "The versioned DOI for version 0.2.3 of the work."
+    type: doi
+    value: 10.5281/zenodo.23027682
 license: MIT
 repository-code: "https://github.com/alex09x/kyb"
 url: "https://kybmemory.com"
