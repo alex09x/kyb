@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Automated End-to-End Test Suite for KYB Web UI & Fleet Memory Control Room.
-Tests HTTP API contracts and live browser interactions via prod-browser.
+Tests HTTP API contracts, incident & task lifecycles, revision history,
+git diff generation, and live browser interactions via prod-browser.
 """
 
 import sys
@@ -10,7 +11,6 @@ import time
 import socket
 import urllib.request
 import urllib.error
-
 import os
 
 def get_server_host():
@@ -50,8 +50,56 @@ def test_http_endpoint(path, expected_status=200, check_fn=None):
                 passed = passed and ok
                 detail += f", {extra}"
             log_test(f"HTTP GET {path}", passed, detail)
+            try:
+                return json.loads(body.decode("utf-8"))
+            except Exception:
+                return body.decode("utf-8")
     except Exception as e:
         log_test(f"HTTP GET {path}", False, f"error: {e}")
+        return None
+
+def test_http_post(path, payload, expected_status=200, check_fn=None):
+    url = f"{SERVER_URL}{path}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            status = resp.status
+            body = resp.read()
+            passed = status == expected_status
+            detail = f"status {status}"
+            if passed and check_fn:
+                ok, extra = check_fn(resp, body)
+                passed = passed and ok
+                detail += f", {extra}"
+            log_test(f"HTTP POST {path}", passed, detail)
+            try:
+                return json.loads(body.decode("utf-8"))
+            except Exception:
+                return body.decode("utf-8")
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        log_test(f"HTTP POST {path}", False, f"status {e.code}: {body.decode('utf-8')[:120]}")
+        return None
+    except Exception as e:
+        log_test(f"HTTP POST {path}", False, f"error: {e}")
+        return None
+
+def test_http_delete(path, expected_status=200):
+    url = f"{SERVER_URL}{path}"
+    req = urllib.request.Request(url, method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            passed = resp.status == expected_status
+            log_test(f"HTTP DELETE {path}", passed, f"status {resp.status}")
+            return True
+    except Exception as e:
+        log_test(f"HTTP DELETE {path}", False, f"error: {e}")
+        return False
 
 def pb_call(method, params=None):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -82,8 +130,9 @@ def main():
         text = body.decode("utf-8")
         has_title = "<title>KYB — Fleet Memory & Control Room</title>" in text
         has_tabs = all(f'id="tab-{t}"' in text for t in ["search", "incidents", "tasks", "graph", "feed"])
-        has_modals = all(f'id="{m}"' in text for m in ["newModal", "resolveIncidentModal", "resolveTaskModal", "shortcutsModal"])
-        return "text/html" in ctype and has_title and has_tabs and has_modals, f"html len {len(text)} bytes"
+        has_modals = all(f'id="{m}"' in text for m in ["newModal", "editModal", "resolveIncidentModal", "resolveTaskModal", "shortcutsModal"])
+        has_full_author = "Alexander Panasenko &lt;alex@prod.codes&gt;" in text
+        return "text/html" in ctype and has_title and has_tabs and has_modals and has_full_author, f"html len {len(text)} bytes"
     test_http_endpoint("/", 200, check_ui)
 
     # 2. Audit API
@@ -99,11 +148,17 @@ def main():
         return data.get("ok") is True, f"entries: {data.get('entries', 0)}"
     test_http_endpoint("/healthz", 200, check_health)
 
-    # 4. Search API
+    # 4. Search API (unfiltered and server-filtered)
     def check_search(resp, body):
         data = json.loads(body.decode("utf-8"))
         return isinstance(data.get("hits"), list), f"hits: {len(data.get('hits', []))}"
     test_http_endpoint("/search?limit=10", 200, check_search)
+
+    def check_search_filtered(resp, body):
+        data = json.loads(body.decode("utf-8"))
+        hits = data.get("hits", [])
+        return isinstance(hits, list), f"hits for 'sccache': {len(hits)}"
+    test_http_endpoint("/search?q=sccache&limit=10", 200, check_search_filtered)
 
     # 5. Incidents API
     def check_incidents(resp, body):
@@ -123,7 +178,115 @@ def main():
         return isinstance(data.get("tags"), list), f"tags: {len(data.get('tags', []))}"
     test_http_endpoint("/tags", 200, check_tags)
 
-    print("\n\033[1m=== 2. Browser E2E Interaction Tests (prod-browser) ===\033[0m")
+    print("\n\033[1m=== 2. Fleet Incident & History & Diff Lifecycle ===\033[0m")
+    test_inc_key = f"inc-e2e-test-{int(time.time())}"
+
+    # Step 1: Create Incident (v1 commit)
+    inc_v1_payload = {
+        "key": test_inc_key,
+        "title": "E2E Test Incident for UI Verification",
+        "service": "test-gateway",
+        "severity": "medium",
+        "hosts": ["test-box-01"],
+        "body": "Initial report: network latency spikes observed on test gateway.\n\nDetection:\n```bash\ncurl -fsSL http://test-box-01/ping\n```",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }
+    create_res = test_http_post("/incidents", inc_v1_payload, 200,
+        lambda r, b: (b'"key"' in b, f"created {test_inc_key}"))
+
+    # Step 2: Edit Incident (v2 commit)
+    inc_v2_payload = {
+        "key": test_inc_key,
+        "title": "E2E Test Incident for UI Verification (Edited)",
+        "service": "test-gateway",
+        "severity": "high",
+        "hosts": ["test-box-01", "test-box-02"],
+        "body": "Initial report: network latency spikes observed on test gateway.\n\nMitigation applied: traffic rerouted to backup gateway.\n\nDetection:\n```bash\ncurl -fsSL http://test-box-01/ping\n```",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }
+    edit_res = test_http_post("/incidents", inc_v2_payload, 200,
+        lambda r, b: (b'"key"' in b, f"edited {test_inc_key}"))
+
+    # Step 3: Verify History (at least 2 commits)
+    hist_data = test_http_endpoint(f"/knowledge/{test_inc_key}/history", 200,
+        lambda r, b: (len(json.loads(b.decode('utf-8')).get('history', [])) >= 2, "history contains >= 2 revisions"))
+
+    history_entries = hist_data.get("history", []) if isinstance(hist_data, dict) else []
+    if len(history_entries) >= 2:
+        sha_latest = history_entries[0]["sha"]
+        sha_prev = history_entries[1]["sha"]
+
+        # Step 4: Inspect Revision Snapshots (GET /knowledge/{key}?at={sha})
+        test_http_endpoint(f"/knowledge/{test_inc_key}?at={sha_prev}", 200,
+            lambda r, b: (b"Initial report" in b and b"traffic rerouted" not in b, f"snapshot {sha_prev[:7]} verified"))
+
+        test_http_endpoint(f"/knowledge/{test_inc_key}?at={sha_latest}", 200,
+            lambda r, b: (b"traffic rerouted" in b, f"snapshot {sha_latest[:7]} verified"))
+
+        # Step 5: Diff Inspection (GET /knowledge/{key}/diff?from={fromSha}&to={toSha})
+        def check_diff(r, b):
+            diff_text = json.loads(b.decode("utf-8")).get("diff", "")
+            has_hunk = "@@" in diff_text
+            has_add = "+" in diff_text
+            return has_hunk and has_add, f"diff hunks present ({len(diff_text)} bytes)"
+        test_http_endpoint(f"/knowledge/{test_inc_key}/diff?from={sha_prev}&to={sha_latest}", 200, check_diff)
+
+    # Step 6: Resolve Incident
+    resolve_payload = {
+        "resolution": "Root cause confirmed: bad routing table entry. Flushed and verified.",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }
+    test_http_post(f"/incidents/{test_inc_key}/resolve", resolve_payload, 200,
+        lambda r, b: (b'"status":"resolved"' in b or b'"resolved"' in b, "incident resolved successfully"))
+
+    # Step 7: Verify resolved status in list
+    def check_resolved_in_list(r, b):
+        incs = json.loads(b.decode("utf-8")).get("incidents", [])
+        found = next((i for i in incs if i.get("key") == test_inc_key), None)
+        return found is not None and found.get("status") == "resolved", "incident found in resolved state"
+    test_http_endpoint("/incidents?all=1", 200, check_resolved_in_list)
+
+    # Step 8: Clean up Incident
+    test_http_delete(f"/knowledge/{test_inc_key}", 200)
+
+    print("\n\033[1m=== 3. Fleet Task Lifecycle ===\033[0m")
+    test_task_key = f"task-e2e-test-{int(time.time())}"
+
+    # Step 1: Create Task
+    task_payload = {
+        "key": test_task_key,
+        "title": "E2E Automated Test Task",
+        "priority": "high",
+        "assignee": "Alexander Panasenko",
+        "body": "Automated verification task acceptance criteria.",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }
+    test_http_post("/tasks", task_payload, 200,
+        lambda r, b: (b'"key"' in b, f"created {test_task_key}"))
+
+    # Step 2: Transition to in_progress
+    test_http_post(f"/tasks/{test_task_key}/transition", {
+        "status": "in_progress",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }, 200, lambda r, b: (b'"in_progress"' in b, "transitioned to in_progress"))
+
+    # Step 3: Transition to blocked
+    test_http_post(f"/tasks/{test_task_key}/transition", {
+        "status": "blocked",
+        "reason": "Waiting for external gateway health check",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }, 200, lambda r, b: (b'"blocked"' in b, "transitioned to blocked"))
+
+    # Step 4: Resolve Task
+    test_http_post(f"/tasks/{test_task_key}/resolve", {
+        "resolution": "Acceptance criteria met and verified.",
+        "author": "Alexander Panasenko <alex@prod.codes>"
+    }, 200, lambda r, b: (b'"done"' in b, "marked task done"))
+
+    # Step 5: Clean up Task
+    test_http_delete(f"/knowledge/{test_task_key}", 200)
+
+    print("\n\033[1m=== 4. Browser E2E Interaction Tests (prod-browser) ===\033[0m")
 
     # Find Target Tab
     tabs_res = pb_call("tabs.list")
@@ -172,14 +335,14 @@ def main():
     time.sleep(0.5)
     log_test("Modal dismissal (key: Escape)", True, "dialog closed")
 
-    # Test 3: Tab Switching to Incidents & Severity Filter Chips
+    # Test 3: Tab Switching to Incidents & Edit / Resolve Controls
     pb_call("pressKey", {"tabId": tab_id, "key": "2"})
     time.sleep(0.8)
     insp = pb_call("inspect", {"tabId": tab_id})
     url = insp.get("result", {}).get("url", "")
     has_sev = any(e.get("name") in ["Critical", "High", "Medium", "Low"] for e in insp.get("result", {}).get("elements", []))
-    has_resolve = any(e.get("name") == "Resolve" for e in insp.get("result", {}).get("elements", []))
-    log_test("Incidents Tab & Severity Controls (key: 2)", "incidents" in url and has_sev and has_resolve, url)
+    has_edit = any("Edit" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
+    log_test("Incidents Tab & Edit / Severity Controls (key: 2)", "incidents" in url and has_sev and has_edit, url)
 
     # Test 4: Tab Switching to Tasks Kanban & Transition Buttons
     pb_call("pressKey", {"tabId": tab_id, "key": "3"})
@@ -232,7 +395,7 @@ def main():
     # Detach cleanly
     pb_call("tabs.detach", {"tabId": tab_id})
 
-    print("\n\033[32m✔ All automated test assertions passed (15/15) with zero failures.\033[0m\n")
+    print("\n\033[32m✔ All automated test assertions passed with zero failures.\033[0m\n")
 
 if __name__ == "__main__":
     main()

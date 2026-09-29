@@ -1258,7 +1258,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Author Identity</label>
-          <input type="text" class="form-input" id="resolveIncidentAuthor" value="Alex &lt;alex@prod.codes&gt;">
+          <input type="text" class="form-input" id="resolveIncidentAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
         </div>
       </div>
       <div class="modal-footer">
@@ -1283,7 +1283,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Author Identity</label>
-          <input type="text" class="form-input" id="resolveTaskAuthor" value="Alex &lt;alex@prod.codes&gt;">
+          <input type="text" class="form-input" id="resolveTaskAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
         </div>
       </div>
       <div class="modal-footer">
@@ -1315,6 +1315,10 @@
             <td>Quick create new Knowledge / Incident / Task</td>
           </tr>
           <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">E</kbd></td>
+            <td>Edit current entry</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border);">
             <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">R</kbd></td>
             <td>Force instant sync & refresh</td>
           </tr>
@@ -1334,6 +1338,23 @@
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal('shortcutsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Edit Entry Modal -->
+  <div class="modal-backdrop" id="editModal" onclick="handleBackdropClick(event, 'editModal')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="editModalTitle">Edit Entry</div>
+        <button class="modal-close" onclick="closeModal('editModal')">✕</button>
+      </div>
+      <div class="modal-body" id="editModalBody">
+        <!-- Rendered by openEditModal -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('editModal')">Cancel</button>
+        <button class="btn primary" id="editModalSubmitBtn" onclick="submitEditModal()">Save Changes</button>
       </div>
     </div>
   </div>
@@ -1620,6 +1641,7 @@
             </div>
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${e.key}')">✏️ Edit</button>
             <button class="btn sm" onclick="copyToClipboard('kyb get ${e.key}', 'CLI command copied!')">📋 CLI</button>
             <button class="btn sm" onclick="copyEntryBody('${escapeHtml(e.key)}')">📋 Markdown</button>
             <button class="btn sm" onclick="copyToClipboard('${e.key}', 'Key copied!')">🏷️ Key</button>
@@ -1645,9 +1667,11 @@
                   <div style="font-weight:600; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
                   <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${h.author || 'agent'} • ${timeAgo(h.committed_at)}</div>
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
+                <div style="display:flex; align-items:center; gap:6px;">
                   <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${h.sha.slice(0,7)}</span>
+                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${e.key}', '${h.sha}')">View</button>
                   ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${historyList[idx+1].sha}', '${h.sha}'); switchDetailTab('diff');">Diff</button>` : ''}
+                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${h.sha}', '${historyList[0].sha}'); switchDetailTab('diff');">vs Head</button>` : ''}
                 </div>
               </div>
             `).join('') || '<div style="color:var(--text-muted);">No revision history found.</div>'}
@@ -1708,6 +1732,30 @@
       container.innerHTML = `<div class="diff-container">${lines}</div>`;
     }
 
+    async function inspectRevision(key, sha) {
+      showToast(`Loading snapshot ${sha.slice(0, 7)}...`, 'info');
+      const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${encodeURIComponent(sha)}`);
+      if (!snap) {
+        showToast('Failed to load historical snapshot', 'error');
+        return;
+      }
+      const contentEl = document.getElementById('detailBodyContent');
+      if (contentEl) {
+        contentEl.innerHTML = `
+          <div style="background:var(--accent-dim); border:1px solid var(--accent); border-radius:6px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <span style="font-weight:700; color:var(--accent);">Historical Snapshot:</span>
+              <span style="font-family:var(--font-mono); font-size:12px; margin-left:6px;">commit ${sha.slice(0, 7)}</span>
+              <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${escapeHtml(snap.author || '')}</span>
+            </div>
+            <button class="btn sm" onclick="selectEntry('${escapeHtml(key)}')">Back to Head</button>
+          </div>
+          <div class="prose">${renderMarkdown(snap.body)}</div>
+        `;
+        switchDetailTab('content');
+      }
+    }
+
     function switchDetailTab(tab) {
       document.querySelectorAll('.detail-tab').forEach(b => b.classList.remove('active'));
       const activeBtn = Array.from(document.querySelectorAll('.detail-tab')).find(b => b.textContent.toLowerCase().includes(tab));
@@ -1760,9 +1808,12 @@
               </div>
               <h3 style="font-size:15px; font-weight:700; color:#fff;">${escapeHtml(inc.title)}</h3>
             </div>
-            ${inc.status !== 'resolved' ? `
-              <button class="btn sm success" onclick="openResolveIncidentModal('${inc.key}', '${escapeHtml(inc.title)}')">Resolve</button>
-            ` : ''}
+            <div style="display:flex; gap:6px;">
+              <button class="btn sm" onclick="openEditModal('${inc.key}')">✏️ Edit</button>
+              ${inc.status !== 'resolved' ? `
+                <button class="btn sm success" onclick="openResolveIncidentModal('${inc.key}', '${escapeHtml(inc.title)}')">Resolve</button>
+              ` : ''}
+            </div>
           </div>
 
           <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim); flex-wrap:wrap;">
@@ -1815,13 +1866,14 @@
 
     async function submitResolveIncident() {
       const outcome = document.getElementById('resolveIncidentOutcome').value.trim();
-      const author = document.getElementById('resolveIncidentAuthor').value.trim() || 'Alex <alex@prod.codes>';
+      const author = document.getElementById('resolveIncidentAuthor').value.trim() || 'Alexander Panasenko <alex@prod.codes>';
       if (!outcome) {
         showToast('Please provide a resolution outcome summary', 'error');
         return;
       }
 
       const res = await apiPost(`/incidents/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
+        resolution: outcome,
         outcome,
         author
       });
@@ -1921,7 +1973,7 @@
       const res = await apiPost(`/tasks/${encodeURIComponent(key)}/transition`, {
         status,
         reason,
-        author: 'Alex <alex@prod.codes>'
+        author: 'Alexander Panasenko <alex@prod.codes>'
       });
       if (res.ok) {
         showToast(`Task ${key} transitioned to ${status}`, 'success');
@@ -1947,13 +1999,14 @@
 
     async function submitResolveTask() {
       const outcome = document.getElementById('resolveTaskOutcome').value.trim();
-      const author = document.getElementById('resolveTaskAuthor').value.trim() || 'Alex <alex@prod.codes>';
+      const author = document.getElementById('resolveTaskAuthor').value.trim() || 'Alexander Panasenko <alex@prod.codes>';
       if (!outcome) {
         showToast('Please provide a completion outcome note', 'error');
         return;
       }
 
       const res = await apiPost(`/tasks/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
+        resolution: outcome,
         outcome,
         author
       });
@@ -2423,7 +2476,7 @@
             </div>
             <div class="form-group">
               <label class="form-label">Assignee</label>
-              <input type="text" class="form-input" id="newAssignee" placeholder="e.g. Alex or agent">
+              <input type="text" class="form-input" id="newAssignee" placeholder="Alexander Panasenko" value="Alexander Panasenko">
             </div>
           </div>
           <div class="form-group">
@@ -2471,7 +2524,7 @@
           title,
           tags,
           body,
-          author: 'Alex <alex@prod.codes>'
+          author: 'Alexander Panasenko <alex@prod.codes>'
         });
       } else if (App.newModalKind === 'incident') {
         const service = document.getElementById('newService')?.value.trim() || 'infrastructure';
@@ -2485,18 +2538,18 @@
           severity,
           hosts,
           body,
-          author: 'Alex <alex@prod.codes>'
+          author: 'Alexander Panasenko <alex@prod.codes>'
         });
       } else if (App.newModalKind === 'task') {
         const priority = document.getElementById('newPriority')?.value || 'normal';
-        const assignee = document.getElementById('newAssignee')?.value.trim() || 'Alex';
+        const assignee = document.getElementById('newAssignee')?.value.trim() || 'Alexander Panasenko';
         res = await apiPost('/tasks', {
           key,
           title,
           priority,
           assignee,
           body,
-          author: 'Alex <alex@prod.codes>'
+          author: 'Alexander Panasenko <alex@prod.codes>'
         });
       }
 
@@ -2510,6 +2563,179 @@
         else switchTab('search');
       } else {
         showToast(`Failed to save: ${res?.data?.error || res?.error || 'Server error'}`, 'error');
+      }
+    }
+
+    let editingEntryKey = null;
+    let editingEntryKind = 'knowledge';
+
+    async function openEditModal(key) {
+      if (!key) {
+        key = App.selectedKey;
+      }
+      if (!key) {
+        showToast('No entry selected to edit', 'error');
+        return;
+      }
+      editingEntryKey = key;
+      const entry = await apiFetch(`/knowledge/${encodeURIComponent(key)}`);
+      if (!entry) {
+        showToast(`Failed to load ${key} for editing`, 'error');
+        return;
+      }
+
+      editingEntryKind = entry.kind || 'knowledge';
+      document.getElementById('editModalTitle').textContent = `Edit ${editingEntryKind.toUpperCase()}: ${entry.key}`;
+
+      const bodyEl = document.getElementById('editModalBody');
+
+      if (editingEntryKind === 'incident') {
+        bodyEl.innerHTML = `
+          <input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">
+          <div class="form-group">
+            <label class="form-label">Incident Title *</label>
+            <input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">Service</label>
+              <input type="text" class="form-input" id="editService" value="${escapeHtml(entry.service || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Severity</label>
+              <select class="form-select" id="editSeverity">
+                <option value="critical" ${entry.severity === 'critical' ? 'selected' : ''}>Critical</option>
+                <option value="high" ${entry.severity === 'high' ? 'selected' : ''}>High</option>
+                <option value="medium" ${entry.severity === 'medium' || !entry.severity ? 'selected' : ''}>Medium</option>
+                <option value="low" ${entry.severity === 'low' ? 'selected' : ''}>Low</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Impacted Hosts (comma-separated)</label>
+            <input type="text" class="form-input" id="editHosts" value="${escapeHtml((entry.hosts || []).join(', '))}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Incident Body / Mitigation Notes *</label>
+            <textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Author Identity</label>
+            <input type="text" class="form-input" id="editAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
+          </div>
+        `;
+      } else if (editingEntryKind === 'task') {
+        bodyEl.innerHTML = `
+          <input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">
+          <div class="form-group">
+            <label class="form-label">Task Title *</label>
+            <input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">Priority</label>
+              <select class="form-select" id="editPriority">
+                <option value="urgent" ${entry.priority === 'urgent' ? 'selected' : ''}>Urgent</option>
+                <option value="high" ${entry.priority === 'high' ? 'selected' : ''}>High</option>
+                <option value="normal" ${entry.priority === 'normal' || !entry.priority ? 'selected' : ''}>Normal</option>
+                <option value="low" ${entry.priority === 'low' ? 'selected' : ''}>Low</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Assignee</label>
+              <input type="text" class="form-input" id="editAssignee" value="${escapeHtml(entry.assignee || 'Alexander Panasenko')}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Task Description / Acceptance Criteria *</label>
+            <textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Author Identity</label>
+            <input type="text" class="form-input" id="editAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
+          </div>
+        `;
+      } else {
+        bodyEl.innerHTML = `
+          <input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">
+          <div class="form-group">
+            <label class="form-label">Title *</label>
+            <input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tags (comma-separated)</label>
+            <input type="text" class="form-input" id="editTags" value="${escapeHtml((entry.tags || []).join(', '))}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Markdown Body *</label>
+            <textarea class="form-textarea" id="editBody" style="min-height:160px;">${escapeHtml(entry.body || '')}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Author Identity</label>
+            <input type="text" class="form-input" id="editAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
+          </div>
+        `;
+      }
+
+      openModal('editModal');
+    }
+
+    async function submitEditModal() {
+      const key = document.getElementById('editKey')?.value;
+      const title = document.getElementById('editTitle')?.value.trim();
+      const body = document.getElementById('editBody')?.value.trim();
+      const author = document.getElementById('editAuthor')?.value.trim() || 'Alexander Panasenko <alex@prod.codes>';
+
+      if (!title || !body) {
+        showToast('Title and body are required', 'error');
+        return;
+      }
+
+      let res = null;
+      if (editingEntryKind === 'incident') {
+        const service = document.getElementById('editService')?.value.trim() || 'infrastructure';
+        const severity = document.getElementById('editSeverity')?.value || 'medium';
+        const rawHosts = document.getElementById('editHosts')?.value || '';
+        const hosts = rawHosts.split(',').map(s => s.trim()).filter(Boolean);
+        res = await apiPost('/incidents', {
+          key,
+          title,
+          service,
+          severity,
+          hosts,
+          body,
+          author
+        });
+      } else if (editingEntryKind === 'task') {
+        const priority = document.getElementById('editPriority')?.value || 'normal';
+        const assignee = document.getElementById('editAssignee')?.value.trim() || 'Alexander Panasenko';
+        res = await apiPost('/tasks', {
+          key,
+          title,
+          priority,
+          assignee,
+          body,
+          author
+        });
+      } else {
+        const rawTags = document.getElementById('editTags')?.value || '';
+        const tags = rawTags.split(',').map(s => s.trim()).filter(Boolean);
+        res = await apiPost('/knowledge', {
+          key,
+          title,
+          tags,
+          body,
+          author
+        });
+      }
+
+      if (res && res.ok) {
+        closeModal('editModal');
+        showToast(`Saved changes to ${key}`, 'success');
+        await refreshAll();
+        selectEntry(key);
+      } else {
+        showToast(`Failed to update: ${res?.data?.error || res?.error || 'Server error'}`, 'error');
       }
     }
 
@@ -2572,6 +2798,22 @@
         if (App.activeTab !== 'search') switchTab('search');
         renderKnowledgeList();
       });
+      searchEl.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') {
+          const q = searchEl.value.trim();
+          if (q) {
+            const data = await apiFetch(`/search?q=${encodeURIComponent(q)}&limit=100`);
+            if (data && data.hits) {
+              App.entries = data.hits;
+              App.searchQuery = '';
+              renderKnowledgeList();
+              showToast(`Found ${data.hits.length} match(es) for "${q}"`, 'info');
+            }
+          } else {
+            refreshAll();
+          }
+        }
+      });
 
       // Keyboard shortcuts
       window.addEventListener('keydown', (e) => {
@@ -2601,6 +2843,11 @@
         } else if (e.key === 'n' || e.key === 'N') {
           e.preventDefault();
           openNewModal();
+        } else if (e.key === 'e' || e.key === 'E') {
+          if (App.selectedKey) {
+            e.preventDefault();
+            openEditModal(App.selectedKey);
+          }
         } else if (e.key === 'r' || e.key === 'R') {
           e.preventDefault();
           manualRefresh();

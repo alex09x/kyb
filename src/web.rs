@@ -82,6 +82,7 @@ mod tests {
 
         // Modals present
         assert!(UI_HTML.contains(r#"id="newModal""#));
+        assert!(UI_HTML.contains(r#"id="editModal""#));
         assert!(UI_HTML.contains(r#"id="resolveIncidentModal""#));
         assert!(UI_HTML.contains(r#"id="resolveTaskModal""#));
         assert!(UI_HTML.contains(r#"id="shortcutsModal""#));
@@ -111,6 +112,7 @@ mod tests {
             "function renderHeaderStats",
             "function renderKnowledgeList",
             "function selectEntry",
+            "function inspectRevision",
             "function loadDiff",
             "function renderIncidents",
             "function filterIncidents",
@@ -125,6 +127,8 @@ mod tests {
             "function switchTab",
             "function openNewModal",
             "function submitNewModal",
+            "function openEditModal",
+            "function submitEditModal",
             "function openShortcutsModal",
         ];
 

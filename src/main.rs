@@ -503,7 +503,7 @@ async fn upsert_incident(State(st): St, Json(r): Json<IncidentReq>) -> Reply {
 #[derive(Deserialize)]
 struct ResolveReq {
     /// How it ended: what fixed it, or the accepted outcome / closing comment.
-    #[serde(default)]
+    #[serde(default, alias = "outcome")]
     resolution: String,
     /// Target status; the kind's closing status when omitted
     /// ("resolved" for incidents, "done" for tasks).
