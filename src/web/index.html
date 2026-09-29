@@ -981,7 +981,7 @@
         <input type="text" id="globalSearch" class="search-input" placeholder="Search fleet memory...">
         <span class="kbd-shortcut">/</span>
       </div>
-      <button class="btn primary sm" onclick="openNewModal()">+ New</button>
+      <button class="btn primary sm" id="btnOpenNew" onclick="openNewModal()">+ New</button>
       <button class="btn sm icon-only" title="Keyboard Shortcuts (?)" onclick="openShortcutsModal()">⌨️</button>
       <button class="btn sm icon-only" id="refreshBtn" title="Force Refresh (R)" onclick="manualRefresh()">🔄</button>
       <div class="live-pulse">
@@ -2319,7 +2319,11 @@
       document.getElementById(id).classList.add('open');
     }
     function closeModal(id) {
-      document.getElementById(id).classList.remove('open');
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('open');
+      if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(document.activeElement.tagName)) {
+        document.activeElement.blur();
+      }
     }
     function handleBackdropClick(e, id) {
       if (e.target.id === id) closeModal(id);
@@ -2622,11 +2626,17 @@
         if (card) card.scrollIntoView({ block: 'nearest' });
       }
 
-      // Initial route
-      const hash = window.location.hash.replace('#/', '');
-      if (['search', 'incidents', 'tasks', 'graph', 'feed'].includes(hash)) {
-        switchTab(hash);
+      // Initial route & hashchange listener
+      function applyRoute() {
+        const hash = window.location.hash.replace('#/', '');
+        if (['search', 'incidents', 'tasks', 'graph', 'feed'].includes(hash)) {
+          if (hash !== App.activeTab) switchTab(hash);
+        } else {
+          switchTab('search');
+        }
       }
+      applyRoute();
+      window.addEventListener('hashchange', applyRoute);
 
       // Initial load & 4s polling
       refreshAll();
