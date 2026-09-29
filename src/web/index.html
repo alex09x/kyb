@@ -810,6 +810,85 @@
     .latency-mid { color: var(--amber); }
     .latency-slow { color: var(--red); }
 
+    /* Search highlighting */
+    mark.search-highlight {
+      background: rgba(0, 179, 196, 0.4);
+      color: #fff;
+      border-radius: 2px;
+      padding: 0 3px;
+      font-weight: 700;
+    }
+
+    /* History & Revision Cards */
+    .rev-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      background: rgba(139, 92, 246, 0.15);
+      color: #a78bfa;
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      padding: 1px 5px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .rev-badge:hover {
+      background: rgba(139, 92, 246, 0.25);
+    }
+    .history-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      transition: border-color 0.1s ease, background 0.1s ease;
+    }
+    .history-card:hover {
+      border-color: var(--accent);
+      background: var(--card-hover);
+    }
+
+    /* Activity Stream Cards for Live Feed */
+    .activity-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 14px;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+    }
+    .activity-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      transition: background 0.1s ease, transform 0.1s ease;
+      cursor: pointer;
+    }
+    .activity-card:hover {
+      background: var(--card-hover);
+      border-color: var(--accent);
+      transform: translateX(2px);
+    }
+    .activity-card.mutation { border-left-color: #10b981; }
+    .activity-card.error { border-left-color: #ef4444; }
+    .activity-card.search { border-left-color: #3b82f6; }
+    .activity-card.retraction { border-left-color: #f59e0b; }
+    .activity-icon {
+      font-size: 20px;
+      min-width: 28px;
+      text-align: center;
+    }
+
     /* ========================================================
        MODALS & TOASTS
        ======================================================== */
@@ -1183,34 +1262,24 @@
     <div id="tab-feed" class="tab-content">
       <div class="feed-container">
         <div class="feed-toolbar">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:12px; color:var(--text-muted);">Method:</span>
-            <button class="chip active" id="feedMethodAll" onclick="setFeedMethodFilter('all')">ALL</button>
-            <button class="chip" id="feedMethodGET" onclick="setFeedMethodFilter('GET')">GET</button>
-            <button class="chip" id="feedMethodPOST" onclick="setFeedMethodFilter('POST')">POST</button>
-            <button class="chip" id="feedMethodDELETE" onclick="setFeedMethodFilter('DELETE')">DELETE</button>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-weight:700; font-size:13.5px; color:#fff;">⚡ Live Fleet Operations</span>
+            <span class="tab-badge teal" id="feedCountBadge">0 operations</span>
           </div>
-          <div style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span style="font-size:12px; color:var(--text-muted);">Filter:</span>
+            <button class="chip active" id="feedMethodAll" onclick="setFeedMethodFilter('all')">ALL</button>
+            <button class="chip" id="feedMethodPOST" onclick="setFeedMethodFilter('POST')">Writes & Commits</button>
+            <button class="chip" id="feedMethodGET" onclick="setFeedMethodFilter('GET')">Reads & Searches</button>
+            <button class="chip" id="feedMethodDELETE" onclick="setFeedMethodFilter('DELETE')">Retractions</button>
             <button class="btn sm" id="feedPauseBtn" onclick="toggleFeedPause()">⏸ Pause Stream</button>
             <button class="btn sm" onclick="clearFeedTable()">Clear View</button>
           </div>
         </div>
 
-        <table class="feed-table">
-          <thead>
-            <tr>
-              <th style="width: 140px;">Timestamp</th>
-              <th style="width: 80px;">Method</th>
-              <th>Resource & Query</th>
-              <th style="width: 110px;">Status</th>
-              <th style="width: 100px;">Latency</th>
-              <th style="width: 130px;">Caller IP</th>
-            </tr>
-          </thead>
-          <tbody id="feedTableBody">
-            <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding:30px;">Listening for agent requests...</td></tr>
-          </tbody>
-        </table>
+        <div id="feedTableBody" class="activity-stream">
+          <div style="text-align:center; color: var(--text-muted); padding:40px;">Listening for agent operations across the fleet...</div>
+        </div>
       </div>
     </div>
 
@@ -1566,6 +1635,31 @@
       return list;
     }
 
+    // In-memory instant detail cache
+    App.detailCache = new Map();
+
+    async function prefetchEntry(key) {
+      if (!key || App.detailCache.has(key)) return;
+      try {
+        const [entryData, historyData] = await Promise.all([
+          apiFetch(`/knowledge/${encodeURIComponent(key)}`),
+          apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
+        ]);
+        if (entryData) {
+          const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
+          App.detailCache.set(key, { entry: entryData, history: historyList });
+        }
+      } catch (_) {}
+    }
+
+    function highlightText(text, query) {
+      if (!text || !query || !query.trim()) return escapeHtml(text);
+      const safe = escapeHtml(text);
+      const q = escapeHtml(query.trim());
+      const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+      return safe.replace(regex, '<mark class="search-highlight">$1</mark>');
+    }
+
     function renderKnowledgeList() {
       const list = getFilteredEntries();
       const container = document.getElementById('knowledgeList');
@@ -1584,16 +1678,20 @@
             ? `<span class="badge badge-task">task</span>`
             : `<span class="badge badge-knowledge">knowledge</span>`;
 
+        const cached = App.detailCache.get(item.key);
+        const revCount = (cached && cached.history && cached.history.length) || 0;
+
         return `
-          <div class="item-card ${isSel ? 'selected' : ''}" onclick="selectEntry('${item.key}')" data-key="${item.key}">
+          <div class="item-card ${isSel ? 'selected' : ''}" onmouseenter="prefetchEntry('${item.key}')" onclick="selectEntry('${item.key}')" data-key="${item.key}">
             <div class="card-top">
-              <span class="item-title">${escapeHtml(item.title || item.key)}</span>
+              <span class="item-title">${highlightText(item.title || item.key, App.searchQuery)}</span>
               ${kindBadge}
             </div>
-            <div class="item-key">${item.key}</div>
+            <div class="item-key">${highlightText(item.key, App.searchQuery)}</div>
             <div class="item-meta">
               <span>${timeAgo(item.updated_at || item.committed_at)}</span>
-              ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${t}</span>`).join('')}
+              ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
+              ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">🕒 ${revCount} revs</span>` : ''}
             </div>
           </div>
         `;
@@ -1612,20 +1710,41 @@
       });
 
       const detailEl = document.getElementById('detailView');
-      detailEl.innerHTML = `<div style="padding: 40px; text-align:center; color: var(--text-muted);">Loading ${key}...</div>`;
 
+      // 1. Instant Cache Hit (0ms!)
+      const cached = App.detailCache.get(key);
+      if (cached) {
+        renderDetailView(cached.entry, cached.history);
+        return;
+      }
+
+      // 2. Instant optimistic skeleton from App.entries (0ms)
+      const known = App.entries.find(e => e.key === key);
+      if (known) {
+        renderDetailView({ ...known, body: known.body || 'Loading document body from fleet memory...' }, [], true);
+      } else {
+        detailEl.innerHTML = `<div style="padding: 40px; text-align:center; color: var(--text-muted);">Loading ${key}...</div>`;
+      }
+
+      // 3. Network fetch in background
       const [entryData, historyData] = await Promise.all([
         apiFetch(`/knowledge/${encodeURIComponent(key)}`),
         apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
       ]);
 
       if (!entryData) {
-        detailEl.innerHTML = `<div class="detail-empty">Error loading entry ${key}</div>`;
+        if (!known) detailEl.innerHTML = `<div class="detail-empty">Error loading entry ${key}</div>`;
         return;
       }
 
-      const e = entryData;
       const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
+      App.detailCache.set(key, { entry: entryData, history: historyList });
+      renderDetailView(entryData, historyList);
+    }
+
+    function renderDetailView(e, historyList, isSkeleton = false) {
+      const detailEl = document.getElementById('detailView');
+      App.currentDetailBody = e.body || '';
 
       detailEl.innerHTML = `
         <div class="detail-header">
@@ -1635,10 +1754,17 @@
               <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:700;">${e.key}</span>
               ${e.sha ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${e.sha.slice(0,7)}</span>` : ''}
             </div>
-            <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title)}</h1>
+            <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title || e.key)}</h1>
             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
               ${(e.tags || []).map(t => `<span class="badge-tag" onclick="filterByTag('${t}')">#${t}</span>`).join('')}
             </div>
+            ${historyList.length > 1 ? `
+              <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.3); border-radius:4px; padding:3px 8px; margin-top:8px; font-size:11px; color:#a78bfa; cursor:pointer;" onclick="switchDetailTab('history')">
+                <span>🕒</span>
+                <strong>${historyList.length} revisions in Git canon</strong>
+                <span style="opacity:0.8;">— click to view timeline →</span>
+              </div>
+            ` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${e.key}')">✏️ Edit</button>
@@ -1662,19 +1788,22 @@
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${historyList.map((h, idx) => `
-              <div class="block-box" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="inspectRevision('${e.key}', '${h.sha}')">
+              <div class="history-card" onclick="inspectRevision('${e.key}', '${h.sha}')">
                 <div>
-                  <div style="font-weight:600; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
-                  <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${h.author || 'agent'} • ${timeAgo(h.committed_at)}</div>
+                  <div style="font-weight:600; font-size:13px; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
+                  <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-top:3px;">
+                    ${escapeHtml(h.author || 'Alexander Panasenko <alex@prod.codes>')} • ${timeAgo(h.committed_at)}
+                    ${h.change ? `<span class="badge ${h.change === 'added' ? 'badge-knowledge' : 'badge-task'}" style="margin-left:6px; font-size:10px;">${h.change}</span>` : ''}
+                  </div>
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${h.sha.slice(0,7)}</span>
-                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${e.key}', '${h.sha}')">View</button>
-                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${historyList[idx+1].sha}', '${h.sha}'); switchDetailTab('diff');">Diff</button>` : ''}
-                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${h.sha}', '${historyList[0].sha}'); switchDetailTab('diff');">vs Head</button>` : ''}
+                  <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent); background:var(--card-subtle); padding:2px 6px; border-radius:4px;">${h.sha.slice(0,7)}</span>
+                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${e.key}', '${h.sha}')">👁️ View</button>
+                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${historyList[idx+1].sha}', '${h.sha}'); switchDetailTab('diff');">🔀 Diff vs Prev</button>` : ''}
+                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${h.sha}', '${historyList[0].sha}'); switchDetailTab('diff');">⚡ vs Head</button>` : ''}
                 </div>
               </div>
-            `).join('') || '<div style="color:var(--text-muted);">No revision history found.</div>'}
+            `).join('') || '<div style="color:var(--text-muted); padding:20px; text-align:center;">No revision history found.</div>'}
           </div>
         </div>
 
@@ -1687,14 +1816,12 @@
         </div>
       `;
 
-      // Store body for markdown copy
-      App.currentDetailBody = e.body;
-
       // Pre-load diff if multiple revisions exist
       if (historyList.length >= 2) {
-        loadDiff(key, historyList[1].sha, historyList[0].sha);
+        loadDiff(e.key, historyList[1].sha, historyList[0].sha);
       } else {
-        document.getElementById('diffViewContainer').innerHTML = '<div style="color:var(--text-muted);">Only 1 version exists; no diff available.</div>';
+        const diffCont = document.getElementById('diffViewContainer');
+        if (diffCont) diffCont.innerHTML = '<div style="color:var(--text-muted);">Only 1 version exists; no diff available.</div>';
       }
     }
 
@@ -2043,34 +2170,158 @@
       }
     }
 
+    // Live Feed Activity Parser
+    function parseAuditActivity(item) {
+      const method = item.method || 'GET';
+      const path = item.path || '';
+      const query = item.query ? decodeURIComponent(item.query) : '';
+      const isOk = item.status >= 200 && item.status < 300;
+
+      let icon = '⚡';
+      let opType = 'mutation'; // mutation, search, error, retraction
+      let title = `${method} ${path}`;
+      let desc = '';
+      let targetKey = null;
+
+      if (!isOk) {
+        icon = '⚠️';
+        opType = 'error';
+        title = `Failed Operation (${item.status})`;
+        desc = `${method} ${path} returned HTTP error ${item.status}`;
+      } else if (method === 'POST' && path === '/incidents') {
+        icon = '🚨';
+        opType = 'error';
+        title = 'Incident Recorded';
+        desc = 'Operational incident filed by fleet agent';
+      } else if (method === 'POST' && path.includes('/incidents/') && path.endsWith('/resolve')) {
+        icon = '🛡️';
+        opType = 'mutation';
+        const parts = path.split('/');
+        targetKey = parts[2];
+        title = `Incident Resolved: ${targetKey}`;
+        desc = 'Root cause verified, resolved, and committed to Git canon';
+      } else if (method === 'POST' && path === '/tasks') {
+        icon = '📋';
+        opType = 'mutation';
+        title = 'Task Created';
+        desc = 'Engineering task added to fleet backlog';
+      } else if (method === 'POST' && path.includes('/tasks/') && path.endsWith('/transition')) {
+        icon = '🔄';
+        opType = 'mutation';
+        const parts = path.split('/');
+        targetKey = parts[2];
+        title = `Task Transitioned: ${targetKey}`;
+        desc = 'Kanban state updated across fleet';
+      } else if (method === 'POST' && path.includes('/tasks/') && path.endsWith('/resolve')) {
+        icon = '✅';
+        opType = 'mutation';
+        const parts = path.split('/');
+        targetKey = parts[2];
+        title = `Task Completed: ${targetKey}`;
+        desc = 'Task closed and archived with outcome summary';
+      } else if (method === 'POST' && (path === '/knowledge' || path.startsWith('/knowledge'))) {
+        icon = '📘';
+        opType = 'mutation';
+        const parts = path.split('/');
+        targetKey = parts.length > 2 ? parts[2] : null;
+        title = targetKey ? `Knowledge Updated: ${targetKey}` : 'Knowledge Commit';
+        desc = 'Synchronized documentation with Git canon';
+      } else if (method === 'DELETE' && path.startsWith('/knowledge/')) {
+        icon = '🗑️';
+        opType = 'retraction';
+        targetKey = path.split('/')[2];
+        title = `Entry Retracted: ${targetKey}`;
+        desc = 'Retracted entry from active fleet registry';
+      } else if (method === 'GET' && path === '/search') {
+        icon = '🔍';
+        opType = 'search';
+        const qMatch = query.match(/q=([^&]*)/);
+        const searchWord = qMatch ? qMatch[1] : '';
+        title = searchWord ? `Fleet Search: "${searchWord}"` : 'Fleet Memory Search';
+        desc = 'Hybrid BM25 + vector search query';
+      } else if (method === 'GET' && path.startsWith('/knowledge/') && path.endsWith('/history')) {
+        icon = '🕒';
+        opType = 'search';
+        targetKey = path.split('/')[2];
+        title = `History Inspected: ${targetKey}`;
+        desc = 'Retrieved git revision history';
+      } else if (method === 'GET' && path.startsWith('/knowledge/') && path.endsWith('/diff')) {
+        icon = '🔀';
+        opType = 'search';
+        targetKey = path.split('/')[2];
+        title = `Diff Computed: ${targetKey}`;
+        desc = 'Computed structured diff between git revisions';
+      } else if (method === 'GET' && path.startsWith('/knowledge/')) {
+        icon = '📖';
+        opType = 'search';
+        targetKey = path.split('/')[2];
+        title = `Retrieved Entry: ${targetKey}`;
+        desc = '0ms memory fetch of document body';
+      } else if (method === 'GET' && path === '/healthz') {
+        icon = '💓';
+        opType = 'search';
+        title = 'Health Probe';
+        desc = 'Heartbeat and readiness check';
+      } else if (method === 'GET' && path === '/tags') {
+        icon = '🏷️';
+        opType = 'search';
+        title = 'Tag Taxonomy';
+        desc = 'Retrieved taxonomy tags and counts';
+      } else {
+        icon = method === 'POST' ? '💾' : '📡';
+        title = `${method} ${path}`;
+        desc = query ? `Query: ${query}` : 'Fleet agent interaction';
+      }
+
+      return { icon, opType, title, desc, targetKey };
+    }
+
     // Live Feed Rendering
     function renderFeed() {
-      const tbody = document.getElementById('feedTableBody');
-      if (!App.audit || !App.audit.length) return;
+      const container = document.getElementById('feedTableBody');
+      if (!container) return;
+      if (!App.audit || !App.audit.length) {
+        container.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">No operations recorded yet.</div>';
+        return;
+      }
 
       let list = [...App.audit];
       if (App.feedMethodFilter !== 'all') {
         list = list.filter(item => item.method === App.feedMethodFilter);
       }
 
-      tbody.innerHTML = list.slice(0, 60).map(item => {
-        const isOk = item.status >= 200 && item.status < 300;
-        const statusBadge = isOk
-          ? `<span style="color:var(--green); font-family:var(--font-mono); font-weight:700;">${item.status} OK</span>`
-          : `<span style="color:var(--red); font-family:var(--font-mono); font-weight:700;">${item.status} ERR</span>`;
+      const countBadge = document.getElementById('feedCountBadge');
+      if (countBadge) countBadge.textContent = `${list.length} operations`;
 
+      container.innerHTML = list.slice(0, 60).map(item => {
+        const isOk = item.status >= 200 && item.status < 300;
+        const act = parseAuditActivity(item);
         const ms = item.ms || 0;
         const latCls = ms < 10 ? 'latency-fast' : ms < 50 ? 'latency-mid' : 'latency-slow';
+        const clickAttr = act.targetKey ? `onclick="selectEntry('${act.targetKey}'); switchTab('search');"` : '';
 
         return `
-          <tr>
-            <td style="font-family:var(--font-mono); color:var(--text-dim);">${timeAgo(item.ts)}</td>
-            <td><span class="method-badge method-${item.method}">${item.method}</span></td>
-            <td><code style="color:var(--text);">${escapeHtml(item.path)}${item.query ? '?' + escapeHtml(item.query) : ''}</code></td>
-            <td>${statusBadge}</td>
-            <td><span class="latency-badge ${latCls}">${ms}ms</span></td>
-            <td style="font-family:var(--font-mono); color:var(--text-muted); font-size:11px;">${item.ip}</td>
-          </tr>
+          <div class="activity-card ${act.opType}" ${clickAttr}>
+            <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+              <div class="activity-icon">${act.icon}</div>
+              <div style="min-width:0;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-weight:700; font-size:13.5px; color:#fff;">${escapeHtml(act.title)}</span>
+                  <span class="method-badge method-${item.method}">${item.method}</span>
+                  <span style="font-family:var(--font-mono); font-size:11px; color:${isOk ? 'var(--green)' : 'var(--red)'}; font-weight:700;">${item.status}</span>
+                </div>
+                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                  ${escapeHtml(act.desc)} • <code style="color:var(--text-dim);">${escapeHtml(item.path)}${item.query ? '?' + escapeHtml(item.query) : ''}</code>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+              <span class="latency-badge ${latCls}">⚡ ${Math.max(1, ms)}ms</span>
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${item.ip}</span>
+              <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
+              ${act.targetKey ? `<button class="btn sm" onclick="event.stopPropagation(); selectEntry('${act.targetKey}'); switchTab('search');">Inspect →</button>` : ''}
+            </div>
+          </div>
         `;
       }).join('');
     }
@@ -2101,28 +2352,112 @@
 
     function clearFeedTable() {
       App.audit = [];
-      document.getElementById('feedTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding:30px;">Feed cleared.</td></tr>';
+      document.getElementById('feedTableBody').innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">Feed cleared. Listening for new operations...</div>';
       showToast('Feed cleared', 'info');
     }
 
-    // Force-Directed Graph Engine with Pan, Zoom & Interaction
+    // Interconnected Topology Graph with Host & Service Hubs
     function buildTopology() {
       const nodes = [];
       const links = [];
       const nodeMap = new Map();
 
+      const serviceSet = new Set();
+      const hostSet = new Set();
+
+      // 1. Scan entries for services and hosts dynamically
+      App.entries.forEach(e => {
+        if (e.hosts && Array.isArray(e.hosts)) {
+          e.hosts.forEach(h => {
+            if (h && typeof h === 'string') hostSet.add(h.toLowerCase().trim());
+          });
+        }
+        if (e.tags && Array.isArray(e.tags)) {
+          e.tags.forEach(t => {
+            if (typeof t === 'string' && (t.startsWith('host-') || t.startsWith('node-') || t.startsWith('srv-'))) {
+              hostSet.add(t.toLowerCase().trim());
+            }
+          });
+        }
+      });
+
+      // Scan for services
+      App.entries.forEach(e => {
+        let svc = e.service;
+        if (!svc && e.tags && e.tags.length) {
+          const t = e.tags.find(tag => !hostSet.has(tag.toLowerCase().trim()));
+          if (t) svc = t;
+        }
+        if (svc) serviceSet.add(svc.toLowerCase().trim());
+      });
+
+      // 2. Add Host Hub Nodes (Square, Purple)
+      let hostIdx = 0;
+      const hostCount = hostSet.size || 1;
+      hostSet.forEach(host => {
+        const angle = (hostIdx / hostCount) * 2 * Math.PI;
+        const hub = {
+          id: 'host:' + host,
+          label: '🖥️ ' + host,
+          type: 'host',
+          service: host,
+          radius: 16,
+          color: '#a855f7',
+          shape: 'square',
+          isHub: true,
+          x: 400 + Math.cos(angle) * 280,
+          y: 300 + Math.sin(angle) * 220,
+          vx: 0,
+          vy: 0,
+          pinned: false
+        };
+        nodes.push(hub);
+        nodeMap.set(hub.id, hub);
+        hostIdx++;
+      });
+
+      // 3. Add Service Hub Nodes (Cyan, Circle)
+      let svcIdx = 0;
+      const svcCount = serviceSet.size || 1;
+      serviceSet.forEach(svc => {
+        const angle = (svcIdx / svcCount) * 2 * Math.PI + 0.3;
+        const hub = {
+          id: 'svc:' + svc,
+          label: '⚙️ ' + svc.toUpperCase(),
+          type: 'service',
+          service: svc,
+          radius: 14,
+          color: '#00e5ff',
+          shape: 'circle',
+          isHub: true,
+          x: 400 + Math.cos(angle) * 160,
+          y: 300 + Math.sin(angle) * 130,
+          vx: 0,
+          vy: 0,
+          pinned: false
+        };
+        nodes.push(hub);
+        nodeMap.set(hub.id, hub);
+        svcIdx++;
+      });
+
+      // 4. Add Entry Nodes
       App.entries.forEach(e => {
         const isInc = e.kind === 'incident';
         const isTask = e.kind === 'task';
+        const svc = (e.service || (e.tags && e.tags[0]) || 'system').toLowerCase();
+
         const node = {
           id: e.key,
           label: e.title || e.key,
           type: isInc ? 'incident' : isTask ? 'task' : 'knowledge',
-          service: e.service || (e.tags && e.tags[0]) || 'system',
-          radius: isInc ? 13 : isTask ? 10 : 8,
+          service: svc,
+          radius: isInc ? 12 : isTask ? 10 : 8,
           color: isInc ? '#ef4444' : isTask ? '#f59e0b' : '#00b3c4',
-          x: (Math.random() - 0.5) * 500 + 400,
-          y: (Math.random() - 0.5) * 400 + 300,
+          shape: 'circle',
+          isHub: false,
+          x: 400 + (Math.random() - 0.5) * 350,
+          y: 300 + (Math.random() - 0.5) * 280,
           vx: 0,
           vy: 0,
           pinned: false
@@ -2131,16 +2466,48 @@
         nodeMap.set(e.key, node);
       });
 
+      // 5. Connect Links
       App.entries.forEach(e => {
+        const srcNode = nodeMap.get(e.key);
+        if (!srcNode) return;
+
+        // Connect to Service Hub
+        const svc = (e.service || (e.tags && e.tags[0]) || '').toLowerCase();
+        if (svc && nodeMap.has('svc:' + svc)) {
+          links.push({ source: srcNode, target: nodeMap.get('svc:' + svc) });
+        }
+
+        // Connect to Host Hub(s)
+        const matchedHosts = new Set();
+        if (e.hosts && Array.isArray(e.hosts)) {
+          e.hosts.forEach(h => {
+            if (h && typeof h === 'string') matchedHosts.add(h.toLowerCase().trim());
+          });
+        }
+        if (e.tags && Array.isArray(e.tags)) {
+          e.tags.forEach(t => {
+            const low = typeof t === 'string' ? t.toLowerCase().trim() : '';
+            if (hostSet.has(low)) matchedHosts.add(low);
+          });
+        }
+        matchedHosts.forEach(h => {
+          if (nodeMap.has('host:' + h)) {
+            links.push({ source: srcNode, target: nodeMap.get('host:' + h) });
+          }
+        });
+
+        // Explicit knowledge links
         if (e.knowledge && Array.isArray(e.knowledge)) {
           e.knowledge.forEach(targetKey => {
             if (nodeMap.has(targetKey)) {
-              links.push({ source: nodeMap.get(e.key), target: nodeMap.get(targetKey) });
+              links.push({ source: srcNode, target: nodeMap.get(targetKey) });
             }
           });
         }
+
+        // Parent task links
         if (e.parent_task && nodeMap.has(e.parent_task)) {
-          links.push({ source: nodeMap.get(e.key), target: nodeMap.get(e.parent_task) });
+          links.push({ source: srcNode, target: nodeMap.get(e.parent_task) });
         }
       });
 
@@ -2176,7 +2543,7 @@
 
         let visibleNodes = App.graphNodes;
         if (App.graphFilter !== 'all') {
-          visibleNodes = visibleNodes.filter(n => n.type === App.graphFilter);
+          visibleNodes = visibleNodes.filter(n => n.isHub || n.type === App.graphFilter);
         }
         const visibleNodeSet = new Set(visibleNodes);
         const visibleLinks = App.graphLinks.filter(l => visibleNodeSet.has(l.source) && visibleNodeSet.has(l.target));
@@ -2188,8 +2555,9 @@
               const dx = visibleNodes[j].x - visibleNodes[i].x;
               const dy = visibleNodes[j].y - visibleNodes[i].y;
               const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-              if (dist < 220) {
-                const f = (220 - dist) / dist * 0.08;
+              const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 260 : 180;
+              if (dist < minDist) {
+                const f = (minDist - dist) / dist * 0.08;
                 if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= dx * f; visibleNodes[i].vy -= dy * f; }
                 if (!visibleNodes[j].pinned) { visibleNodes[j].vx += dx * f; visibleNodes[j].vy += dy * f; }
               }
@@ -2201,7 +2569,8 @@
             const dx = l.target.x - l.source.x;
             const dy = l.target.y - l.source.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const f = (dist - 90) * 0.005;
+            const idealDist = (l.source.isHub || l.target.isHub) ? 130 : 80;
+            const f = (dist - idealDist) * 0.005;
             if (!l.source.pinned) { l.source.vx += dx * f; l.source.vy += dy * f; }
             if (!l.target.pinned) { l.target.vx -= dx * f; l.target.vy -= dy * f; }
           });
@@ -2233,27 +2602,51 @@
           ctx.beginPath();
           ctx.moveTo(l.source.x, l.source.y);
           ctx.lineTo(l.target.x, l.target.y);
-          ctx.strokeStyle = isHigh ? 'rgba(0, 179, 196, 0.7)' : 'rgba(255, 255, 255, 0.08)';
-          ctx.lineWidth = isHigh ? 2 : 1;
+          ctx.strokeStyle = isHigh ? 'rgba(0, 179, 196, 0.8)' : (l.target.isHub || l.source.isHub ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)');
+          ctx.lineWidth = isHigh ? 2.2 : (l.target.isHub || l.source.isHub ? 1.2 : 0.8);
           ctx.stroke();
         });
 
         // Draw Nodes
         visibleNodes.forEach(n => {
           const isHovered = n === hoveredNode;
+          const r = n.radius + (isHovered ? 4 : 0);
+
           ctx.beginPath();
-          ctx.arc(n.x, n.y, n.radius + (isHovered ? 3 : 0), 0, Math.PI * 2);
+          if (n.shape === 'square') {
+            const s = r * 2;
+            const x = n.x - r;
+            const y = n.y - r;
+            const cr = 4;
+            ctx.moveTo(x + cr, y);
+            ctx.lineTo(x + s - cr, y);
+            ctx.quadraticCurveTo(x + s, y, x + s, y + cr);
+            ctx.lineTo(x + s, y + s - cr);
+            ctx.quadraticCurveTo(x + s, y + s, x + s - cr, y + s);
+            ctx.lineTo(x + cr, y + s);
+            ctx.quadraticCurveTo(x, y + s, x, y + s - cr);
+            ctx.lineTo(x, y + cr);
+            ctx.quadraticCurveTo(x, y, x + cr, y);
+          } else {
+            ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+          }
           ctx.fillStyle = n.color;
           ctx.shadowColor = n.color;
-          ctx.shadowBlur = isHovered ? 14 : 6;
+          ctx.shadowBlur = isHovered ? 16 : (n.isHub ? 10 : 4);
           ctx.fill();
           ctx.shadowBlur = 0;
 
+          if (n.isHub) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = isHovered ? 2.5 : 1.5;
+            ctx.stroke();
+          }
+
           // Label
-          ctx.fillStyle = isHovered ? '#00b3c4' : '#f0f4fa';
-          ctx.font = `${isHovered ? 'bold ' : ''}11px ui-monospace, sans-serif`;
+          ctx.fillStyle = isHovered ? '#00b3c4' : (n.isHub ? '#ffffff' : '#f0f4fa');
+          ctx.font = `${isHovered || n.isHub ? 'bold ' : ''}${n.isHub ? '12px' : '11px'} ui-monospace, sans-serif`;
           ctx.textAlign = 'center';
-          ctx.fillText(n.label.slice(0, 22), n.x, n.y + n.radius + 14);
+          ctx.fillText(n.label.slice(0, 24), n.x, n.y + r + 13);
         });
 
         ctx.restore();
@@ -2279,7 +2672,7 @@
         for (const n of App.graphNodes) {
           const dx = n.x - gx;
           const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 5) {
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
             clicked = n;
             break;
           }
@@ -2313,7 +2706,7 @@
         for (const n of App.graphNodes) {
           const dx = n.x - gx;
           const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 5) {
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
             found = n;
             break;
           }
@@ -2328,7 +2721,8 @@
           hud.innerHTML = `
             <div style="font-weight:700; color:${found.color}; margin-bottom:2px;">${found.type.toUpperCase()}: ${escapeHtml(found.label)}</div>
             <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${found.id}</div>
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Service: ${found.service} • ${linksCount} link(s)</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${found.isHub ? 'Infrastructure Hub' : 'Service: ' + found.service} • ${linksCount} link(s)</div>
+            ${!found.isHub ? `<div style="font-size:10px; color:var(--accent); margin-top:4px; font-weight:600;">Double-click to inspect entry →</div>` : `<div style="font-size:10px; color:#a78bfa; margin-top:4px; font-weight:600;">Double-click to filter fleet →</div>`}
           `;
         } else {
           hud.style.display = 'none';
@@ -2358,9 +2752,20 @@
         for (const n of App.graphNodes) {
           const dx = n.x - gx;
           const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 5) {
-            selectEntry(n.id);
-            switchTab('search');
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
+            if (n.isHub) {
+              const searchInput = document.getElementById('globalSearch');
+              if (searchInput) {
+                const term = n.id.replace(/^(svc|host):/, '');
+                searchInput.value = term;
+                App.searchQuery = term;
+                renderKnowledgeList();
+                switchTab('search');
+              }
+            } else {
+              selectEntry(n.id);
+              switchTab('search');
+            }
             break;
           }
         }
