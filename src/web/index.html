@@ -2845,6 +2845,15 @@
           }
         });
 
+        if (focusedNode && hud && hud.style.display !== 'none') {
+          const screenX = focusedNode.x * camera.zoom + camera.x;
+          const screenY = focusedNode.y * camera.zoom + camera.y;
+          const hudX = Math.min(width - 340, Math.max(20, screenX + 18));
+          const hudY = Math.min(height - 180, Math.max(20, screenY - 25));
+          hud.style.left = `${hudX}px`;
+          hud.style.top = `${hudY}px`;
+        }
+
         ctx.globalAlpha = 1.0;
         ctx.restore();
         graphAnimId = requestAnimationFrame(step);
@@ -2863,14 +2872,17 @@
         return { mx, my, gx, gy };
       }
 
+      let mouseDownPos = { x: 0, y: 0 };
+
       canvas.onmousedown = (e) => {
         const { mx, my, gx, gy } = getGraphPos(e);
+        mouseDownPos = { x: mx, y: my };
         didDragOrPan = false;
         let clicked = null;
         for (const n of App.graphNodes) {
           const dx = n.x - gx;
           const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
+          if (Math.hypot(dx, dy) <= n.radius + 12) {
             clicked = n;
             break;
           }
@@ -2879,6 +2891,7 @@
           draggedNode = clicked;
           draggedNode.pinned = true;
           reheatSimulation(0.4);
+          focusNode(clicked);
         } else {
           isPanning = true;
           panStart = { x: mx - camera.x, y: my - camera.y };
@@ -2909,7 +2922,7 @@
         for (const n of App.graphNodes) {
           const dx = n.x - gx;
           const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
+          if (Math.hypot(dx, dy) <= n.radius + 10) {
             found = n;
             break;
           }
@@ -2936,13 +2949,12 @@
       };
 
       canvas.onclick = (e) => {
-        if (didDragOrPan) return;
         const { mx, my, gx, gy } = getGraphPos(e);
+        const dist = Math.hypot(mx - mouseDownPos.x, my - mouseDownPos.y);
+        if (dist > 8) return;
         let clicked = null;
         for (const n of App.graphNodes) {
-          const dx = n.x - gx;
-          const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
+          if (Math.hypot(n.x - gx, n.y - gy) <= n.radius + 12) {
             clicked = n;
             break;
           }
@@ -3158,6 +3170,15 @@
       });
       reheatSimulation(0.7);
     }
+
+    // Expose helpers globally
+    window.focusNode = focusNode;
+    window.focusNodeById = focusNodeById;
+    window.filterFleetByHub = filterFleetByHub;
+    window.fitGraphCamera = fitGraphCamera;
+    window.reheatSimulation = reheatSimulation;
+    window.showNodeHud = showNodeHud;
+    window.closeNodeHud = closeNodeHud;
 
     // Modal Helpers
     function openModal(id) {
