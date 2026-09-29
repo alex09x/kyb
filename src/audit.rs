@@ -29,18 +29,32 @@ impl Audit {
 
 pub async fn audit_mw(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
-    // the skill's ensure_up polls healthz on every command — noise, skip it
-    if path == "/healthz" {
+    let query = req.uri().query().unwrap_or("").to_string();
+    let method = req.method().to_string();
+
+    // Skip polling & internal dashboard noise:
+    // - healthz probe
+    // - audit & activity log polling
+    // - tag taxonomy fetching (/tags)
+    // - background lists without filter (/incidents, /tasks with GET)
+    // - empty search polling (/search without q parameter)
+    let is_polling = path == "/healthz"
+        || path == "/api/audit"
+        || path == "/api/activity"
+        || path == "/tags"
+        || ((path == "/incidents" || path == "/tasks") && method == "GET")
+        || (path == "/search" && !query.contains("q="));
+
+    if is_polling {
         return next.run(req).await;
     }
+
     let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let ip = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| c.0.ip().to_string())
         .unwrap_or_else(|| "-".into());
-    let method = req.method().to_string();
-    let query = req.uri().query().unwrap_or("").to_string();
     let start = std::time::Instant::now();
     let resp = next.run(req).await;
     st.audit.append(&serde_json::json!({

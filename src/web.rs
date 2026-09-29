@@ -59,6 +59,18 @@ pub async fn api_audit(State(st): State<Arc<AppState>>, Query(q): Query<AuditQ>)
         .into_response()
 }
 
+pub async fn api_activity(State(st): State<Arc<AppState>>) -> Response {
+    let entries = st.store.recent_commits(60).unwrap_or_default();
+    (
+        StatusCode::OK,
+        Json(json!({
+            "count": entries.len(),
+            "activity": entries,
+        })),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +260,24 @@ mod tests {
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(text.contains("KYB — Fleet Memory & Control Room"));
+    }
+
+    #[tokio::test]
+    async fn test_api_activity_returns_list() {
+        let (app, _data, _idx, _audit_path) = test_setup();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/activity")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let val: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(val.get("count").is_some());
+        assert!(val.get("activity").is_some());
     }
 }

@@ -474,6 +474,91 @@ impl Store {
         Ok(out)
     }
 
+    /// Recent commits across the entire database canon with document titles and actions.
+    pub fn recent_commits(&self, limit: usize) -> Result<Vec<ActivityEvent>> {
+        let repo = self.repo()?;
+        if repo.head().is_err() {
+            return Ok(vec![]);
+        }
+        let mut walk = repo.revwalk()?;
+        walk.push_head()?;
+        walk.set_sorting(Sort::TOPOLOGICAL)?;
+        let mut out = vec![];
+        for oid in walk.take(limit) {
+            let oid = oid?;
+            let commit = repo.find_commit(oid)?;
+            let tree = commit.tree()?;
+            let parent_tree = match commit.parent(0) {
+                Ok(p) => Some(p.tree()?),
+                Err(_) => None,
+            };
+            let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+            let mut files = vec![];
+            let mut detected_key = None;
+            let mut action = "updated".to_string();
+            for d in diff.deltas() {
+                if let Some(path) = d.new_file().path().and_then(|p| p.to_str()) {
+                    files.push(path.to_string());
+                    if detected_key.is_none() {
+                        if let Some(filename) = path.rsplit('/').next() {
+                            if let Some(k) = filename.strip_suffix(".md") {
+                                detected_key = Some(k.to_string());
+                            }
+                        }
+                    }
+                }
+                match d.status() {
+                    Delta::Added => action = "created".to_string(),
+                    Delta::Deleted => action = "archived".to_string(),
+                    _ => {}
+                }
+            }
+            let msg = commit.summary().unwrap_or("").trim().to_string();
+            if msg.contains("resolve") {
+                action = "resolved".to_string();
+            } else if msg.contains("delete") {
+                action = "retracted".to_string();
+            }
+
+            let author_name = commit.author().name().map(|n| n.to_string()).unwrap_or_default();
+            let author = if author_name.is_empty() || author_name == "kyb" {
+                "Alexander Panasenko <alex@prod.codes>".to_string()
+            } else {
+                author_name
+            };
+
+            let time_sec = commit.time().seconds();
+            let ts = iso(time_sec);
+
+            let (kind, title) = if let Some(k) = &detected_key {
+                let kind_str = if k.starts_with(INCIDENT_PREFIX) {
+                    "incident"
+                } else if k.starts_with(TASK_PREFIX) {
+                    "task"
+                } else {
+                    "knowledge"
+                };
+                let doc_title = self.get_at(k, &oid.to_string()).ok().flatten().map(|e| e.title);
+                (kind_str.to_string(), doc_title.or_else(|| Some(k.clone())))
+            } else {
+                ("system".to_string(), Some("Fleet Infrastructure Canon".to_string()))
+            };
+
+            out.push(ActivityEvent {
+                sha: oid.to_string(),
+                ts,
+                author,
+                message: msg,
+                key: detected_key,
+                kind,
+                title,
+                action,
+                files,
+            });
+        }
+        Ok(out)
+    }
+
     pub fn head_info(&self) -> Result<Option<(String, String)>> {
         let repo = self.repo()?;
         let out = match repo.head() {
@@ -485,6 +570,19 @@ impl Store {
         };
         Ok(out)
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActivityEvent {
+    pub sha: String,
+    pub ts: String,
+    pub author: String,
+    pub message: String,
+    pub key: Option<String>,
+    pub kind: String,
+    pub title: Option<String>,
+    pub action: String,
+    pub files: Vec<String>,
 }
 
 #[cfg(test)]

@@ -772,6 +772,51 @@
       background: rgba(0, 229, 255, 0.35);
     }
 
+    /* Sliding Graph Inspector Drawer */
+    .graph-drawer {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      bottom: 14px;
+      width: 380px;
+      max-width: calc(100% - 28px);
+      background: rgba(10, 14, 22, 0.96);
+      border: 1px solid rgba(0, 229, 255, 0.35);
+      border-radius: 12px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 229, 255, 0.15);
+      backdrop-filter: blur(16px);
+      z-index: 35;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(120%);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto;
+    }
+    .graph-drawer.open {
+      transform: translateX(0);
+    }
+    .graph-drawer-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .graph-drawer-body {
+      padding: 18px;
+      flex: 1;
+      overflow-y: auto;
+    }
+    .graph-drawer-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
     /* ========================================================
        TAB 5: LIVE FLEET FEED (Audit Log)
        ======================================================== */
@@ -1064,7 +1109,7 @@
         <span>🕸️ Topology</span>
       </a>
       <a href="#/feed" class="nav-tab" data-tab="feed">
-        <span>⚡ Live Feed</span>
+        <span>⚡ Activity</span>
         <span class="tab-badge" id="badgeFeedCount">0</span>
       </a>
     </nav>
@@ -1244,31 +1289,76 @@
 
     <!-- ==================== TAB 4: TOPOLOGY GRAPH ==================== -->
     <div id="tab-graph" class="tab-content">
-      <div class="graph-container">
+      <div class="graph-container" id="graphContainer">
         <canvas id="topoCanvas"></canvas>
         <div class="node-hud" id="nodeHud"></div>
 
         <div class="graph-overlay">
-          <div style="font-weight: 700; color: var(--text); font-size:13px;">Fleet Topology Engine</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Knowledge Articles</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Fleet Incidents</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Agent Tasks</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#00e5ff; border:1px solid #fff;"></span> Service Hubs (⚙️)</div>
-          <div class="graph-legend-item"><span class="legend-color" style="background:#a855f7; border-radius:2px;"></span> Host Hubs (🖥️)</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="font-weight: 700; color: #fff; font-size:13px; letter-spacing:0.5px;">🌐 Fleet Topology</div>
+            <span class="tab-badge teal" id="topoNodeCountBadge">0 nodes</span>
+          </div>
 
-          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
+          <div style="margin-bottom:8px;">
             <input type="text" id="topoSearchInput" class="form-input" style="padding:4px 8px; font-size:11px; height:26px; border-radius:4px; width:100%;" placeholder="🔍 Highlight in graph..." oninput="setTopoSearch(this.value)">
             <div id="topoSearchCount" style="font-size:10px; color:var(--accent); margin-top:3px; display:none;"></div>
           </div>
 
           <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:4px; font-size:11px; color: var(--text-dim);">
-            <span>Filter Graph:</span>
-            <div style="display:flex; gap:4px; margin-top:4px;">
-              <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
-              <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">Doc</button>
-              <button class="chip" id="gFilterIncidents" onclick="setGraphFilter('incident')">Inc</button>
-              <button class="chip" id="gFilterTasks" onclick="setGraphFilter('task')">Task</button>
+            <span style="font-weight:600; color:var(--text-muted);">Layout Perspective:</span>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; margin-top:4px;">
+              <button class="chip active" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">🪐 Orbit Cluster</button>
+              <button class="chip" id="layoutRadarBtn" onclick="setGraphLayout('radar')">🎯 Radar Rings</button>
+              <button class="chip" id="layoutHierarchyBtn" onclick="setGraphLayout('hierarchy')">🌲 Hierarchy</button>
+              <button class="chip" id="layoutGridBtn" onclick="setGraphLayout('grid')">🗂️ Service Grid</button>
             </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:6px; font-size:11px; color: var(--text-dim);">
+            <span style="font-weight:600; color:var(--text-muted);">Filter Elements:</span>
+            <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+              <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
+              <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">📘 Doc</button>
+              <button class="chip" id="gFilterIncidents" onclick="setGraphFilter('incident')">🚨 Inc</button>
+              <button class="chip" id="gFilterTasks" onclick="setGraphFilter('task')">📋 Task</button>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:6px; font-size:10.5px;">
+            <div class="graph-legend-item"><span class="legend-color" style="background:#00e5ff; border:1px solid #fff;"></span> Service Hubs (⚙️)</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#a855f7; border-radius:2px;"></span> Host Hubs (🖥️)</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Knowledge Articles</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Fleet Incidents</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Agent Tasks</div>
+          </div>
+        </div>
+
+        <!-- Sliding Inspector Drawer -->
+        <div class="graph-drawer" id="graphDrawer">
+          <div class="graph-drawer-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="badge badge-knowledge" id="drawerBadge">KNOWLEDGE</span>
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);" id="drawerKey">key</span>
+            </div>
+            <button class="modal-close" onclick="closeGraphDrawer()" style="font-size:16px;">✕</button>
+          </div>
+          <div class="graph-drawer-body" id="drawerBody">
+            <h2 id="drawerTitle" style="font-size:15px; font-weight:700; color:#fff; margin-bottom:8px;">Title</h2>
+            <div id="drawerMeta" style="font-size:11.5px; color:var(--text-muted); margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
+            <div style="border-top:1px solid var(--border); padding-top:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:var(--accent); text-transform:uppercase; margin-bottom:6px;">Connected Infrastructure</div>
+              <div id="drawerLinks" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+            </div>
+            <div style="border-top:1px solid var(--border); padding-top:10px;">
+              <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px;">Document Body Preview</div>
+              <div id="drawerContent" class="prose" style="font-size:12px; max-height:260px; overflow-y:auto; background:var(--card-subtle); padding:10px; border-radius:6px;"></div>
+            </div>
+          </div>
+          <div class="graph-drawer-footer" id="drawerFooter">
+            <button class="btn sm primary" id="drawerOpenFullBtn">📖 Open Full Page</button>
+            <button class="btn sm" id="drawerEditBtn">✏️ Quick Edit</button>
+            <button class="btn sm" id="drawerCenterBtn">🎯 Center Camera</button>
+            <button class="btn sm" id="drawerCopyBtn">📋 Copy Key</button>
           </div>
         </div>
 
@@ -1277,25 +1367,27 @@
           <button class="btn sm" onclick="fitGraphCamera()">🎯 Fit All</button>
           <button class="btn sm" onclick="zoomGraph(1.25)">➕ Zoom</button>
           <button class="btn sm" onclick="zoomGraph(0.8)">➖ Zoom</button>
+          <button class="btn sm" onclick="unpinAllGraphNodes()">📌 Unpin All</button>
           <button class="btn sm" onclick="resetGraphCamera()">⟲ Reset</button>
         </div>
       </div>
     </div>
 
-    <!-- ==================== TAB 5: LIVE FLEET FEED ==================== -->
+    <!-- ==================== TAB 5: FLEET ACTIVITY & CHANGELOG ==================== -->
     <div id="tab-feed" class="tab-content">
       <div class="feed-container">
         <div class="feed-toolbar">
           <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-weight:700; font-size:13.5px; color:#fff;">⚡ Live Fleet Operations</span>
+            <span style="font-weight:700; font-size:13.5px; color:#fff;">⚡ Fleet Activity & Git Canon Changelog</span>
             <span class="tab-badge teal" id="feedCountBadge">0 operations</span>
           </div>
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span style="font-size:12px; color:var(--text-muted);">Filter:</span>
-            <button class="chip active" id="feedMethodAll" onclick="setFeedMethodFilter('all')">ALL</button>
-            <button class="chip" id="feedMethodPOST" onclick="setFeedMethodFilter('POST')">Writes & Commits</button>
-            <button class="chip" id="feedMethodGET" onclick="setFeedMethodFilter('GET')">Reads & Searches</button>
-            <button class="chip" id="feedMethodDELETE" onclick="setFeedMethodFilter('DELETE')">Retractions</button>
+            <button class="chip active" id="actFilterAll" onclick="setActivityFilter('all')">All Operations</button>
+            <button class="chip" id="actFilterKnowledge" onclick="setActivityFilter('knowledge')">📘 Knowledge</button>
+            <button class="chip" id="actFilterIncidents" onclick="setActivityFilter('incident')">🚨 Incidents</button>
+            <button class="chip" id="actFilterTasks" onclick="setActivityFilter('task')">📋 Tasks</button>
+            <button class="chip" id="actFilterSearches" onclick="setActivityFilter('search')">🔍 Agent Searches</button>
             <button class="btn sm" id="feedPauseBtn" onclick="toggleFeedPause()">⏸ Pause Stream</button>
             <button class="btn sm" onclick="clearFeedTable()">Clear View</button>
           </div>
@@ -1463,6 +1555,7 @@
       incidents: [],
       tasks: [],
       tags: [],
+      activity: [],
       audit: [],
       health: {},
       selectedKey: null,
@@ -1471,8 +1564,10 @@
       activeTab: 'search',
       incidentStatusFilter: 'all',
       incidentSeverityFilter: 'all',
-      feedMethodFilter: 'all',
+      activityFilter: 'all',
       feedPaused: false,
+      graphLayout: 'orbit',
+      drawerNode: null,
       graphNodes: [],
       graphLinks: [],
       graphFilter: 'all',
@@ -1564,13 +1659,14 @@
 
     // Full Refresh Loop
     async function refreshAll() {
-      const [searchData, incData, taskData, tagsData, healthData, auditData] = await Promise.all([
+      const [searchData, incData, taskData, tagsData, healthData, actData, auditData] = await Promise.all([
         apiFetch('/search?limit=100'),
         apiFetch('/incidents?all=1'),
         apiFetch('/tasks?all=1'),
         apiFetch('/tags'),
         apiFetch('/healthz'),
-        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=60')
+        apiFetch('/api/activity'),
+        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=40')
       ]);
 
       if (searchData && searchData.hits) App.entries = searchData.hits;
@@ -1578,6 +1674,7 @@
       if (taskData && taskData.tasks) App.tasks = taskData.tasks;
       if (tagsData && tagsData.tags) App.tags = tagsData.tags;
       if (healthData) App.health = healthData;
+      if (actData && actData.activity) App.activity = actData.activity;
       if (auditData && auditData.entries) App.audit = auditData.entries;
 
       App.lastSyncTime = Date.now();
@@ -1621,7 +1718,8 @@
       incBadge.className = openInc > 0 ? 'tab-badge red' : 'tab-badge';
 
       document.getElementById('badgeTasksCount').textContent = activeTasks;
-      document.getElementById('badgeFeedCount').textContent = App.audit.length;
+      const totalOps = (App.activity && App.activity.length) || (App.audit && App.audit.length) || 0;
+      document.getElementById('badgeFeedCount').textContent = totalOps;
 
       // Tag Pills in Explorer
       const tagContainer = document.getElementById('tagPills');
@@ -2194,169 +2292,161 @@
       }
     }
 
-    // Live Feed Activity Parser
-    function parseAuditActivity(item) {
-      const method = item.method || 'GET';
-      const path = item.path || '';
-      const query = item.query ? decodeURIComponent(item.query) : '';
-      const isOk = item.status >= 200 && item.status < 300;
-
-      let icon = '⚡';
-      let opType = 'mutation'; // mutation, search, error, retraction
-      let title = `${method} ${path}`;
-      let desc = '';
-      let targetKey = null;
-
-      if (!isOk) {
-        icon = '⚠️';
-        opType = 'error';
-        title = `Failed Operation (${item.status})`;
-        desc = `${method} ${path} returned HTTP error ${item.status}`;
-      } else if (method === 'POST' && path === '/incidents') {
-        icon = '🚨';
-        opType = 'error';
-        title = 'Incident Recorded';
-        desc = 'Operational incident filed by fleet agent';
-      } else if (method === 'POST' && path.includes('/incidents/') && path.endsWith('/resolve')) {
-        icon = '🛡️';
-        opType = 'mutation';
-        const parts = path.split('/');
-        targetKey = parts[2];
-        title = `Incident Resolved: ${targetKey}`;
-        desc = 'Root cause verified, resolved, and committed to Git canon';
-      } else if (method === 'POST' && path === '/tasks') {
-        icon = '📋';
-        opType = 'mutation';
-        title = 'Task Created';
-        desc = 'Engineering task added to fleet backlog';
-      } else if (method === 'POST' && path.includes('/tasks/') && path.endsWith('/transition')) {
-        icon = '🔄';
-        opType = 'mutation';
-        const parts = path.split('/');
-        targetKey = parts[2];
-        title = `Task Transitioned: ${targetKey}`;
-        desc = 'Kanban state updated across fleet';
-      } else if (method === 'POST' && path.includes('/tasks/') && path.endsWith('/resolve')) {
-        icon = '✅';
-        opType = 'mutation';
-        const parts = path.split('/');
-        targetKey = parts[2];
-        title = `Task Completed: ${targetKey}`;
-        desc = 'Task closed and archived with outcome summary';
-      } else if (method === 'POST' && (path === '/knowledge' || path.startsWith('/knowledge'))) {
-        icon = '📘';
-        opType = 'mutation';
-        const parts = path.split('/');
-        targetKey = parts.length > 2 ? parts[2] : null;
-        title = targetKey ? `Knowledge Updated: ${targetKey}` : 'Knowledge Commit';
-        desc = 'Synchronized documentation with Git canon';
-      } else if (method === 'DELETE' && path.startsWith('/knowledge/')) {
-        icon = '🗑️';
-        opType = 'retraction';
-        targetKey = path.split('/')[2];
-        title = `Entry Retracted: ${targetKey}`;
-        desc = 'Retracted entry from active fleet registry';
-      } else if (method === 'GET' && path === '/search') {
-        icon = '🔍';
-        opType = 'search';
-        const qMatch = query.match(/q=([^&]*)/);
-        const searchWord = qMatch ? qMatch[1] : '';
-        title = searchWord ? `Fleet Search: "${searchWord}"` : 'Fleet Memory Search';
-        desc = 'Hybrid BM25 + vector search query';
-      } else if (method === 'GET' && path.startsWith('/knowledge/') && path.endsWith('/history')) {
-        icon = '🕒';
-        opType = 'search';
-        targetKey = path.split('/')[2];
-        title = `History Inspected: ${targetKey}`;
-        desc = 'Retrieved git revision history';
-      } else if (method === 'GET' && path.startsWith('/knowledge/') && path.endsWith('/diff')) {
-        icon = '🔀';
-        opType = 'search';
-        targetKey = path.split('/')[2];
-        title = `Diff Computed: ${targetKey}`;
-        desc = 'Computed structured diff between git revisions';
-      } else if (method === 'GET' && path.startsWith('/knowledge/')) {
-        icon = '📖';
-        opType = 'search';
-        targetKey = path.split('/')[2];
-        title = `Retrieved Entry: ${targetKey}`;
-        desc = '0ms memory fetch of document body';
-      } else if (method === 'GET' && path === '/healthz') {
-        icon = '💓';
-        opType = 'search';
-        title = 'Health Probe';
-        desc = 'Heartbeat and readiness check';
-      } else if (method === 'GET' && path === '/tags') {
-        icon = '🏷️';
-        opType = 'search';
-        title = 'Tag Taxonomy';
-        desc = 'Retrieved taxonomy tags and counts';
-      } else {
-        icon = method === 'POST' ? '💾' : '📡';
-        title = `${method} ${path}`;
-        desc = query ? `Query: ${query}` : 'Fleet agent interaction';
-      }
-
-      return { icon, opType, title, desc, targetKey };
-    }
-
-    // Live Feed Rendering
+    // Fleet Activity & Git Canon Changelog Renderer
     function renderFeed() {
       const container = document.getElementById('feedTableBody');
       if (!container) return;
-      if (!App.audit || !App.audit.length) {
-        container.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">No operations recorded yet.</div>';
-        return;
-      }
 
-      let list = [...App.audit];
-      if (App.feedMethodFilter !== 'all') {
-        list = list.filter(item => item.method === App.feedMethodFilter);
+      const actList = (App.activity || []).map(a => ({
+        type: 'canon',
+        sha: a.sha,
+        ts: a.ts,
+        author: a.author || 'Alexander Panasenko <alex@prod.codes>',
+        message: a.message,
+        key: a.key,
+        kind: a.kind || 'knowledge',
+        title: a.title,
+        action: a.action || 'updated',
+        files: a.files || []
+      }));
+
+      // Real user searches from audit log (skipping internal polling)
+      const searchList = (App.audit || [])
+        .filter(item => item.path === '/search' && item.query && item.query.includes('q='))
+        .map(item => {
+          const qMatch = decodeURIComponent(item.query).match(/q=([^&]*)/);
+          const q = qMatch ? qMatch[1] : '';
+          return {
+            type: 'search',
+            query: q,
+            ts: item.ts,
+            ms: item.ms || 0,
+            ip: item.ip,
+            status: item.status,
+            kind: 'search'
+          };
+        });
+
+      let merged = [...actList, ...searchList];
+      merged.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+      if (App.activityFilter !== 'all') {
+        merged = merged.filter(item => {
+          if (App.activityFilter === 'search') return item.type === 'search';
+          return item.kind === App.activityFilter;
+        });
       }
 
       const countBadge = document.getElementById('feedCountBadge');
-      if (countBadge) countBadge.textContent = `${list.length} operations`;
+      if (countBadge) countBadge.textContent = `${merged.length} operations`;
 
-      container.innerHTML = list.slice(0, 60).map(item => {
-        const isOk = item.status >= 200 && item.status < 300;
-        const act = parseAuditActivity(item);
-        const ms = item.ms || 0;
-        const latCls = ms < 10 ? 'latency-fast' : ms < 50 ? 'latency-mid' : 'latency-slow';
-        const clickAttr = act.targetKey ? `onclick="selectEntry('${act.targetKey}'); switchTab('search');"` : '';
+      if (!merged.length) {
+        container.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">No operations matching selected filter.</div>';
+        return;
+      }
+
+      container.innerHTML = merged.slice(0, 80).map(item => {
+        if (item.type === 'search') {
+          return `
+            <div class="activity-card search" onclick="setGlobalSearchQuery('${escapeHtml(item.query)}')">
+              <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                <div class="activity-icon">🔍</div>
+                <div style="min-width:0;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-weight:700; font-size:13.5px; color:#fff;">Agent Search Query</span>
+                    <span class="badge badge-tag" style="font-size:10px;">QUERY</span>
+                    <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:700;">"${escapeHtml(item.query)}"</span>
+                  </div>
+                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
+                    Hybrid BM25 and vector memory query • <code style="color:var(--text-dim);">GET /search?q=${escapeHtml(item.query)}</code>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+                <span class="latency-badge latency-fast">⚡ ${Math.max(1, item.ms)}ms</span>
+                <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${item.ip}</span>
+                <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
+                <button class="btn sm" onclick="event.stopPropagation(); setGlobalSearchQuery('${escapeHtml(item.query)}')">Search →</button>
+              </div>
+            </div>
+          `;
+        }
+
+        // Canon Database Mutation Event
+        const isInc = item.kind === 'incident';
+        const isTask = item.kind === 'task';
+        const isResolved = item.action === 'resolved';
+        const isCreated = item.action === 'created';
+        const isArchived = item.action === 'archived' || item.action === 'retracted';
+
+        let icon = '📘';
+        let cardType = 'mutation';
+        if (isInc) {
+          icon = isResolved ? '🛡️' : '🚨';
+          cardType = isResolved ? 'mutation' : 'error';
+        } else if (isTask) {
+          icon = isResolved ? '✅' : '📋';
+          cardType = 'mutation';
+        } else if (isArchived) {
+          icon = '🗑️';
+          cardType = 'retraction';
+        } else if (isCreated) {
+          icon = '✨';
+        }
+
+        const actionColor = isCreated ? 'var(--green)' : isResolved ? '#10b981' : isArchived ? 'var(--red)' : 'var(--accent)';
+        const docTitle = item.title || item.key || 'Fleet Canon Mutation';
+        const clickAttr = item.key ? `onclick="selectEntry('${escapeHtml(item.key)}'); switchTab('search');"` : '';
 
         return `
-          <div class="activity-card ${act.opType}" ${clickAttr}>
+          <div class="activity-card ${cardType}" ${clickAttr}>
             <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-              <div class="activity-icon">${act.icon}</div>
+              <div class="activity-icon">${icon}</div>
               <div style="min-width:0;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span style="font-weight:700; font-size:13.5px; color:#fff;">${escapeHtml(act.title)}</span>
-                  <span class="method-badge method-${item.method}">${item.method}</span>
-                  <span style="font-family:var(--font-mono); font-size:11px; color:${isOk ? 'var(--green)' : 'var(--red)'}; font-weight:700;">${item.status}</span>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span style="font-weight:700; font-size:13.5px; color:#fff;">${escapeHtml(docTitle)}</span>
+                  <span class="badge" style="background:rgba(255,255,255,0.06); color:${actionColor}; border:1px solid ${actionColor}; font-size:10px; font-weight:700; text-transform:uppercase;">${item.action}</span>
+                  <span class="badge badge-${item.kind}" style="font-size:10px;">${item.kind.toUpperCase()}</span>
+                  ${item.key ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${item.key}</span>` : ''}
                 </div>
-                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                  ${escapeHtml(act.desc)} • <code style="color:var(--text-dim);">${escapeHtml(item.path)}${item.query ? '?' + escapeHtml(item.query) : ''}</code>
+                <div style="font-size:11.5px; color:var(--text-muted); margin-top:3px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span style="color:var(--text); font-style:italic;">"${escapeHtml(item.message || 'Updated in canon')}"</span>
+                  <span>•</span>
+                  <span>👤 ${escapeHtml(item.author)}</span>
+                  ${item.files && item.files.length ? `<span>• 📄 ${escapeHtml(item.files.join(', '))}</span>` : ''}
                 </div>
               </div>
             </div>
-            <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
-              <span class="latency-badge ${latCls}">⚡ ${Math.max(1, ms)}ms</span>
-              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${item.ip}</span>
+            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+              <span class="rev-badge" title="Git Commit SHA">⚡ ${item.sha.slice(0, 7)}</span>
               <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
-              ${act.targetKey ? `<button class="btn sm" onclick="event.stopPropagation(); selectEntry('${act.targetKey}'); switchTab('search');">Inspect →</button>` : ''}
+              ${item.key ? `
+                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchTab('search');">👁️ View</button>
+                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchDetailTab('diff'); switchTab('search');">🔀 Diff</button>
+              ` : ''}
             </div>
           </div>
         `;
       }).join('');
     }
 
-    function setFeedMethodFilter(method) {
-      App.feedMethodFilter = method;
-      ['ALL', 'GET', 'POST', 'DELETE'].forEach(m => {
-        const btn = document.getElementById(`feedMethod${m}`);
-        if (btn) btn.classList.toggle('active', m === method);
+    function setActivityFilter(filter) {
+      App.activityFilter = filter;
+      ['All', 'Knowledge', 'Incidents', 'Tasks', 'Searches'].forEach(f => {
+        const btn = document.getElementById(`actFilter${f}`);
+        if (btn) btn.classList.toggle('active', f.toLowerCase() === filter || (filter === 'incident' && f === 'Incidents') || (filter === 'task' && f === 'Tasks') || (filter === 'search' && f === 'Searches'));
       });
       renderFeed();
+    }
+
+    function setGlobalSearchQuery(q) {
+      const searchEl = document.getElementById('globalSearch');
+      if (searchEl) {
+        searchEl.value = q;
+        App.searchQuery = q;
+        switchTab('search');
+        renderKnowledgeList();
+      }
     }
 
     function toggleFeedPause() {
@@ -2365,22 +2455,26 @@
       if (App.feedPaused) {
         btn.textContent = '▶ Resume Stream';
         btn.classList.add('primary');
-        showToast('Live feed paused', 'info');
+        showToast('Changelog stream paused', 'info');
       } else {
         btn.textContent = '⏸ Pause Stream';
         btn.classList.remove('primary');
-        showToast('Live feed resumed', 'info');
+        showToast('Changelog stream resumed', 'info');
         refreshAll();
       }
     }
 
     function clearFeedTable() {
+      App.activity = [];
       App.audit = [];
-      document.getElementById('feedTableBody').innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">Feed cleared. Listening for new operations...</div>';
-      showToast('Feed cleared', 'info');
+      document.getElementById('feedTableBody').innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">Activity feed cleared. Listening for new commits...</div>';
+      showToast('Activity stream view cleared', 'info');
     }
 
-    // Interconnected Topology Graph with Host & Service Hubs
+    // ========================================================
+    // TAB 4: NEXT-GEN CYBER TOPOLOGY GRAPH (2026 VISUAL ENGINE)
+    // ========================================================
+
     function buildTopology() {
       const nodes = [];
       const links = [];
@@ -2418,10 +2512,10 @@
       // Existing node positions map to prevent jumping on refresh
       const existingPosMap = new Map();
       if (App.graphNodes) {
-        App.graphNodes.forEach(n => existingPosMap.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy }));
+        App.graphNodes.forEach(n => existingPosMap.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy, pinned: n.pinned }));
       }
 
-      // 2. Add Host Hub Nodes (Square, Purple)
+      // 2. Add Host Hub Nodes (Server Blade Module)
       let hostIdx = 0;
       const hostCount = hostSet.size || 1;
       hostSet.forEach(host => {
@@ -2430,52 +2524,60 @@
         const prev = existingPosMap.get(id);
         const hub = {
           id: id,
-          label: '🖥️ ' + host,
+          label: host,
           type: 'host',
           service: host,
-          radius: 16,
+          shape: 'blade',
+          width: 114,
+          height: 26,
+          radius: 18,
           color: '#a855f7',
-          shape: 'square',
           isHub: true,
+          count: 0,
           x: prev ? prev.x : 450 + Math.cos(angle) * 320,
           y: prev ? prev.y : 350 + Math.sin(angle) * 240,
+          targetX: 450 + Math.cos(angle) * 320,
+          targetY: 350 + Math.sin(angle) * 240,
           vx: prev ? prev.vx : 0,
           vy: prev ? prev.vy : 0,
-          pinned: false
+          pinned: prev ? prev.pinned : false
         };
         nodes.push(hub);
         nodeMap.set(hub.id, hub);
         hostIdx++;
       });
 
-      // 3. Add Service Hub Nodes (Cyan, Circle)
+      // 3. Add Service Hub Nodes (Glowing Hexagonal Badges)
       let svcIdx = 0;
       const svcCount = serviceSet.size || 1;
       serviceSet.forEach(svc => {
-        const angle = (svcIdx / svcCount) * 2 * Math.PI + 0.3;
+        const angle = (svcIdx / svcCount) * 2 * Math.PI + 0.35;
         const id = 'svc:' + svc;
         const prev = existingPosMap.get(id);
         const hub = {
           id: id,
-          label: '⚙️ ' + svc.toUpperCase(),
+          label: svc.toUpperCase(),
           type: 'service',
           service: svc,
-          radius: 14,
+          shape: 'hexagon',
+          radius: 22,
           color: '#00e5ff',
-          shape: 'circle',
           isHub: true,
-          x: prev ? prev.x : 450 + Math.cos(angle) * 180,
-          y: prev ? prev.y : 350 + Math.sin(angle) * 140,
+          count: 0,
+          x: prev ? prev.x : 450 + Math.cos(angle) * 190,
+          y: prev ? prev.y : 350 + Math.sin(angle) * 150,
+          targetX: 450 + Math.cos(angle) * 190,
+          targetY: 350 + Math.sin(angle) * 150,
           vx: prev ? prev.vx : 0,
           vy: prev ? prev.vy : 0,
-          pinned: false
+          pinned: prev ? prev.pinned : false
         };
         nodes.push(hub);
         nodeMap.set(hub.id, hub);
         svcIdx++;
       });
 
-      // 4. Add Entry Nodes (Clustered around their parent Service Hub)
+      // 4. Add Entry Nodes (Micro-Card Capsules)
       App.entries.forEach(e => {
         const isInc = e.kind === 'incident';
         const isTask = e.kind === 'task';
@@ -2489,31 +2591,37 @@
         } else {
           const parentHub = nodeMap.get('svc:' + svc);
           const orbitAngle = Math.random() * 2 * Math.PI;
-          const orbitDist = 55 + Math.random() * 75;
+          const orbitDist = 65 + Math.random() * 80;
           startX = parentHub ? parentHub.x + Math.cos(orbitAngle) * orbitDist : 450 + (Math.random() - 0.5) * 360;
           startY = parentHub ? parentHub.y + Math.sin(orbitAngle) * orbitDist : 350 + (Math.random() - 0.5) * 280;
         }
 
+        const labelText = e.title || e.key;
         const node = {
           id: e.key,
-          label: e.title || e.key,
+          label: labelText,
           type: isInc ? 'incident' : isTask ? 'task' : 'knowledge',
           service: svc,
-          radius: isInc ? 12 : isTask ? 10 : 8,
+          shape: 'capsule',
+          width: Math.min(135, Math.max(90, labelText.length * 6.5 + 28)),
+          height: isInc ? 24 : 22,
+          radius: isInc ? 13 : isTask ? 11 : 9,
           color: isInc ? '#ef4444' : isTask ? '#f59e0b' : '#00b3c4',
-          shape: 'circle',
           isHub: false,
           x: startX,
           y: startY,
+          targetX: startX,
+          targetY: startY,
           vx: prev ? prev.vx : 0,
           vy: prev ? prev.vy : 0,
-          pinned: false
+          pinned: prev ? prev.pinned : false,
+          data: e
         };
         nodes.push(node);
         nodeMap.set(e.key, node);
       });
 
-      // 5. Connect Links
+      // 5. Connect Links & Calculate Satellite Counts
       App.entries.forEach(e => {
         const srcNode = nodeMap.get(e.key);
         if (!srcNode) return;
@@ -2521,7 +2629,9 @@
         // Connect to Service Hub
         const svc = (e.service || (e.tags && e.tags[0]) || '').toLowerCase();
         if (svc && nodeMap.has('svc:' + svc)) {
-          links.push({ source: srcNode, target: nodeMap.get('svc:' + svc) });
+          const sHub = nodeMap.get('svc:' + svc);
+          links.push({ source: srcNode, target: sHub });
+          sHub.count = (sHub.count || 0) + 1;
         }
 
         // Connect to Host Hub(s)
@@ -2539,7 +2649,9 @@
         }
         matchedHosts.forEach(h => {
           if (nodeMap.has('host:' + h)) {
-            links.push({ source: srcNode, target: nodeMap.get('host:' + h) });
+            const hHub = nodeMap.get('host:' + h);
+            links.push({ source: srcNode, target: hHub });
+            hHub.count = (hHub.count || 0) + 1;
           }
         });
 
@@ -2560,13 +2672,20 @@
 
       App.graphNodes = nodes;
       App.graphLinks = links;
+
+      const badgeEl = document.getElementById('topoNodeCountBadge');
+      if (badgeEl) badgeEl.textContent = `${nodes.length} nodes`;
+
+      calculateLayoutTargets(App.graphLayout || 'orbit');
       initCanvasGraph();
     }
 
+    // Graph Visual Engine State
     let graphAnimId = null;
     let camera = { x: 0, y: 0, zoom: 1 };
     let targetCamera = null;
     let draggedNode = null;
+    let dragStartPos = { x: 0, y: 0 };
     let hoveredNode = null;
     let focusedNode = null;
     let isPanning = false;
@@ -2580,6 +2699,154 @@
       simulationAlpha = Math.max(simulationAlpha, alpha);
     }
 
+    // Layout Perspectives Engine
+    function calculateLayoutTargets(mode) {
+      const nodes = App.graphNodes || [];
+      if (!nodes.length) return;
+
+      const canvas = document.getElementById('topoCanvas');
+      const parent = canvas ? canvas.parentElement : null;
+      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 960;
+      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 640;
+      const cx = width / 2;
+      const cy = height / 2;
+
+      const hostNodes = nodes.filter(n => n.type === 'host');
+      const svcNodes = nodes.filter(n => n.type === 'service');
+      const entryNodes = nodes.filter(n => !n.isHub);
+
+      if (mode === 'radar') {
+        // Concentric Radar Rings Perspective
+        // Ring 1: Hosts (radius 135)
+        hostNodes.forEach((n, i) => {
+          const ang = (i / Math.max(1, hostNodes.length)) * 2 * Math.PI - Math.PI / 2;
+          n.targetX = cx + Math.cos(ang) * 140;
+          n.targetY = cy + Math.sin(ang) * 125;
+        });
+
+        // Ring 2: Services (radius 260)
+        svcNodes.forEach((n, i) => {
+          const ang = (i / Math.max(1, svcNodes.length)) * 2 * Math.PI - Math.PI / 2 + 0.25;
+          n.targetX = cx + Math.cos(ang) * 270;
+          n.targetY = cy + Math.sin(ang) * 225;
+        });
+
+        // Ring 3: Entries placed radially along outer orbit near parent service
+        entryNodes.forEach(n => {
+          const parentSvc = svcNodes.find(s => s.service === n.service) || svcNodes[0];
+          const baseAng = parentSvc ? Math.atan2(parentSvc.targetY - cy, parentSvc.targetX - cx) : 0;
+          const spreadAng = baseAng + (Math.sin(n.id.charCodeAt(0) * 3) * 0.45);
+          const rDist = 410 + (Math.cos(n.id.charCodeAt(0) * 7) * 45);
+          n.targetX = cx + Math.cos(spreadAng) * rDist;
+          n.targetY = cy + Math.sin(spreadAng) * (rDist * 0.85);
+        });
+      } else if (mode === 'hierarchy') {
+        // Hierarchical Architectural Tree Perspective
+        // Tier 1: Host Blades
+        const hostW = width / (hostNodes.length + 1);
+        hostNodes.forEach((n, i) => {
+          n.targetX = hostW * (i + 1);
+          n.targetY = 100;
+        });
+
+        // Tier 2: Service Hubs
+        const svcW = width / (svcNodes.length + 1);
+        svcNodes.forEach((n, i) => {
+          n.targetX = svcW * (i + 1);
+          n.targetY = 240;
+        });
+
+        // Tier 3: Incidents & Tasks
+        const incAndTasks = entryNodes.filter(n => n.type === 'incident' || n.type === 'task');
+        const itW = width / (incAndTasks.length + 1);
+        incAndTasks.forEach((n, i) => {
+          n.targetX = itW * (i + 1);
+          n.targetY = 400;
+        });
+
+        // Tier 4: Knowledge Documentation
+        const docs = entryNodes.filter(n => n.type === 'knowledge');
+        const docW = width / (docs.length + 1);
+        docs.forEach((n, i) => {
+          n.targetX = docW * (i + 1);
+          n.targetY = 560;
+        });
+      } else if (mode === 'grid') {
+        // Cyber Matrix / Service Grid Perspective
+        const cols = 3;
+        const colW = (width - 120) / cols;
+        const rowH = 220;
+
+        svcNodes.forEach((sNode, sIdx) => {
+          const col = sIdx % cols;
+          const row = Math.floor(sIdx / cols);
+          const cellX = 60 + col * colW + colW / 2;
+          const cellY = 90 + row * rowH;
+
+          sNode.targetX = cellX;
+          sNode.targetY = cellY;
+
+          // Align service dependent items inside its cell column
+          const children = entryNodes.filter(n => n.service === sNode.service);
+          children.forEach((cNode, cIdx) => {
+            const subRow = Math.floor(cIdx / 2) + 1;
+            const subCol = (cIdx % 2 === 0) ? -1 : 1;
+            cNode.targetX = cellX + subCol * 70;
+            cNode.targetY = cellY + subRow * 36;
+          });
+        });
+
+        // Place host hubs along bottom shelf
+        const hW = width / (hostNodes.length + 1);
+        hostNodes.forEach((hNode, i) => {
+          hNode.targetX = hW * (i + 1);
+          hNode.targetY = Math.max(height - 60, Math.ceil(svcNodes.length / cols) * rowH + 110);
+        });
+      } else {
+        // Orbit Cluster Perspective
+        hostNodes.forEach((n, i) => {
+          const ang = (i / Math.max(1, hostNodes.length)) * 2 * Math.PI;
+          n.targetX = cx + Math.cos(ang) * 330;
+          n.targetY = cy + Math.sin(ang) * 250;
+        });
+
+        svcNodes.forEach((n, i) => {
+          const ang = (i / Math.max(1, svcNodes.length)) * 2 * Math.PI + 0.35;
+          n.targetX = cx + Math.cos(ang) * 190;
+          n.targetY = cy + Math.sin(ang) * 150;
+        });
+
+        entryNodes.forEach(n => {
+          const parentSvc = svcNodes.find(s => s.service === n.service);
+          if (parentSvc) {
+            const ang = (n.id.charCodeAt(0) * 1.3) % (2 * Math.PI);
+            const dist = 65 + (n.id.charCodeAt(0) % 70);
+            n.targetX = parentSvc.targetX + Math.cos(ang) * dist;
+            n.targetY = parentSvc.targetY + Math.sin(ang) * dist;
+          }
+        });
+      }
+    }
+
+    function setGraphLayout(mode) {
+      App.graphLayout = mode;
+      ['Orbit', 'Radar', 'Hierarchy', 'Grid'].forEach(m => {
+        const btn = document.getElementById(`layout${m}Btn`);
+        if (btn) btn.classList.toggle('active', m.toLowerCase() === mode);
+      });
+
+      calculateLayoutTargets(mode);
+      reheatSimulation(1.0);
+      showToast(`Perspective switched to ${mode.toUpperCase()}`, 'info');
+    }
+
+    function unpinAllGraphNodes() {
+      (App.graphNodes || []).forEach(n => { n.pinned = false; });
+      reheatSimulation(0.9);
+      showToast('All nodes unpinned and relaxed', 'info');
+    }
+
+    // Next-Gen Canvas Initialization & Animation Loop
     function initCanvasGraph() {
       const canvas = document.getElementById('topoCanvas');
       if (!canvas) return;
@@ -2607,15 +2874,15 @@
       function step() {
         checkResize();
         const parent = canvas.parentElement;
-        const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
-        const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+        const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 960;
+        const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 640;
         animTick += 0.035;
 
-        // Smooth Cinematic Camera Lerp
+        // Smooth Camera Lerp
         if (targetCamera) {
-          camera.x += (targetCamera.x - camera.x) * 0.12;
-          camera.y += (targetCamera.y - camera.y) * 0.12;
-          camera.zoom += (targetCamera.zoom - camera.zoom) * 0.12;
+          camera.x += (targetCamera.x - camera.x) * 0.14;
+          camera.y += (targetCamera.y - camera.y) * 0.14;
+          camera.zoom += (targetCamera.zoom - camera.zoom) * 0.14;
           if (Math.abs(targetCamera.x - camera.x) < 0.4 &&
               Math.abs(targetCamera.y - camera.y) < 0.4 &&
               Math.abs(targetCamera.zoom - camera.zoom) < 0.002) {
@@ -2626,68 +2893,73 @@
           }
         }
 
-        let visibleNodes = App.graphNodes;
+        let visibleNodes = App.graphNodes || [];
         if (App.graphFilter !== 'all') {
           visibleNodes = visibleNodes.filter(n => n.isHub || n.type === App.graphFilter);
         }
         const visibleNodeSet = new Set(visibleNodes);
-        const visibleLinks = App.graphLinks.filter(l => visibleNodeSet.has(l.source) && visibleNodeSet.has(l.target));
+        const visibleLinks = (App.graphLinks || []).filter(l => visibleNodeSet.has(l.source) && visibleNodeSet.has(l.target));
 
-        // Physics Simulation with Temperature Alpha Cooling (Halts completely to eliminate jitter)
-        if (App.graphPhysics && simulationAlpha > 0.002) {
-          // Repulsion
-          for (let i = 0; i < visibleNodes.length; i++) {
-            for (let j = i + 1; j < visibleNodes.length; j++) {
-              const dx = visibleNodes[j].x - visibleNodes[i].x;
-              const dy = visibleNodes[j].y - visibleNodes[i].y;
-              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-              const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 170 : 95;
-              if (dist < minDist) {
-                const repForce = Math.min(8, (minDist - dist) / dist * 1.3) * simulationAlpha;
-                const fx = (dx / dist) * repForce;
-                const fy = (dy / dist) * repForce;
-                if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= fx; visibleNodes[i].vy -= fy; }
-                if (!visibleNodes[j].pinned) { visibleNodes[j].vx += fx; visibleNodes[j].vy += fy; }
-              }
-            }
-          }
+        // Physics Simulation & Layout Morphing
+        if (App.graphPhysics && simulationAlpha > 0.001) {
+          const isOrbit = App.graphLayout === 'orbit';
 
-          // Attraction along links
-          visibleLinks.forEach(l => {
-            const dx = l.target.x - l.source.x;
-            const dy = l.target.y - l.source.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const idealDist = (l.source.isHub || l.target.isHub) ? 125 : 70;
-            const displacement = dist - idealDist;
-            const force = Math.max(-6, Math.min(6, displacement * 0.025)) * simulationAlpha;
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-
-            if (!l.source.pinned) { l.source.vx += fx; l.source.vy += fy; }
-            if (!l.target.pinned) { l.target.vx -= fx; l.target.vy -= fy; }
-          });
-
-          // Center gravity and velocity damping
-          const cx = width / 2;
-          const cy = height / 2;
-          const maxSpeed = 6 * simulationAlpha;
+          // Layout Target Attraction
           visibleNodes.forEach(n => {
             if (!n.pinned) {
-              n.vx += (cx - n.x) * 0.001 * simulationAlpha;
-              n.vy += (cy - n.y) * 0.001 * simulationAlpha;
-              n.vx *= 0.84;
-              n.vy *= 0.84;
-              const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy) || 1;
-              if (speed > maxSpeed && maxSpeed > 0.001) {
-                n.vx = (n.vx / speed) * maxSpeed;
-                n.vy = (n.vy / speed) * maxSpeed;
+              const pull = isOrbit ? 0.03 : 0.14;
+              n.vx += (n.targetX - n.x) * pull * simulationAlpha;
+              n.vy += (n.targetY - n.y) * pull * simulationAlpha;
+            }
+          });
+
+          // Repulsion & Spring forces in Orbit perspective
+          if (isOrbit) {
+            for (let i = 0; i < visibleNodes.length; i++) {
+              for (let j = i + 1; j < visibleNodes.length; j++) {
+                const dx = visibleNodes[j].x - visibleNodes[i].x;
+                const dy = visibleNodes[j].y - visibleNodes[i].y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 180 : 90;
+                if (dist < minDist) {
+                  const rep = Math.min(8, (minDist - dist) / dist * 1.4) * simulationAlpha;
+                  const fx = (dx / dist) * rep;
+                  const fy = (dy / dist) * rep;
+                  if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= fx; visibleNodes[i].vy -= fy; }
+                  if (!visibleNodes[j].pinned) { visibleNodes[j].vx += fx; visibleNodes[j].vy += fy; }
+                }
+              }
+            }
+
+            visibleLinks.forEach(l => {
+              const dx = l.target.x - l.source.x;
+              const dy = l.target.y - l.source.y;
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+              const idealDist = (l.source.isHub || l.target.isHub) ? 130 : 75;
+              const force = Math.max(-6, Math.min(6, (dist - idealDist) * 0.025)) * simulationAlpha;
+              const fx = (dx / dist) * force;
+              const fy = (dy / dist) * force;
+              if (!l.source.pinned) { l.source.vx += fx; l.source.vy += fy; }
+              if (!l.target.pinned) { l.target.vx -= fx; l.target.vy -= fy; }
+            });
+          }
+
+          // Damping and Velocity Integration
+          const maxSpeed = 8 * simulationAlpha;
+          visibleNodes.forEach(n => {
+            if (!n.pinned) {
+              n.vx *= 0.82;
+              n.vy *= 0.82;
+              const spd = Math.hypot(n.vx, n.vy) || 1;
+              if (spd > maxSpeed && maxSpeed > 0.001) {
+                n.vx = (n.vx / spd) * maxSpeed;
+                n.vy = (n.vy / spd) * maxSpeed;
               }
               if (!isNaN(n.vx)) n.x += n.vx;
               if (!isNaN(n.vy)) n.y += n.vy;
             }
           });
 
-          // Exponential cooling
           simulationAlpha *= 0.965;
           if (simulationAlpha <= 0.002) {
             simulationAlpha = 0;
@@ -2695,7 +2967,7 @@
           }
         }
 
-        // Active Focus & Neighborhood Spotlight Calculation
+        // Active Neighborhood Spotlight
         const activeNode = focusedNode || hoveredNode;
         let connectedNodeSet = null;
         let activeLinks = [];
@@ -2712,25 +2984,102 @@
           });
         }
 
-        // Render Canvas with Camera Transform
+        // ==========================================
+        // RENDER PASS
+        // ==========================================
         ctx.save();
         ctx.clearRect(0, 0, width, height);
+
+        // 1. Draw Infinite Cyber Blueprint Grid
+        const worldMinX = -camera.x / camera.zoom;
+        const worldMinY = -camera.y / camera.zoom;
+        const worldMaxX = (width - camera.x) / camera.zoom;
+        const worldMaxY = (height - camera.y) / camera.zoom;
+
         ctx.translate(camera.x, camera.y);
         ctx.scale(camera.zoom, camera.zoom);
 
-        // 1. Draw Links
+        // Minor Grid
+        const minorStep = 60;
+        const startGridX = Math.floor(worldMinX / minorStep) * minorStep;
+        const endGridX = Math.ceil(worldMaxX / minorStep) * minorStep;
+        const startGridY = Math.floor(worldMinY / minorStep) * minorStep;
+        const endGridY = Math.ceil(worldMaxY / minorStep) * minorStep;
+
+        ctx.beginPath();
+        for (let gx = startGridX; gx <= endGridX; gx += minorStep) {
+          ctx.moveTo(gx, worldMinY);
+          ctx.lineTo(gx, worldMaxY);
+        }
+        for (let gy = startGridY; gy <= endGridY; gy += minorStep) {
+          ctx.moveTo(worldMinX, gy);
+          ctx.lineTo(worldMaxX, gy);
+        }
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.035)';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+
+        // Major Grid with Crosshairs (+)
+        const majorStep = 240;
+        const startMajorX = Math.floor(worldMinX / majorStep) * majorStep;
+        const endMajorX = Math.ceil(worldMaxX / majorStep) * majorStep;
+        const startMajorY = Math.floor(worldMinY / majorStep) * majorStep;
+        const endMajorY = Math.ceil(worldMaxY / majorStep) * majorStep;
+
+        ctx.beginPath();
+        for (let gx = startMajorX; gx <= endMajorX; gx += majorStep) {
+          ctx.moveTo(gx, worldMinY);
+          ctx.lineTo(gx, worldMaxY);
+        }
+        for (let gy = startMajorY; gy <= endMajorY; gy += majorStep) {
+          ctx.moveTo(worldMinX, gy);
+          ctx.lineTo(worldMaxX, gy);
+        }
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.08)';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+
+        // Precision Crosshairs
+        ctx.beginPath();
+        const chSize = 6;
+        for (let gx = startMajorX; gx <= endMajorX; gx += majorStep) {
+          for (let gy = startMajorY; gy <= endMajorY; gy += majorStep) {
+            ctx.moveTo(gx - chSize, gy);
+            ctx.lineTo(gx + chSize, gy);
+            ctx.moveTo(gx, gy - chSize);
+            ctx.lineTo(gx, gy + chSize);
+          }
+        }
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.22)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // 2. Draw Curved Bézier Spline Connectors
         visibleLinks.forEach(l => {
           const isActive = activeNode && (l.source === activeNode || l.target === activeNode);
+          const dx = l.target.x - l.source.x;
+          const dy = l.target.y - l.source.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const nx = -dy / dist;
+          const ny = dx / dist;
+
+          // Controlled curvature based on node IDs
+          const curveOffset = Math.sin((l.source.id.charCodeAt(0) + l.target.id.charCodeAt(0)) % 10) * Math.min(26, dist * 0.12);
+          const cpX = (l.source.x + l.target.x) / 2 + nx * curveOffset;
+          const cpY = (l.source.y + l.target.y) / 2 + ny * curveOffset;
+          l._cpX = cpX;
+          l._cpY = cpY;
+
           ctx.beginPath();
           ctx.moveTo(l.source.x, l.source.y);
-          ctx.lineTo(l.target.x, l.target.y);
+          ctx.quadraticCurveTo(cpX, cpY, l.target.x, l.target.y);
 
           if (activeNode) {
             if (isActive) {
               ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
               ctx.lineWidth = 2.4;
               ctx.shadowColor = '#00e5ff';
-              ctx.shadowBlur = 8;
+              ctx.shadowBlur = 10;
             } else {
               ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
               ctx.lineWidth = 0.6;
@@ -2746,50 +3095,60 @@
           ctx.shadowBlur = 0;
         });
 
-        // 2. Draw Animated Photon Energy Pulses Streaming Along Active Links
-        if (activeLinks.length > 0) {
-          activeLinks.forEach((l, idx) => {
-            const pulseT = (animTick * 1.2 + idx * 0.22) % 1.0;
-            const px = l.source.x + (l.target.x - l.source.x) * pulseT;
-            const py = l.source.y + (l.target.y - l.source.y) * pulseT;
-            ctx.beginPath();
-            ctx.arc(px, py, 3, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
-            ctx.shadowColor = '#00e5ff';
-            ctx.shadowBlur = 10;
-            ctx.fill();
-            ctx.shadowBlur = 0;
-          });
+        // 3. Draw Animated Streaming Photon Pulses Along Splines
+        const pulses = activeLinks.length > 0 ? activeLinks : visibleLinks.slice(0, 16);
+        pulses.forEach((l, idx) => {
+          const t = (animTick * 1.1 + idx * 0.28) % 1.0;
+          const cpX = l._cpX || (l.source.x + l.target.x) / 2;
+          const cpY = l._cpY || (l.source.y + l.target.y) / 2;
+
+          // Quadratic Bézier curve position: B(t) = (1-t)^2*P0 + 2(1-t)t*P1 + t^2*P2
+          const px = (1 - t) * (1 - t) * l.source.x + 2 * (1 - t) * t * cpX + t * t * l.target.x;
+          const py = (1 - t) * (1 - t) * l.source.y + 2 * (1 - t) * t * cpY + t * t * l.target.y;
+
+          ctx.beginPath();
+          ctx.arc(px, py, 2.8, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = '#00e5ff';
+          ctx.shadowBlur = 12;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        });
+
+        // 4. Draw Elastic Magnetic Tether While Dragging
+        if (draggedNode && (dragStartPos.x !== 0 || dragStartPos.y !== 0)) {
+          ctx.beginPath();
+          ctx.moveTo(dragStartPos.x, dragStartPos.y);
+          ctx.lineTo(draggedNode.x, draggedNode.y);
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
 
-        // 3. Draw Nodes
+        // 5. Draw Cyber Micro-Cards & Hexagonal Hubs
         visibleNodes.forEach(n => {
           const isCurrentActive = n === activeNode;
           const isConnected = connectedNodeSet ? connectedNodeSet.has(n) : true;
           const isSearchMatch = topoSearchQuery && (n.label.toLowerCase().includes(topoSearchQuery) || n.id.toLowerCase().includes(topoSearchQuery));
 
-          // Calculate node opacity based on focus and search
           let alpha = 1.0;
-          if (activeNode) {
-            alpha = isConnected ? 1.0 : 0.12;
-          }
-          if (topoSearchQuery) {
-            alpha = isSearchMatch ? 1.0 : Math.min(alpha, 0.18);
-          }
+          if (activeNode) alpha = isConnected ? 1.0 : 0.12;
+          if (topoSearchQuery) alpha = isSearchMatch ? 1.0 : Math.min(alpha, 0.18);
           ctx.globalAlpha = alpha;
 
-          const r = n.radius + (isCurrentActive ? 4 : 0);
-
-          // Pulsating Sonar Radar Rings for Search Matches
-          if (isSearchMatch) {
+          // Pulsating Sonar Waves on Search Matches & Open Incidents
+          if (isSearchMatch || (n.type === 'incident' && !n.isHub)) {
+            const pulseColor = n.type === 'incident' ? '239, 68, 68' : '0, 229, 255';
             for (let rIdx = 0; rIdx < 2; rIdx++) {
               const ringProgress = (animTick * 1.4 + rIdx * 0.5) % 1.0;
-              const ringRadius = r + ringProgress * 26;
-              const ringAlpha = (1 - ringProgress) * 0.9;
+              const ringRadius = (n.radius || 16) + ringProgress * 28;
+              const ringAlpha = (1 - ringProgress) * 0.85;
               ctx.beginPath();
               ctx.arc(n.x, n.y, ringRadius, 0, Math.PI * 2);
-              ctx.strokeStyle = `rgba(0, 229, 255, ${ringAlpha})`;
-              ctx.lineWidth = 1.8;
+              ctx.strokeStyle = `rgba(${pulseColor}, ${ringAlpha})`;
+              ctx.lineWidth = 1.6;
               ctx.stroke();
             }
           }
@@ -2797,72 +3156,214 @@
           // Pulsating Halo on Focused Node
           if (n === focusedNode) {
             const haloProgress = (Math.sin(animTick * 3) + 1) / 2;
-            const haloRadius = r + 6 + haloProgress * 4;
             ctx.beginPath();
-            ctx.arc(n.x, n.y, haloRadius, 0, Math.PI * 2);
+            ctx.arc(n.x, n.y, (n.radius || 18) + 10 + haloProgress * 5, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(0, 229, 255, ${0.4 + haloProgress * 0.4})`;
             ctx.lineWidth = 2;
             ctx.stroke();
           }
 
-          // Draw Node Geometry
-          ctx.beginPath();
-          if (n.shape === 'square') {
-            const s = r * 2;
-            const x = n.x - r;
-            const y = n.y - r;
-            const cr = 4;
-            ctx.moveTo(x + cr, y);
-            ctx.lineTo(x + s - cr, y);
-            ctx.quadraticCurveTo(x + s, y, x + s, y + cr);
-            ctx.lineTo(x + s, y + s - cr);
-            ctx.quadraticCurveTo(x + s, y + s, x + s - cr, y + s);
-            ctx.lineTo(x + cr, y + s);
-            ctx.quadraticCurveTo(x, y + s, x, y + s - cr);
-            ctx.lineTo(x, y + cr);
-            ctx.quadraticCurveTo(x, y, x + cr, y);
-          } else {
-            ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-          }
-          ctx.fillStyle = n.color;
-          ctx.shadowColor = n.color;
-          ctx.shadowBlur = isCurrentActive ? 20 : (n.isHub ? 12 : 5);
-          ctx.fill();
-          ctx.shadowBlur = 0;
+          // --- NODE GEOMETRY RENDERING ---
+          if (n.shape === 'hexagon') {
+            // Service Hub Hexagon
+            const r = n.radius + (isCurrentActive ? 3 : 0);
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+              const ang = (i * Math.PI / 3) + Math.PI / 6;
+              const hx = n.x + r * Math.cos(ang);
+              const hy = n.y + r * Math.sin(ang);
+              if (i === 0) ctx.moveTo(hx, hy);
+              else ctx.lineTo(hx, hy);
+            }
+            ctx.closePath();
+            ctx.fillStyle = '#061726';
+            ctx.fill();
 
-          if (n.isHub) {
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = isCurrentActive ? 2.5 : 1.5;
+            ctx.strokeStyle = isCurrentActive ? '#ffffff' : '#00e5ff';
+            ctx.lineWidth = isCurrentActive ? 2.6 : 1.8;
+            ctx.shadowColor = '#00e5ff';
+            ctx.shadowBlur = isCurrentActive ? 22 : 12;
             ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Center Symbol
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('⚙️', n.x, n.y);
+
+            // Satellite Count Badge
+            if (n.count !== undefined) {
+              const satX = n.x + r * 0.8;
+              const satY = n.y - r * 0.8;
+              ctx.beginPath();
+              ctx.arc(satX, satY, 8.5, 0, Math.PI * 2);
+              ctx.fillStyle = '#00e5ff';
+              ctx.fill();
+              ctx.fillStyle = '#000000';
+              ctx.font = 'bold 9px ui-monospace, sans-serif';
+              ctx.fillText(String(n.count), satX, satY);
+            }
+
+            // Monospace Title
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11.5px ui-monospace, sans-serif';
+            ctx.fillText(n.label, n.x, n.y + r + 14);
+
+          } else if (n.shape === 'blade') {
+            // Host Blade Module
+            const w = n.width;
+            const h = n.height;
+            const rx = n.x - w / 2;
+            const ry = n.y - h / 2;
+            const rad = 6;
+
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, w, h, rad);
+            ctx.fillStyle = '#140c22';
+            ctx.fill();
+
+            ctx.strokeStyle = isCurrentActive ? '#ffffff' : '#a855f7';
+            ctx.lineWidth = isCurrentActive ? 2.2 : 1.4;
+            ctx.shadowColor = '#a855f7';
+            ctx.shadowBlur = isCurrentActive ? 18 : 8;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Green LED Status Indicator
+            ctx.beginPath();
+            ctx.arc(rx + 10, n.y, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#10b981';
+            ctx.shadowColor = '#10b981';
+            ctx.shadowBlur = 6;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Text
+            ctx.fillStyle = '#f3e8ff';
+            ctx.font = 'bold 10px ui-monospace, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(n.label.slice(0, 14), rx + 20, n.y);
+
+          } else {
+            // Micro-Card Capsule Pill
+            const w = n.width;
+            const h = n.height;
+            const rx = n.x - w / 2;
+            const ry = n.y - h / 2;
+            const rad = 11;
+
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, w, h, rad);
+            ctx.fillStyle = n.type === 'incident' ? '#260a0a' : n.type === 'task' ? '#241a06' : '#061a1e';
+            ctx.fill();
+
+            ctx.strokeStyle = isCurrentActive ? '#ffffff' : n.color;
+            ctx.lineWidth = isCurrentActive ? 2.2 : 1.2;
+            ctx.shadowColor = n.color;
+            ctx.shadowBlur = isCurrentActive ? 16 : 6;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Left Icon
+            const icon = n.type === 'incident' ? '🚨' : n.type === 'task' ? '📋' : '📘';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(icon, rx + 11, n.y);
+
+            // Label Text
+            ctx.fillStyle = '#f0f4fa';
+            ctx.font = '10.5px ui-monospace, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(n.label.slice(0, 16), rx + 22, n.y);
           }
 
-          // Node Text Label
-          if (alpha > 0.3) {
-            ctx.fillStyle = isCurrentActive ? '#00e5ff' : (n.isHub ? '#ffffff' : '#f0f4fa');
-            ctx.font = `${isCurrentActive || n.isHub ? 'bold ' : ''}${n.isHub ? '12px' : '11px'} ui-monospace, sans-serif`;
+          // Pin Indicator
+          if (n.pinned) {
+            ctx.font = '11px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(n.label.slice(0, 24), n.x, n.y + r + 13);
+            ctx.textBaseline = 'middle';
+            ctx.fillText('📌', n.x + (n.width ? n.width / 2 - 2 : 14), n.y - (n.height ? n.height / 2 - 2 : 12));
           }
         });
 
-        if (focusedNode && hud && hud.style.display !== 'none') {
-          const screenX = focusedNode.x * camera.zoom + camera.x;
-          const screenY = focusedNode.y * camera.zoom + camera.y;
-          const hudX = Math.min(width - 340, Math.max(20, screenX + 18));
-          const hudY = Math.min(height - 180, Math.max(20, screenY - 25));
-          hud.style.left = `${hudX}px`;
-          hud.style.top = `${hudY}px`;
-        }
+        // 6. Draw Interactive Mini-Map (Radar Viewport HUD)
+        ctx.restore(); // Restore to screen coordinate space
 
-        ctx.globalAlpha = 1.0;
-        ctx.restore();
+        const mmW = 150;
+        const mmH = 95;
+        const mmX = 18;
+        const mmY = height - mmH - 18;
+
+        // Mini-Map Glass Box
+        ctx.beginPath();
+        ctx.roundRect(mmX, mmY, mmW, mmH, 8);
+        ctx.fillStyle = 'rgba(8, 14, 22, 0.88)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Mini-Map Header
+        ctx.fillStyle = 'rgba(0, 229, 255, 0.8)';
+        ctx.font = 'bold 9px ui-monospace, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('🛰️ RADAR VIEWPORT', mmX + 8, mmY + 6);
+
+        // Rotating Radar Sweep Ray
+        const sweepAngle = (animTick * 1.5) % (Math.PI * 2);
+        const mmCx = mmX + mmW / 2;
+        const mmCy = mmY + mmH / 2 + 6;
+        ctx.beginPath();
+        ctx.moveTo(mmCx, mmCy);
+        ctx.arc(mmCx, mmCy, 36, sweepAngle, sweepAngle + 0.3);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0, 229, 255, 0.08)';
+        ctx.fill();
+
+        // Mini-Map Node Dots
+        const worldBounds = getTopologyBounds();
+        const bW = Math.max(200, worldBounds.maxX - worldBounds.minX);
+        const bH = Math.max(160, worldBounds.maxY - worldBounds.minY);
+
+        visibleNodes.forEach(n => {
+          const normX = (n.x - worldBounds.minX) / bW;
+          const normY = (n.y - worldBounds.minY) / bH;
+          const dotX = mmX + 12 + normX * (mmW - 24);
+          const dotY = mmY + 22 + normY * (mmH - 32);
+
+          ctx.beginPath();
+          ctx.arc(dotX, dotY, n.isHub ? 2.5 : 1.8, 0, Math.PI * 2);
+          ctx.fillStyle = n.color;
+          ctx.fill();
+        });
+
+        // Mini-Map Camera Viewport Rectangle
+        const camNormMinX = (worldMinX - worldBounds.minX) / bW;
+        const camNormMinY = (worldMinY - worldBounds.minY) / bH;
+        const camNormMaxX = (worldMaxX - worldBounds.minX) / bW;
+        const camNormMaxY = (worldMaxY - worldBounds.minY) / bH;
+
+        const vpX = Math.max(mmX + 4, Math.min(mmX + mmW - 4, mmX + 12 + camNormMinX * (mmW - 24)));
+        const vpY = Math.max(mmY + 16, Math.min(mmY + mmH - 4, mmY + 22 + camNormMinY * (mmH - 32)));
+        const vpW = Math.min(mmW - 8, Math.max(12, (camNormMaxX - camNormMinX) * (mmW - 24)));
+        const vpH = Math.min(mmH - 24, Math.max(8, (camNormMaxY - camNormMinY) * (mmH - 32)));
+
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(vpX, vpY, vpW, vpH);
+
         graphAnimId = requestAnimationFrame(step);
       }
 
       if (graphAnimId) cancelAnimationFrame(graphAnimId);
       step();
 
-      // Mouse & Camera Coordinates
+      // Mouse & Graph Pos Helper
       function getGraphPos(e) {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
@@ -2872,26 +3373,63 @@
         return { mx, my, gx, gy };
       }
 
+      function getTopologyBounds() {
+        const nodes = App.graphNodes || [];
+        if (!nodes.length) return { minX: -200, maxX: 1100, minY: -200, maxY: 900 };
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        nodes.forEach(n => {
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        });
+        const pad = 120;
+        return { minX: minX - pad, maxX: maxX + pad, minY: minY - pad, maxY: maxY + pad };
+      }
+
       let mouseDownPos = { x: 0, y: 0 };
 
       canvas.onmousedown = (e) => {
         const { mx, my, gx, gy } = getGraphPos(e);
         mouseDownPos = { x: mx, y: my };
         didDragOrPan = false;
+
+        // Check Mini-Map Click Navigation
+        const parent = canvas.parentElement;
+        const width = parent ? parent.clientWidth : 960;
+        const height = parent ? parent.clientHeight : 640;
+        const mmW = 150, mmH = 95, mmX = 18, mmY = height - mmH - 18;
+
+        if (mx >= mmX && mx <= mmX + mmW && my >= mmY && my <= mmY + mmH) {
+          const bounds = getTopologyBounds();
+          const normX = (mx - (mmX + 12)) / (mmW - 24);
+          const normY = (my - (mmY + 22)) / (mmH - 32);
+          const targetWorldX = bounds.minX + normX * (bounds.maxX - bounds.minX);
+          const targetWorldY = bounds.minY + normY * (bounds.maxY - bounds.minY);
+
+          targetCamera = {
+            x: width / 2 - targetWorldX * camera.zoom,
+            y: height / 2 - targetWorldY * camera.zoom,
+            zoom: camera.zoom
+          };
+          return;
+        }
+
+        // Test Node Hit
         let clicked = null;
-        for (const n of App.graphNodes) {
-          const dx = n.x - gx;
-          const dy = n.y - gy;
-          if (Math.hypot(dx, dy) <= n.radius + 12) {
+        for (const n of (App.graphNodes || [])) {
+          const hitR = n.width ? Math.max(n.width / 2, n.height / 2) + 6 : n.radius + 12;
+          if (Math.hypot(n.x - gx, n.y - gy) <= hitR) {
             clicked = n;
             break;
           }
         }
+
         if (clicked) {
           draggedNode = clicked;
-          draggedNode.pinned = true;
-          reheatSimulation(0.4);
+          dragStartPos = { x: clicked.x, y: clicked.y };
           focusNode(clicked);
+          openGraphDrawer(clicked);
         } else {
           isPanning = true;
           panStart = { x: mx - camera.x, y: my - camera.y };
@@ -2905,8 +3443,7 @@
           didDragOrPan = true;
           draggedNode.x = gx;
           draggedNode.y = gy;
-          reheatSimulation(0.25);
-          if (focusedNode === draggedNode) showNodeHud(draggedNode);
+          reheatSimulation(0.3);
           return;
         }
 
@@ -2917,60 +3454,37 @@
           return;
         }
 
-        // Hover test
+        // Hover Detection
         let found = null;
-        for (const n of App.graphNodes) {
-          const dx = n.x - gx;
-          const dy = n.y - gy;
-          if (Math.hypot(dx, dy) <= n.radius + 10) {
+        for (const n of (App.graphNodes || [])) {
+          const hitR = n.width ? Math.max(n.width / 2, n.height / 2) + 6 : n.radius + 10;
+          if (Math.hypot(n.x - gx, n.y - gy) <= hitR) {
             found = n;
             break;
           }
         }
         hoveredNode = found;
         canvas.style.cursor = found ? 'pointer' : (isPanning ? 'grabbing' : 'grab');
-
-        if (!focusedNode) {
-          if (found) {
-            showNodeHud(found, { x: mx, y: my });
-          } else {
-            hud.style.display = 'none';
-          }
-        }
       };
 
       window.onmouseup = () => {
         if (draggedNode) {
-          draggedNode.pinned = false;
+          const moved = Math.hypot(draggedNode.x - dragStartPos.x, draggedNode.y - dragStartPos.y);
+          if (moved > 10) {
+            draggedNode.pinned = true;
+            showToast(`📌 Pinned ${draggedNode.label} (Double-click to unpin)`, 'info');
+          }
           draggedNode = null;
         }
         isPanning = false;
         canvas.style.cursor = 'grab';
       };
 
-      canvas.onclick = (e) => {
-        const { mx, my, gx, gy } = getGraphPos(e);
-        const dist = Math.hypot(mx - mouseDownPos.x, my - mouseDownPos.y);
-        if (dist > 8) return;
-        let clicked = null;
-        for (const n of App.graphNodes) {
-          if (Math.hypot(n.x - gx, n.y - gy) <= n.radius + 12) {
-            clicked = n;
-            break;
-          }
-        }
-        if (clicked) {
-          focusNode(clicked);
-        } else {
-          closeNodeHud();
-        }
-      };
-
       canvas.onwheel = (e) => {
         e.preventDefault();
         const { mx, my } = getGraphPos(e);
         const factor = e.deltaY < 0 ? 1.15 : 0.85;
-        const newZoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
+        const newZoom = Math.min(3.2, Math.max(0.25, camera.zoom * factor));
         camera.x = mx - (mx - camera.x) * (newZoom / camera.zoom);
         camera.y = my - (my - camera.y) * (newZoom / camera.zoom);
         camera.zoom = newZoom;
@@ -2978,11 +3492,14 @@
 
       canvas.ondblclick = (e) => {
         const { gx, gy } = getGraphPos(e);
-        for (const n of App.graphNodes) {
-          const dx = n.x - gx;
-          const dy = n.y - gy;
-          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
-            if (n.isHub) {
+        for (const n of (App.graphNodes || [])) {
+          const hitR = n.width ? Math.max(n.width / 2, n.height / 2) + 6 : n.radius + 10;
+          if (Math.hypot(n.x - gx, n.y - gy) <= hitR) {
+            if (n.pinned) {
+              n.pinned = false;
+              reheatSimulation(0.6);
+              showToast(`Unpinned ${n.label}`, 'info');
+            } else if (n.isHub) {
               filterFleetByHub(n.id);
             } else {
               selectEntry(n.id);
@@ -2994,17 +3511,96 @@
       };
     }
 
-    function focusNode(node) {
-      if (!node) {
-        closeNodeHud();
-        return;
+    // Sliding Inspector Drawer
+    function openGraphDrawer(node) {
+      if (!node) return;
+      App.drawerNode = node;
+      const drawer = document.getElementById('graphDrawer');
+      if (!drawer) return;
+
+      const isHub = node.isHub;
+      const badge = document.getElementById('drawerBadge');
+      badge.textContent = isHub ? (node.type === 'host' ? 'HOST BLADE' : 'SERVICE HUB') : node.type.toUpperCase();
+      badge.className = `badge badge-${node.type}`;
+
+      document.getElementById('drawerKey').textContent = node.id;
+      document.getElementById('drawerTitle').textContent = node.label;
+
+      const metaEl = document.getElementById('drawerMeta');
+      metaEl.innerHTML = `
+        <span>Type: <strong style="color:#fff;">${node.type.toUpperCase()}</strong></span>
+        ${node.service ? `<span>Service: <strong style="color:var(--accent);">${escapeHtml(node.service)}</strong></span>` : ''}
+        ${node.pinned ? `<span style="color:var(--amber);">📌 PINNED</span>` : ''}
+      `;
+
+      // Connected infrastructure chips
+      const linksEl = document.getElementById('drawerLinks');
+      const connNodes = (App.graphLinks || [])
+        .filter(l => l.source === node || l.target === node)
+        .map(l => l.source === node ? l.target : l.source);
+
+      if (connNodes.length > 0) {
+        linksEl.innerHTML = connNodes.map(c => `
+          <button class="badge badge-tag" style="cursor:pointer;" onclick="focusNodeById('${escapeHtml(c.id)}')">
+            ${c.shape === 'blade' ? '🖥️' : c.shape === 'hexagon' ? '⚙️' : '📄'} ${escapeHtml(c.label)}
+          </button>
+        `).join('');
+      } else {
+        linksEl.innerHTML = '<span style="font-size:11px; color:var(--text-muted);">No active links detected.</span>';
       }
+
+      // Markdown preview
+      const contentEl = document.getElementById('drawerContent');
+      if (node.data && node.data.body) {
+        contentEl.innerHTML = renderMarkdown(node.data.body);
+      } else if (isHub) {
+        contentEl.innerHTML = `
+          <p><strong>Fleet Infrastructure Hub:</strong> Coordinates connections, routing, and operational status for the <code>${escapeHtml(node.service)}</code> subsystem.</p>
+          <p>Connected components: <strong>${connNodes.length}</strong> active fleet entities.</p>
+        `;
+      } else {
+        contentEl.innerHTML = '<span style="color:var(--text-muted);">Loading document body...</span>';
+        apiFetch(`/knowledge/${encodeURIComponent(node.id)}`).then(data => {
+          if (data && data.body) contentEl.innerHTML = renderMarkdown(data.body);
+        });
+      }
+
+      // Actions
+      const openFullBtn = document.getElementById('drawerOpenFullBtn');
+      const editBtn = document.getElementById('drawerEditBtn');
+      const centerBtn = document.getElementById('drawerCenterBtn');
+      const copyBtn = document.getElementById('drawerCopyBtn');
+
+      if (!isHub) {
+        openFullBtn.style.display = 'inline-block';
+        openFullBtn.onclick = () => { selectEntry(node.id); switchTab('search'); closeGraphDrawer(); };
+        editBtn.style.display = 'inline-block';
+        editBtn.onclick = () => { openEditModal(node.id); };
+      } else {
+        openFullBtn.style.display = 'none';
+        editBtn.style.display = 'none';
+      }
+
+      centerBtn.onclick = () => focusNode(node);
+      copyBtn.onclick = () => copyToClipboard(node.id, 'Key copied to clipboard');
+
+      drawer.classList.add('open');
+    }
+
+    function closeGraphDrawer() {
+      const drawer = document.getElementById('graphDrawer');
+      if (drawer) drawer.classList.remove('open');
+      App.drawerNode = null;
+    }
+
+    function focusNode(node) {
+      if (!node) return;
       focusedNode = node;
       const canvas = document.getElementById('topoCanvas');
       if (canvas) {
         const parent = canvas.parentElement;
-        const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
-        const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+        const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 960;
+        const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 640;
         const targetZoom = Math.max(1.3, camera.zoom);
         targetCamera = {
           x: width / 2 - node.x * targetZoom,
@@ -3013,78 +3609,19 @@
         };
       }
       reheatSimulation(0.35);
-      showNodeHud(node);
-    }
-
-    function showNodeHud(node, fixedPos = null) {
-      const hud = document.getElementById('nodeHud');
-      const canvas = document.getElementById('topoCanvas');
-      if (!hud || !node || !canvas) return;
-
-      const parent = canvas.parentElement;
-      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
-      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
-
-      const screenX = fixedPos ? fixedPos.x : (node.x * camera.zoom + camera.x);
-      const screenY = fixedPos ? fixedPos.y : (node.y * camera.zoom + camera.y);
-
-      const hudX = Math.min(width - 340, Math.max(20, screenX + 18));
-      const hudY = Math.min(height - 180, Math.max(20, screenY - 25));
-
-      hud.style.left = `${hudX}px`;
-      hud.style.top = `${hudY}px`;
-      hud.style.display = 'block';
-
-      const linksCount = App.graphLinks.filter(l => l.source === node || l.target === node).length;
-      const isHub = node.isHub;
-
-      hud.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
-          <div>
-            <span class="badge ${isHub ? (node.type === 'host' ? 'badge-task' : 'badge-knowledge') : (node.type === 'incident' ? 'badge-incident' : node.type === 'task' ? 'badge-task' : 'badge-knowledge')}">${node.type.toUpperCase()}</span>
-            <div style="font-weight:700; font-size:13px; color:#fff; margin-top:3px;">${escapeHtml(node.label)}</div>
-          </div>
-          <button onclick="closeNodeHud()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; padding:0 4px;" title="Close">✕</button>
-        </div>
-        <div style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${escapeHtml(node.id)}</div>
-        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
-          ${isHub ? (node.type === 'host' ? 'Fleet Infrastructure Host' : 'Fleet Service Gateway') : `Service: <strong style="color:#fff;">${escapeHtml(node.service || 'infrastructure')}</strong>`}
-          • <span style="color:var(--accent); font-weight:600;">${linksCount} connection(s)</span>
-        </div>
-        <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
-          ${!isHub ? `
-            <button class="node-hud-btn" onclick="selectEntry('${escapeHtml(node.id)}'); switchTab('search');">👁️ Open Record</button>
-            <button class="node-hud-btn" onclick="focusNodeById('${escapeHtml(node.id)}')">🎯 Center</button>
-            <button class="node-hud-btn" onclick="copyToClipboard('${escapeHtml(node.id)}', 'Key copied!')">📋 Copy Key</button>
-          ` : `
-            <button class="node-hud-btn" onclick="filterFleetByHub('${escapeHtml(node.id)}')">🔍 Filter Fleet</button>
-            <button class="node-hud-btn" onclick="focusNodeById('${escapeHtml(node.id)}')">🎯 Center Cluster</button>
-          `}
-        </div>
-      `;
-    }
-
-    function closeNodeHud() {
-      const hud = document.getElementById('nodeHud');
-      if (hud) hud.style.display = 'none';
-      focusedNode = null;
     }
 
     function focusNodeById(id) {
-      const n = App.graphNodes.find(item => item.id === id);
-      if (n) focusNode(n);
+      const n = (App.graphNodes || []).find(item => item.id === id);
+      if (n) {
+        focusNode(n);
+        openGraphDrawer(n);
+      }
     }
 
     function filterFleetByHub(hubId) {
       const term = hubId.replace(/^(svc|host):/, '');
-      const searchInput = document.getElementById('globalSearch');
-      if (searchInput) {
-        searchInput.value = term;
-        App.searchQuery = term;
-        renderKnowledgeList();
-        switchTab('search');
-        showToast(`Filtered fleet by "${term}"`, 'info');
-      }
+      setGlobalSearchQuery(term);
     }
 
     function setTopoSearch(query) {
@@ -3094,7 +3631,7 @@
       if (!topoSearchQuery) {
         countEl.style.display = 'none';
       } else {
-        const matches = App.graphNodes.filter(n =>
+        const matches = (App.graphNodes || []).filter(n =>
           n.label.toLowerCase().includes(topoSearchQuery) || n.id.toLowerCase().includes(topoSearchQuery)
         );
         countEl.textContent = `${matches.length} matching node(s)`;
@@ -3113,10 +3650,10 @@
       const canvas = document.getElementById('topoCanvas');
       if (!canvas) return;
       const parent = canvas.parentElement;
-      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
-      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 960;
+      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 640;
 
-      let visibleNodes = App.graphNodes;
+      let visibleNodes = App.graphNodes || [];
       if (App.graphFilter !== 'all') {
         visibleNodes = visibleNodes.filter(n => n.isHub || n.type === App.graphFilter);
       }
@@ -3130,7 +3667,7 @@
         if (n.y > maxY) maxY = n.y;
       });
 
-      const pad = 100;
+      const pad = 120;
       const bw = Math.max(100, (maxX - minX) + pad * 2);
       const bh = Math.max(100, (maxY - minY) + pad * 2);
       const midX = (minX + maxX) / 2;
@@ -3146,11 +3683,11 @@
     }
 
     function zoomGraph(factor) {
-      const newZoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
+      const newZoom = Math.min(3.2, Math.max(0.25, camera.zoom * factor));
       const canvas = document.getElementById('topoCanvas');
       const parent = canvas ? canvas.parentElement : null;
-      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
-      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 960;
+      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 640;
       targetCamera = {
         x: (width / 2) - ((width / 2) - camera.x) * (newZoom / camera.zoom),
         y: (height / 2) - ((height / 2) - camera.y) * (newZoom / camera.zoom),
@@ -3176,9 +3713,13 @@
     window.focusNodeById = focusNodeById;
     window.filterFleetByHub = filterFleetByHub;
     window.fitGraphCamera = fitGraphCamera;
+    window.zoomGraph = zoomGraph;
+    window.resetGraphCamera = resetGraphCamera;
     window.reheatSimulation = reheatSimulation;
-    window.showNodeHud = showNodeHud;
-    window.closeNodeHud = closeNodeHud;
+    window.setGraphLayout = setGraphLayout;
+    window.unpinAllGraphNodes = unpinAllGraphNodes;
+    window.openGraphDrawer = openGraphDrawer;
+    window.closeGraphDrawer = closeGraphDrawer;
 
     // Modal Helpers
     function openModal(id) {

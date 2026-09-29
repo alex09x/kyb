@@ -131,6 +131,7 @@ fn api_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(web::serve_ui))
         .route("/api/audit", get(web::api_audit))
+        .route("/api/activity", get(web::api_activity))
         .route("/healthz", get(healthz))
         .route("/knowledge", post(upsert))
         .route("/knowledge/{key}", get(get_one).delete(remove))
