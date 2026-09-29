@@ -744,17 +744,32 @@
 
     .node-hud {
       position: absolute;
-      pointer-events: none;
-      background: rgba(17, 21, 32, 0.95);
-      border: 1px solid var(--accent);
-      border-radius: 6px;
-      padding: 8px 12px;
+      pointer-events: auto;
+      background: rgba(13, 17, 26, 0.94);
+      border: 1px solid rgba(0, 229, 255, 0.4);
+      border-radius: 8px;
+      padding: 12px 14px;
       font-size: 12px;
       color: #fff;
       display: none;
-      z-index: 20;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-      max-width: 320px;
+      z-index: 30;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 15px rgba(0, 229, 255, 0.2);
+      backdrop-filter: blur(14px);
+      max-width: 340px;
+    }
+    .node-hud-btn {
+      background: rgba(0, 229, 255, 0.15);
+      border: 1px solid rgba(0, 229, 255, 0.35);
+      color: #00e5ff;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.1s ease;
+    }
+    .node-hud-btn:hover {
+      background: rgba(0, 229, 255, 0.35);
     }
 
     /* ========================================================
@@ -1238,7 +1253,15 @@
           <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Knowledge Articles</div>
           <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Fleet Incidents</div>
           <div class="graph-legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Agent Tasks</div>
-          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:2px; font-size:11px; color: var(--text-dim);">
+          <div class="graph-legend-item"><span class="legend-color" style="background:#00e5ff; border:1px solid #fff;"></span> Service Hubs (⚙️)</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#a855f7; border-radius:2px;"></span> Host Hubs (🖥️)</div>
+
+          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
+            <input type="text" id="topoSearchInput" class="form-input" style="padding:4px 8px; font-size:11px; height:26px; border-radius:4px; width:100%;" placeholder="🔍 Highlight in graph..." oninput="setTopoSearch(this.value)">
+            <div id="topoSearchCount" style="font-size:10px; color:var(--accent); margin-top:3px; display:none;"></div>
+          </div>
+
+          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:4px; font-size:11px; color: var(--text-dim);">
             <span>Filter Graph:</span>
             <div style="display:flex; gap:4px; margin-top:4px;">
               <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
@@ -1250,8 +1273,9 @@
         </div>
 
         <div class="graph-controls-bar">
-          <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">⏸ Pause</button>
-          <button class="btn sm" onclick="zoomGraph(1.2)">➕ Zoom</button>
+          <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">⚡ Reheat</button>
+          <button class="btn sm" onclick="fitGraphCamera()">🎯 Fit All</button>
+          <button class="btn sm" onclick="zoomGraph(1.25)">➕ Zoom</button>
           <button class="btn sm" onclick="zoomGraph(0.8)">➖ Zoom</button>
           <button class="btn sm" onclick="resetGraphCamera()">⟲ Reset</button>
         </div>
@@ -2391,13 +2415,21 @@
         if (svc) serviceSet.add(svc.toLowerCase().trim());
       });
 
+      // Existing node positions map to prevent jumping on refresh
+      const existingPosMap = new Map();
+      if (App.graphNodes) {
+        App.graphNodes.forEach(n => existingPosMap.set(n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy }));
+      }
+
       // 2. Add Host Hub Nodes (Square, Purple)
       let hostIdx = 0;
       const hostCount = hostSet.size || 1;
       hostSet.forEach(host => {
         const angle = (hostIdx / hostCount) * 2 * Math.PI;
+        const id = 'host:' + host;
+        const prev = existingPosMap.get(id);
         const hub = {
-          id: 'host:' + host,
+          id: id,
           label: '🖥️ ' + host,
           type: 'host',
           service: host,
@@ -2405,10 +2437,10 @@
           color: '#a855f7',
           shape: 'square',
           isHub: true,
-          x: 400 + Math.cos(angle) * 280,
-          y: 300 + Math.sin(angle) * 220,
-          vx: 0,
-          vy: 0,
+          x: prev ? prev.x : 450 + Math.cos(angle) * 320,
+          y: prev ? prev.y : 350 + Math.sin(angle) * 240,
+          vx: prev ? prev.vx : 0,
+          vy: prev ? prev.vy : 0,
           pinned: false
         };
         nodes.push(hub);
@@ -2421,8 +2453,10 @@
       const svcCount = serviceSet.size || 1;
       serviceSet.forEach(svc => {
         const angle = (svcIdx / svcCount) * 2 * Math.PI + 0.3;
+        const id = 'svc:' + svc;
+        const prev = existingPosMap.get(id);
         const hub = {
-          id: 'svc:' + svc,
+          id: id,
           label: '⚙️ ' + svc.toUpperCase(),
           type: 'service',
           service: svc,
@@ -2430,10 +2464,10 @@
           color: '#00e5ff',
           shape: 'circle',
           isHub: true,
-          x: 400 + Math.cos(angle) * 160,
-          y: 300 + Math.sin(angle) * 130,
-          vx: 0,
-          vy: 0,
+          x: prev ? prev.x : 450 + Math.cos(angle) * 180,
+          y: prev ? prev.y : 350 + Math.sin(angle) * 140,
+          vx: prev ? prev.vx : 0,
+          vy: prev ? prev.vy : 0,
           pinned: false
         };
         nodes.push(hub);
@@ -2441,11 +2475,24 @@
         svcIdx++;
       });
 
-      // 4. Add Entry Nodes
+      // 4. Add Entry Nodes (Clustered around their parent Service Hub)
       App.entries.forEach(e => {
         const isInc = e.kind === 'incident';
         const isTask = e.kind === 'task';
         const svc = (e.service || (e.tags && e.tags[0]) || 'system').toLowerCase();
+        const prev = existingPosMap.get(e.key);
+
+        let startX, startY;
+        if (prev) {
+          startX = prev.x;
+          startY = prev.y;
+        } else {
+          const parentHub = nodeMap.get('svc:' + svc);
+          const orbitAngle = Math.random() * 2 * Math.PI;
+          const orbitDist = 55 + Math.random() * 75;
+          startX = parentHub ? parentHub.x + Math.cos(orbitAngle) * orbitDist : 450 + (Math.random() - 0.5) * 360;
+          startY = parentHub ? parentHub.y + Math.sin(orbitAngle) * orbitDist : 350 + (Math.random() - 0.5) * 280;
+        }
 
         const node = {
           id: e.key,
@@ -2456,10 +2503,10 @@
           color: isInc ? '#ef4444' : isTask ? '#f59e0b' : '#00b3c4',
           shape: 'circle',
           isHub: false,
-          x: 400 + (Math.random() - 0.5) * 350,
-          y: 300 + (Math.random() - 0.5) * 280,
-          vx: 0,
-          vy: 0,
+          x: startX,
+          y: startY,
+          vx: prev ? prev.vx : 0,
+          vy: prev ? prev.vy : 0,
           pinned: false
         };
         nodes.push(node);
@@ -2518,16 +2565,27 @@
 
     let graphAnimId = null;
     let camera = { x: 0, y: 0, zoom: 1 };
+    let targetCamera = null;
     let draggedNode = null;
     let hoveredNode = null;
+    let focusedNode = null;
     let isPanning = false;
     let panStart = { x: 0, y: 0 };
+    let didDragOrPan = false;
+    let simulationAlpha = 1.0;
+    let animTick = 0;
+    let topoSearchQuery = '';
+
+    function reheatSimulation(alpha = 0.8) {
+      simulationAlpha = Math.max(simulationAlpha, alpha);
+    }
 
     function initCanvasGraph() {
       const canvas = document.getElementById('topoCanvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const hud = document.getElementById('nodeHud');
+
       function checkResize() {
         const parent = canvas.parentElement;
         if (!parent) return;
@@ -2551,6 +2609,22 @@
         const parent = canvas.parentElement;
         const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
         const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+        animTick += 0.035;
+
+        // Smooth Cinematic Camera Lerp
+        if (targetCamera) {
+          camera.x += (targetCamera.x - camera.x) * 0.12;
+          camera.y += (targetCamera.y - camera.y) * 0.12;
+          camera.zoom += (targetCamera.zoom - camera.zoom) * 0.12;
+          if (Math.abs(targetCamera.x - camera.x) < 0.4 &&
+              Math.abs(targetCamera.y - camera.y) < 0.4 &&
+              Math.abs(targetCamera.zoom - camera.zoom) < 0.002) {
+            camera.x = targetCamera.x;
+            camera.y = targetCamera.y;
+            camera.zoom = targetCamera.zoom;
+            targetCamera = null;
+          }
+        }
 
         let visibleNodes = App.graphNodes;
         if (App.graphFilter !== 'all') {
@@ -2559,16 +2633,17 @@
         const visibleNodeSet = new Set(visibleNodes);
         const visibleLinks = App.graphLinks.filter(l => visibleNodeSet.has(l.source) && visibleNodeSet.has(l.target));
 
-        if (App.graphPhysics) {
-          // Repulsion (Coulomb with normalized vector)
+        // Physics Simulation with Temperature Alpha Cooling (Halts completely to eliminate jitter)
+        if (App.graphPhysics && simulationAlpha > 0.002) {
+          // Repulsion
           for (let i = 0; i < visibleNodes.length; i++) {
             for (let j = i + 1; j < visibleNodes.length; j++) {
               const dx = visibleNodes[j].x - visibleNodes[i].x;
               const dy = visibleNodes[j].y - visibleNodes[i].y;
               const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-              const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 180 : 100;
+              const minDist = (visibleNodes[i].isHub || visibleNodes[j].isHub) ? 170 : 95;
               if (dist < minDist) {
-                const repForce = Math.min(10, (minDist - dist) / dist * 1.5);
+                const repForce = Math.min(8, (minDist - dist) / dist * 1.3) * simulationAlpha;
                 const fx = (dx / dist) * repForce;
                 const fy = (dy / dist) * repForce;
                 if (!visibleNodes[i].pinned) { visibleNodes[i].vx -= fx; visibleNodes[i].vy -= fy; }
@@ -2577,14 +2652,14 @@
             }
           }
 
-          // Attraction (Hooke's law with linear normalized unit vector & damping)
+          // Attraction along links
           visibleLinks.forEach(l => {
             const dx = l.target.x - l.source.x;
             const dy = l.target.y - l.source.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const idealDist = (l.source.isHub || l.target.isHub) ? 130 : 75;
+            const idealDist = (l.source.isHub || l.target.isHub) ? 125 : 70;
             const displacement = dist - idealDist;
-            const force = Math.max(-8, Math.min(8, displacement * 0.02));
+            const force = Math.max(-6, Math.min(6, displacement * 0.025)) * simulationAlpha;
             const fx = (dx / dist) * force;
             const fy = (dy / dist) * force;
 
@@ -2592,18 +2667,18 @@
             if (!l.target.pinned) { l.target.vx -= fx; l.target.vy -= fy; }
           });
 
-          // Center gravity and velocity damping with hard speed cap
+          // Center gravity and velocity damping
           const cx = width / 2;
           const cy = height / 2;
-          const maxSpeed = 7;
+          const maxSpeed = 6 * simulationAlpha;
           visibleNodes.forEach(n => {
             if (!n.pinned) {
-              n.vx += (cx - n.x) * 0.0015;
-              n.vy += (cy - n.y) * 0.0015;
-              n.vx *= 0.86;
-              n.vy *= 0.86;
+              n.vx += (cx - n.x) * 0.001 * simulationAlpha;
+              n.vy += (cy - n.y) * 0.001 * simulationAlpha;
+              n.vx *= 0.84;
+              n.vy *= 0.84;
               const speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy) || 1;
-              if (speed > maxSpeed) {
+              if (speed > maxSpeed && maxSpeed > 0.001) {
                 n.vx = (n.vx / speed) * maxSpeed;
                 n.vy = (n.vy / speed) * maxSpeed;
               }
@@ -2611,30 +2686,126 @@
               if (!isNaN(n.vy)) n.y += n.vy;
             }
           });
+
+          // Exponential cooling
+          simulationAlpha *= 0.965;
+          if (simulationAlpha <= 0.002) {
+            simulationAlpha = 0;
+            visibleNodes.forEach(n => { n.vx = 0; n.vy = 0; });
+          }
         }
 
-        // Render with Camera Transform
+        // Active Focus & Neighborhood Spotlight Calculation
+        const activeNode = focusedNode || hoveredNode;
+        let connectedNodeSet = null;
+        let activeLinks = [];
+        if (activeNode) {
+          connectedNodeSet = new Set([activeNode]);
+          visibleLinks.forEach(l => {
+            if (l.source === activeNode) {
+              connectedNodeSet.add(l.target);
+              activeLinks.push(l);
+            } else if (l.target === activeNode) {
+              connectedNodeSet.add(l.source);
+              activeLinks.push(l);
+            }
+          });
+        }
+
+        // Render Canvas with Camera Transform
         ctx.save();
         ctx.clearRect(0, 0, width, height);
         ctx.translate(camera.x, camera.y);
         ctx.scale(camera.zoom, camera.zoom);
 
-        // Draw Links
+        // 1. Draw Links
         visibleLinks.forEach(l => {
-          const isHigh = hoveredNode && (l.source === hoveredNode || l.target === hoveredNode);
+          const isActive = activeNode && (l.source === activeNode || l.target === activeNode);
           ctx.beginPath();
           ctx.moveTo(l.source.x, l.source.y);
           ctx.lineTo(l.target.x, l.target.y);
-          ctx.strokeStyle = isHigh ? 'rgba(0, 179, 196, 0.8)' : (l.target.isHub || l.source.isHub ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.06)');
-          ctx.lineWidth = isHigh ? 2.2 : (l.target.isHub || l.source.isHub ? 1.2 : 0.8);
+
+          if (activeNode) {
+            if (isActive) {
+              ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
+              ctx.lineWidth = 2.4;
+              ctx.shadowColor = '#00e5ff';
+              ctx.shadowBlur = 8;
+            } else {
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
+              ctx.lineWidth = 0.6;
+              ctx.shadowBlur = 0;
+            }
+          } else {
+            const isHubLink = l.target.isHub || l.source.isHub;
+            ctx.strokeStyle = isHubLink ? 'rgba(0, 229, 255, 0.16)' : 'rgba(255, 255, 255, 0.07)';
+            ctx.lineWidth = isHubLink ? 1.2 : 0.8;
+            ctx.shadowBlur = 0;
+          }
           ctx.stroke();
+          ctx.shadowBlur = 0;
         });
 
-        // Draw Nodes
-        visibleNodes.forEach(n => {
-          const isHovered = n === hoveredNode;
-          const r = n.radius + (isHovered ? 4 : 0);
+        // 2. Draw Animated Photon Energy Pulses Streaming Along Active Links
+        if (activeLinks.length > 0) {
+          activeLinks.forEach((l, idx) => {
+            const pulseT = (animTick * 1.2 + idx * 0.22) % 1.0;
+            const px = l.source.x + (l.target.x - l.source.x) * pulseT;
+            const py = l.source.y + (l.target.y - l.source.y) * pulseT;
+            ctx.beginPath();
+            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = '#00e5ff';
+            ctx.shadowBlur = 10;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+          });
+        }
 
+        // 3. Draw Nodes
+        visibleNodes.forEach(n => {
+          const isCurrentActive = n === activeNode;
+          const isConnected = connectedNodeSet ? connectedNodeSet.has(n) : true;
+          const isSearchMatch = topoSearchQuery && (n.label.toLowerCase().includes(topoSearchQuery) || n.id.toLowerCase().includes(topoSearchQuery));
+
+          // Calculate node opacity based on focus and search
+          let alpha = 1.0;
+          if (activeNode) {
+            alpha = isConnected ? 1.0 : 0.12;
+          }
+          if (topoSearchQuery) {
+            alpha = isSearchMatch ? 1.0 : Math.min(alpha, 0.18);
+          }
+          ctx.globalAlpha = alpha;
+
+          const r = n.radius + (isCurrentActive ? 4 : 0);
+
+          // Pulsating Sonar Radar Rings for Search Matches
+          if (isSearchMatch) {
+            for (let rIdx = 0; rIdx < 2; rIdx++) {
+              const ringProgress = (animTick * 1.4 + rIdx * 0.5) % 1.0;
+              const ringRadius = r + ringProgress * 26;
+              const ringAlpha = (1 - ringProgress) * 0.9;
+              ctx.beginPath();
+              ctx.arc(n.x, n.y, ringRadius, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(0, 229, 255, ${ringAlpha})`;
+              ctx.lineWidth = 1.8;
+              ctx.stroke();
+            }
+          }
+
+          // Pulsating Halo on Focused Node
+          if (n === focusedNode) {
+            const haloProgress = (Math.sin(animTick * 3) + 1) / 2;
+            const haloRadius = r + 6 + haloProgress * 4;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, haloRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(0, 229, 255, ${0.4 + haloProgress * 0.4})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          // Draw Node Geometry
           ctx.beginPath();
           if (n.shape === 'square') {
             const s = r * 2;
@@ -2655,23 +2826,26 @@
           }
           ctx.fillStyle = n.color;
           ctx.shadowColor = n.color;
-          ctx.shadowBlur = isHovered ? 16 : (n.isHub ? 10 : 4);
+          ctx.shadowBlur = isCurrentActive ? 20 : (n.isHub ? 12 : 5);
           ctx.fill();
           ctx.shadowBlur = 0;
 
           if (n.isHub) {
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = isHovered ? 2.5 : 1.5;
+            ctx.lineWidth = isCurrentActive ? 2.5 : 1.5;
             ctx.stroke();
           }
 
-          // Label
-          ctx.fillStyle = isHovered ? '#00b3c4' : (n.isHub ? '#ffffff' : '#f0f4fa');
-          ctx.font = `${isHovered || n.isHub ? 'bold ' : ''}${n.isHub ? '12px' : '11px'} ui-monospace, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText(n.label.slice(0, 24), n.x, n.y + r + 13);
+          // Node Text Label
+          if (alpha > 0.3) {
+            ctx.fillStyle = isCurrentActive ? '#00e5ff' : (n.isHub ? '#ffffff' : '#f0f4fa');
+            ctx.font = `${isCurrentActive || n.isHub ? 'bold ' : ''}${n.isHub ? '12px' : '11px'} ui-monospace, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText(n.label.slice(0, 24), n.x, n.y + r + 13);
+          }
         });
 
+        ctx.globalAlpha = 1.0;
         ctx.restore();
         graphAnimId = requestAnimationFrame(step);
       }
@@ -2691,6 +2865,7 @@
 
       canvas.onmousedown = (e) => {
         const { mx, my, gx, gy } = getGraphPos(e);
+        didDragOrPan = false;
         let clicked = null;
         for (const n of App.graphNodes) {
           const dx = n.x - gx;
@@ -2703,6 +2878,7 @@
         if (clicked) {
           draggedNode = clicked;
           draggedNode.pinned = true;
+          reheatSimulation(0.4);
         } else {
           isPanning = true;
           panStart = { x: mx - camera.x, y: my - camera.y };
@@ -2713,12 +2889,16 @@
         const { mx, my, gx, gy } = getGraphPos(e);
 
         if (draggedNode) {
+          didDragOrPan = true;
           draggedNode.x = gx;
           draggedNode.y = gy;
+          reheatSimulation(0.25);
+          if (focusedNode === draggedNode) showNodeHud(draggedNode);
           return;
         }
 
         if (isPanning) {
+          didDragOrPan = true;
           camera.x = mx - panStart.x;
           camera.y = my - panStart.y;
           return;
@@ -2735,20 +2915,14 @@
           }
         }
         hoveredNode = found;
+        canvas.style.cursor = found ? 'pointer' : (isPanning ? 'grabbing' : 'grab');
 
-        if (found) {
-          hud.style.display = 'block';
-          hud.style.left = `${mx + 15}px`;
-          hud.style.top = `${my - 15}px`;
-          const linksCount = App.graphLinks.filter(l => l.source === found || l.target === found).length;
-          hud.innerHTML = `
-            <div style="font-weight:700; color:${found.color}; margin-bottom:2px;">${found.type.toUpperCase()}: ${escapeHtml(found.label)}</div>
-            <div style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim);">${found.id}</div>
-            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${found.isHub ? 'Infrastructure Hub' : 'Service: ' + found.service} • ${linksCount} link(s)</div>
-            ${!found.isHub ? `<div style="font-size:10px; color:var(--accent); margin-top:4px; font-weight:600;">Double-click to inspect entry →</div>` : `<div style="font-size:10px; color:#a78bfa; margin-top:4px; font-weight:600;">Double-click to filter fleet →</div>`}
-          `;
-        } else {
-          hud.style.display = 'none';
+        if (!focusedNode) {
+          if (found) {
+            showNodeHud(found, { x: mx, y: my });
+          } else {
+            hud.style.display = 'none';
+          }
         }
       };
 
@@ -2758,12 +2932,32 @@
           draggedNode = null;
         }
         isPanning = false;
+        canvas.style.cursor = 'grab';
+      };
+
+      canvas.onclick = (e) => {
+        if (didDragOrPan) return;
+        const { mx, my, gx, gy } = getGraphPos(e);
+        let clicked = null;
+        for (const n of App.graphNodes) {
+          const dx = n.x - gx;
+          const dy = n.y - gy;
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
+            clicked = n;
+            break;
+          }
+        }
+        if (clicked) {
+          focusNode(clicked);
+        } else {
+          closeNodeHud();
+        }
       };
 
       canvas.onwheel = (e) => {
         e.preventDefault();
         const { mx, my } = getGraphPos(e);
-        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        const factor = e.deltaY < 0 ? 1.15 : 0.85;
         const newZoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
         camera.x = mx - (mx - camera.x) * (newZoom / camera.zoom);
         camera.y = my - (my - camera.y) * (newZoom / camera.zoom);
@@ -2777,14 +2971,7 @@
           const dy = n.y - gy;
           if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 6) {
             if (n.isHub) {
-              const searchInput = document.getElementById('globalSearch');
-              if (searchInput) {
-                const term = n.id.replace(/^(svc|host):/, '');
-                searchInput.value = term;
-                App.searchQuery = term;
-                renderKnowledgeList();
-                switchTab('search');
-              }
+              filterFleetByHub(n.id);
             } else {
               selectEntry(n.id);
               switchTab('search');
@@ -2795,19 +2982,172 @@
       };
     }
 
+    function focusNode(node) {
+      if (!node) {
+        closeNodeHud();
+        return;
+      }
+      focusedNode = node;
+      const canvas = document.getElementById('topoCanvas');
+      if (canvas) {
+        const parent = canvas.parentElement;
+        const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
+        const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+        const targetZoom = Math.max(1.3, camera.zoom);
+        targetCamera = {
+          x: width / 2 - node.x * targetZoom,
+          y: height / 2 - node.y * targetZoom,
+          zoom: targetZoom
+        };
+      }
+      reheatSimulation(0.35);
+      showNodeHud(node);
+    }
+
+    function showNodeHud(node, fixedPos = null) {
+      const hud = document.getElementById('nodeHud');
+      const canvas = document.getElementById('topoCanvas');
+      if (!hud || !node || !canvas) return;
+
+      const parent = canvas.parentElement;
+      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
+      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+
+      const screenX = fixedPos ? fixedPos.x : (node.x * camera.zoom + camera.x);
+      const screenY = fixedPos ? fixedPos.y : (node.y * camera.zoom + camera.y);
+
+      const hudX = Math.min(width - 340, Math.max(20, screenX + 18));
+      const hudY = Math.min(height - 180, Math.max(20, screenY - 25));
+
+      hud.style.left = `${hudX}px`;
+      hud.style.top = `${hudY}px`;
+      hud.style.display = 'block';
+
+      const linksCount = App.graphLinks.filter(l => l.source === node || l.target === node).length;
+      const isHub = node.isHub;
+
+      hud.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+          <div>
+            <span class="badge ${isHub ? (node.type === 'host' ? 'badge-task' : 'badge-knowledge') : (node.type === 'incident' ? 'badge-incident' : node.type === 'task' ? 'badge-task' : 'badge-knowledge')}">${node.type.toUpperCase()}</span>
+            <div style="font-weight:700; font-size:13px; color:#fff; margin-top:3px;">${escapeHtml(node.label)}</div>
+          </div>
+          <button onclick="closeNodeHud()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; padding:0 4px;" title="Close">✕</button>
+        </div>
+        <div style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${escapeHtml(node.id)}</div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+          ${isHub ? (node.type === 'host' ? 'Fleet Infrastructure Host' : 'Fleet Service Gateway') : `Service: <strong style="color:#fff;">${escapeHtml(node.service || 'infrastructure')}</strong>`}
+          • <span style="color:var(--accent); font-weight:600;">${linksCount} connection(s)</span>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+          ${!isHub ? `
+            <button class="node-hud-btn" onclick="selectEntry('${escapeHtml(node.id)}'); switchTab('search');">👁️ Open Record</button>
+            <button class="node-hud-btn" onclick="focusNodeById('${escapeHtml(node.id)}')">🎯 Center</button>
+            <button class="node-hud-btn" onclick="copyToClipboard('${escapeHtml(node.id)}', 'Key copied!')">📋 Copy Key</button>
+          ` : `
+            <button class="node-hud-btn" onclick="filterFleetByHub('${escapeHtml(node.id)}')">🔍 Filter Fleet</button>
+            <button class="node-hud-btn" onclick="focusNodeById('${escapeHtml(node.id)}')">🎯 Center Cluster</button>
+          `}
+        </div>
+      `;
+    }
+
+    function closeNodeHud() {
+      const hud = document.getElementById('nodeHud');
+      if (hud) hud.style.display = 'none';
+      focusedNode = null;
+    }
+
+    function focusNodeById(id) {
+      const n = App.graphNodes.find(item => item.id === id);
+      if (n) focusNode(n);
+    }
+
+    function filterFleetByHub(hubId) {
+      const term = hubId.replace(/^(svc|host):/, '');
+      const searchInput = document.getElementById('globalSearch');
+      if (searchInput) {
+        searchInput.value = term;
+        App.searchQuery = term;
+        renderKnowledgeList();
+        switchTab('search');
+        showToast(`Filtered fleet by "${term}"`, 'info');
+      }
+    }
+
+    function setTopoSearch(query) {
+      topoSearchQuery = (query || '').trim().toLowerCase();
+      const countEl = document.getElementById('topoSearchCount');
+      if (!countEl) return;
+      if (!topoSearchQuery) {
+        countEl.style.display = 'none';
+      } else {
+        const matches = App.graphNodes.filter(n =>
+          n.label.toLowerCase().includes(topoSearchQuery) || n.id.toLowerCase().includes(topoSearchQuery)
+        );
+        countEl.textContent = `${matches.length} matching node(s)`;
+        countEl.style.display = 'block';
+        reheatSimulation(0.3);
+      }
+    }
+
     function toggleGraphPhysics() {
-      App.graphPhysics = !App.graphPhysics;
-      const btn = document.getElementById('pausePhysicsBtn');
-      btn.textContent = App.graphPhysics ? '⏸ Pause' : '▶ Resume';
-      btn.classList.toggle('primary', !App.graphPhysics);
+      App.graphPhysics = true;
+      reheatSimulation(1.0);
+      showToast('⚡ Physics simulation reheated', 'info');
+    }
+
+    function fitGraphCamera() {
+      const canvas = document.getElementById('topoCanvas');
+      if (!canvas) return;
+      const parent = canvas.parentElement;
+      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
+      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+
+      let visibleNodes = App.graphNodes;
+      if (App.graphFilter !== 'all') {
+        visibleNodes = visibleNodes.filter(n => n.isHub || n.type === App.graphFilter);
+      }
+      if (!visibleNodes.length) return;
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      visibleNodes.forEach(n => {
+        if (n.x < minX) minX = n.x;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.y > maxY) maxY = n.y;
+      });
+
+      const pad = 100;
+      const bw = Math.max(100, (maxX - minX) + pad * 2);
+      const bh = Math.max(100, (maxY - minY) + pad * 2);
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+
+      const targetZoom = Math.min(2.0, Math.max(0.35, Math.min(width / bw, height / bh)));
+      targetCamera = {
+        x: width / 2 - midX * targetZoom,
+        y: height / 2 - midY * targetZoom,
+        zoom: targetZoom
+      };
+      showToast('🎯 Centered fleet topology', 'info');
     }
 
     function zoomGraph(factor) {
-      camera.zoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
+      const newZoom = Math.min(3, Math.max(0.3, camera.zoom * factor));
+      const canvas = document.getElementById('topoCanvas');
+      const parent = canvas ? canvas.parentElement : null;
+      const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
+      const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
+      targetCamera = {
+        x: (width / 2) - ((width / 2) - camera.x) * (newZoom / camera.zoom),
+        y: (height / 2) - ((height / 2) - camera.y) * (newZoom / camera.zoom),
+        zoom: newZoom
+      };
     }
 
     function resetGraphCamera() {
-      camera = { x: 0, y: 0, zoom: 1 };
+      fitGraphCamera();
     }
 
     function setGraphFilter(filter) {
@@ -2816,6 +3156,7 @@
         const btn = document.getElementById(`gFilter${name}`);
         if (btn) btn.classList.toggle('active', name.toLowerCase() === filter || (filter === 'incident' && name === 'Incidents') || (filter === 'task' && name === 'Tasks'));
       });
+      reheatSimulation(0.7);
     }
 
     // Modal Helpers
