@@ -2366,7 +2366,7 @@
         bodyEl.innerHTML = `
           <div class="form-group">
             <label class="form-label">Incident Title *</label>
-            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Redis out of memory on booster" oninput="autoSlugIncident(this.value)">
+            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Redis out of memory on cache-01" oninput="autoSlugIncident(this.value)">
           </div>
           <div class="form-group">
             <label class="form-label">Incident Key *</label>
@@ -2389,7 +2389,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Impacted Hosts (comma-separated)</label>
-            <input type="text" class="form-input" id="newHosts" placeholder="booster, ram9">
+            <input type="text" class="form-input" id="newHosts" placeholder="cache-01, worker-02">
           </div>
           <div class="form-group">
             <label class="form-label">Incident Summary & Detection Check *</label>
