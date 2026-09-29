@@ -2528,18 +2528,29 @@
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const hud = document.getElementById('nodeHud');
-
-      function resize() {
-        if (!canvas.parentElement) return;
-        canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio;
-        canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio;
-        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      function checkResize() {
+        const parent = canvas.parentElement;
+        if (!parent) return;
+        const w = parent.clientWidth;
+        const h = parent.clientHeight;
+        if (w > 0 && h > 0) {
+          const targetW = Math.floor(w * window.devicePixelRatio);
+          const targetH = Math.floor(h * window.devicePixelRatio);
+          if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+          }
+        }
       }
-      resize();
+      checkResize();
 
       function step() {
-        const width = canvas.parentElement?.clientWidth || 800;
-        const height = canvas.parentElement?.clientHeight || 600;
+        checkResize();
+        const parent = canvas.parentElement;
+        const width = (parent && parent.clientWidth > 0) ? parent.clientWidth : 900;
+        const height = (parent && parent.clientHeight > 0) ? parent.clientHeight : 600;
 
         let visibleNodes = App.graphNodes;
         if (App.graphFilter !== 'all') {
