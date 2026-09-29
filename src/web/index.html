@@ -1,0 +1,1570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KYB — Fleet Memory & Control Room</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23111520'/><path d='M8 7h4v7l6-7h5l-7 7.5L24 25h-5l-6-8.5V25H8V7z' fill='%2300b3c4'/></svg>">
+  <style>
+    :root {
+      --bg: #090b10;
+      --card: #111520;
+      --card-hover: #151b29;
+      --card-subtle: #0d1017;
+      --border: #1e2638;
+      --border-focus: #00b3c4;
+      --accent: #00b3c4;
+      --accent-glow: rgba(0, 179, 196, 0.2);
+      --accent-dim: rgba(0, 179, 196, 0.08);
+      --text: #f0f4fa;
+      --text-dim: #8b9cb6;
+      --text-muted: #54647c;
+      --red: #ef4444;
+      --red-dim: rgba(239, 68, 68, 0.12);
+      --amber: #f59e0b;
+      --amber-dim: rgba(245, 158, 11, 0.12);
+      --green: #10b981;
+      --green-dim: rgba(16, 185, 129, 0.12);
+      --purple: #8b5cf6;
+      --purple-dim: rgba(139, 92, 246, 0.12);
+      --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-focus); }
+
+    /* Header */
+    header {
+      background: rgba(17, 21, 32, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .brand-logo {
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: 1px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+    .brand-title {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: -0.2px;
+    }
+    .live-pulse {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--green);
+      background: var(--green-dim);
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+    }
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      background: var(--green);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    /* Tabs */
+    .nav-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .nav-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+    .nav-tab:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .nav-tab.active {
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid rgba(0, 179, 196, 0.25);
+    }
+    .tab-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: var(--border);
+      color: var(--text);
+    }
+    .tab-badge.red { background: var(--red); color: #fff; }
+    .tab-badge.amber { background: var(--amber); color: #000; }
+    .tab-badge.teal { background: var(--accent); color: #000; font-weight: 700; }
+
+    /* Header Controls */
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .search-box {
+      position: relative;
+      width: 280px;
+    }
+    .search-input {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 13px;
+      padding: 7px 12px 7px 32px;
+      border-radius: 6px;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .kbd-shortcut {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      background: var(--border);
+      color: var(--text-muted);
+      padding: 2px 5px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    /* Subheader Stats */
+    .stats-bar {
+      background: var(--card-subtle);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 12px;
+      color: var(--text-dim);
+      overflow-x: auto;
+    }
+    .stat-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .stat-val {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text);
+    }
+    .stat-val.accent { color: var(--accent); }
+    .stat-val.red { color: var(--red); }
+    .stat-val.green { color: var(--green); }
+    .stat-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      padding: 24px;
+      max-width: 1600px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.15s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* Buttons */
+    .btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { background: var(--card-hover); border-color: var(--border-light); }
+    .btn.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
+    .btn.primary:hover { filter: brightness(1.1); box-shadow: 0 0 10px var(--accent-glow); }
+    .btn.sm { padding: 4px 8px; font-size: 11px; }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge-knowledge { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0, 179, 196, 0.3); }
+    .badge-incident { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-task { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(139, 92, 246, 0.3); }
+    .badge-open { background: var(--red); color: #fff; }
+    .badge-mitigated { background: var(--amber); color: #000; }
+    .badge-resolved { background: var(--green); color: #fff; }
+    .badge-blocked { background: var(--amber); color: #000; }
+    .badge-in_progress { background: var(--accent); color: #000; }
+    .badge-done { background: var(--green); color: #fff; }
+    .badge-tag {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .badge-tag:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* ========================================================
+       TAB 1: KNOWLEDGE & SEARCH (Two-Pane)
+       ======================================================== */
+    .explorer-layout {
+      display: grid;
+      grid-template-columns: 440px 1fr;
+      gap: 20px;
+      height: calc(100vh - 180px);
+      min-height: 600px;
+    }
+    @media (max-width: 1024px) {
+      .explorer-layout { grid-template-columns: 1fr; height: auto; }
+    }
+
+    .explorer-pane {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .pane-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .filter-chips {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .chip {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .chip:hover, .chip.active {
+      color: var(--text);
+      background: var(--border);
+      border-color: var(--text-dim);
+    }
+    .chip.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+    .pane-list {
+      flex: 1;
+      overflow-y: auto;
+      divide-y: 1px solid var(--border);
+    }
+    .item-card {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.12s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .item-card:hover { background: var(--card-hover); }
+    .item-card.selected {
+      background: var(--card-hover);
+      border-left: 3px solid var(--accent);
+    }
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .item-title {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .item-key {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent);
+    }
+    .item-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Detail Pane */
+    .detail-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      gap: 12px;
+      text-align: center;
+      padding: 40px;
+    }
+    .detail-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card-subtle);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .detail-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 8px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card-subtle);
+    }
+    .detail-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .detail-tab.active { background: var(--border); color: var(--text); }
+    .detail-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    /* Markdown prose styles */
+    .prose {
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--text);
+      max-width: 900px;
+    }
+    .prose h1, .prose h2, .prose h3 {
+      color: #fff;
+      font-weight: 700;
+      margin: 24px 0 12px 0;
+      letter-spacing: -0.3px;
+    }
+    .prose h1:first-child { margin-top: 0; }
+    .prose h1 { font-size: 20px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .prose h2 { font-size: 17px; }
+    .prose h3 { font-size: 15px; }
+    .prose p { margin-bottom: 14px; }
+    .prose ul, .prose ol { margin: 0 0 14px 24px; }
+    .prose li { margin-bottom: 4px; }
+    .prose pre {
+      background: #06080c;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    .prose code {
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      color: var(--accent);
+    }
+    .prose pre code { background: transparent; padding: 0; color: #fff; }
+    .prose blockquote {
+      border-left: 3px solid var(--accent);
+      padding-left: 14px;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+    .prose table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    .prose th, .prose td {
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      text-align: left;
+    }
+    .prose th { background: rgba(255, 255, 255, 0.03); color: var(--text); font-weight: 600; }
+
+    /* Diff View */
+    .diff-container {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: #06080c;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    .diff-line {
+      display: flex;
+      padding: 1px 8px;
+      white-space: pre-wrap;
+    }
+    .diff-add { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .diff-del { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+    .diff-hunk { background: rgba(0, 179, 196, 0.1); color: var(--accent); padding: 4px 8px; font-weight: 700; }
+
+    /* ========================================================
+       TAB 2: INCIDENTS CONTROL ROOM
+       ======================================================== */
+    .incidents-container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .alert-banner {
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.2) 0%, rgba(239, 68, 68, 0.05) 100%);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .alert-banner.healthy {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.02) 100%);
+      border-color: var(--green);
+    }
+    .incident-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+      gap: 16px;
+    }
+    .incident-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      transition: border-color 0.15s ease;
+    }
+    .incident-card:hover { border-color: var(--border-light); }
+    .incident-card.open { border-left: 4px solid var(--red); }
+    .incident-card.mitigated { border-left: 4px solid var(--amber); }
+    .incident-card.resolved { border-left: 4px solid var(--green); }
+
+    .block-box {
+      background: #06080c;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+    .block-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+    .resolution-callout {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #a7f3d0;
+    }
+
+    /* ========================================================
+       TAB 3: AGENT TASKS KANBAN
+       ======================================================== */
+    .kanban-board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 1200px) {
+      .kanban-board { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 680px) {
+      .kanban-board { grid-template-columns: 1fr; }
+    }
+
+    .kanban-column {
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 180px);
+      overflow: hidden;
+    }
+    .column-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .column-cards {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+    }
+    .task-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .task-card:hover { border-color: var(--border-light); transform: translateY(-1px); }
+
+    /* ========================================================
+       TAB 4: TOPOLOGY GRAPH CANVAS
+       ======================================================== */
+    .graph-container {
+      position: relative;
+      height: calc(100vh - 180px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #06080c;
+      overflow: hidden;
+    }
+    #topoCanvas { width: 100%; height: 100%; display: block; }
+    .graph-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(17, 21, 32, 0.9);
+      border: 1px solid var(--border);
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      backdrop-filter: blur(8px);
+    }
+    .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+    .legend-color { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* ========================================================
+       TAB 5: LIVE FLEET FEED (Audit Log)
+       ======================================================== */
+    .feed-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .feed-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    .feed-table th, .feed-table td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    .feed-table th { background: var(--card-subtle); color: var(--text-muted); font-weight: 600; }
+    .feed-table tr:hover td { background: var(--card-hover); }
+    .method-badge {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 10.5px;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .method-POST { background: var(--accent-dim); color: var(--accent); }
+    .method-GET { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+    .method-DELETE { background: var(--red-dim); color: var(--red); }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <a href="#/search" class="brand">
+      <div class="brand-logo">KYB</div>
+      <div>
+        <div class="brand-title">Know Your Business</div>
+        <div style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">Agent Fleet Memory & Control Room</div>
+      </div>
+    </a>
+
+    <nav class="nav-tabs">
+      <a href="#/search" class="nav-tab active" data-tab="search">
+        <span>🔍 Knowledge</span>
+        <span class="tab-badge teal" id="badgeKnowledgeCount">0</span>
+      </a>
+      <a href="#/incidents" class="nav-tab" data-tab="incidents">
+        <span>🚨 Incidents</span>
+        <span class="tab-badge" id="badgeIncidentsCount">0</span>
+      </a>
+      <a href="#/tasks" class="nav-tab" data-tab="tasks">
+        <span>📋 Tasks</span>
+        <span class="tab-badge" id="badgeTasksCount">0</span>
+      </a>
+      <a href="#/graph" class="nav-tab" data-tab="graph">
+        <span>🕸️ Topology</span>
+      </a>
+      <a href="#/feed" class="nav-tab" data-tab="feed">
+        <span>⚡ Live Feed</span>
+        <span class="tab-badge" id="badgeFeedCount">0</span>
+      </a>
+    </nav>
+
+    <div class="header-controls">
+      <div class="search-box">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="text" id="globalSearch" class="search-input" placeholder="Search fleet memory...">
+        <span class="kbd-shortcut">/</span>
+      </div>
+      <div class="live-pulse">
+        <span class="live-dot"></span>
+        <span>DAEMON ONLINE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Metrics Subheader -->
+  <section class="stats-bar">
+    <div class="stat-item">
+      <span>Indexed:</span>
+      <span class="stat-val accent" id="statIndexed">0 keys</span>
+    </div>
+    <div class="stat-dot"></div>
+    <div class="stat-item">
+      <span>Incidents:</span>
+      <span class="stat-val" id="statIncidents">0 open</span>
+    </div>
+    <div class="stat-dot"></div>
+    <div class="stat-item">
+      <span>Agent Tasks:</span>
+      <span class="stat-val" id="statTasks">0 active</span>
+    </div>
+    <div class="stat-dot"></div>
+    <div class="stat-item">
+      <span>Engine:</span>
+      <span class="stat-val green" id="statEngine">BM25 + CPU Vector (~5ms)</span>
+    </div>
+    <div class="stat-dot"></div>
+    <div class="stat-item">
+      <span>Git Canon:</span>
+      <span class="stat-val" id="statRev">head</span>
+    </div>
+  </section>
+
+  <!-- Main Content Area -->
+  <main>
+
+    <!-- ==================== TAB 1: KNOWLEDGE & SEARCH ==================== -->
+    <div id="tab-search" class="tab-content active">
+      <div class="explorer-layout">
+        <!-- Left Master List -->
+        <div class="explorer-pane">
+          <div class="pane-header">
+            <div class="filter-chips">
+              <span class="chip active" data-filter="all">All</span>
+              <span class="chip" data-filter="knowledge">Knowledge</span>
+              <span class="chip" data-filter="incident">Incidents</span>
+              <span class="chip" data-filter="task">Tasks</span>
+              <span class="chip" data-filter="recent">Recent</span>
+            </div>
+            <div id="tagPills" style="display:flex; flex-wrap:wrap; gap:4px; max-height: 48px; overflow-y:auto;"></div>
+          </div>
+          <div class="pane-list" id="knowledgeList">
+            <div style="padding: 24px; text-align:center; color: var(--text-muted);">Loading knowledge base...</div>
+          </div>
+        </div>
+
+        <!-- Right Detail View -->
+        <div class="explorer-pane">
+          <div id="detailView" style="display:flex; flex-direction:column; height:100%;">
+            <div class="detail-empty">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+              <div>Select an entry from the list to view documentation, git history, or diffs.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 2: INCIDENTS ==================== -->
+    <div id="tab-incidents" class="tab-content">
+      <div class="incidents-container">
+        <div id="incidentAlertBanner" class="alert-banner healthy">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size: 24px;">🛡️</span>
+            <div>
+              <div style="font-weight: 700; font-size: 15px;" id="incidentBannerTitle">All Systems Operational</div>
+              <div style="font-size: 12px; color: var(--text-dim);" id="incidentBannerSub">No active or unmitigated incidents recorded across the agent fleet.</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn sm" onclick="filterIncidents('all')">All</button>
+            <button class="btn sm" onclick="filterIncidents('open')">Open</button>
+            <button class="btn sm" onclick="filterIncidents('mitigated')">Mitigated</button>
+            <button class="btn sm" onclick="filterIncidents('resolved')">Resolved</button>
+          </div>
+        </div>
+
+        <div class="incident-cards" id="incidentCardsGrid"></div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 3: AGENT TASKS ==================== -->
+    <div id="tab-tasks" class="tab-content">
+      <div class="kanban-board">
+        <div class="kanban-column">
+          <div class="column-header">
+            <span>Backlog / Open</span>
+            <span class="tab-badge" id="colOpenCount">0</span>
+          </div>
+          <div class="column-cards" id="colOpen"></div>
+        </div>
+        <div class="kanban-column">
+          <div class="column-header">
+            <span>In Progress</span>
+            <span class="tab-badge teal" id="colInProgressCount">0</span>
+          </div>
+          <div class="column-cards" id="colInProgress"></div>
+        </div>
+        <div class="kanban-column">
+          <div class="column-header">
+            <span>Blocked</span>
+            <span class="tab-badge amber" id="colBlockedCount">0</span>
+          </div>
+          <div class="column-cards" id="colBlocked"></div>
+        </div>
+        <div class="kanban-column">
+          <div class="column-header">
+            <span>Done / Closed</span>
+            <span class="tab-badge" id="colDoneCount">0</span>
+          </div>
+          <div class="column-cards" id="colDone"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 4: TOPOLOGY GRAPH ==================== -->
+    <div id="tab-graph" class="tab-content">
+      <div class="graph-container">
+        <canvas id="topoCanvas"></canvas>
+        <div class="graph-overlay">
+          <div style="font-weight: 700; color: var(--text);">Fleet Topology Map</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Services & Hosts</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#8b5cf6;"></span> Knowledge Articles</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Incidents</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Agent Tasks</div>
+          <div style="font-size:11px; color: var(--text-muted); margin-top:4px;">Drag nodes • Scroll to zoom • Click to view</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 5: LIVE FLEET FEED ==================== -->
+    <div id="tab-feed" class="tab-content">
+      <div class="feed-container">
+        <table class="feed-table">
+          <thead>
+            <tr>
+              <th style="width: 140px;">Timestamp</th>
+              <th style="width: 80px;">Method</th>
+              <th>Resource & Query</th>
+              <th style="width: 100px;">Status</th>
+              <th style="width: 90px;">Latency</th>
+              <th style="width: 130px;">Caller IP</th>
+            </tr>
+          </thead>
+          <tbody id="feedTableBody">
+            <tr><td colspan="6" style="text-align:center; color: var(--text-muted); padding:30px;">Listening for agent requests...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // Global Application State
+    const App = {
+      entries: [],
+      incidents: [],
+      tasks: [],
+      tags: [],
+      audit: [],
+      health: {},
+      selectedKey: null,
+      currentFilter: 'all',
+      searchQuery: '',
+      activeTab: 'search',
+      graphNodes: [],
+      graphLinks: []
+    };
+
+    // Lightweight In-Browser Markdown Parser
+    function renderMarkdown(md) {
+      if (!md) return '';
+      let html = md
+        // Escape HTML
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        // Code blocks
+        .replace(/```([a-z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`)
+        // Inline code
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // Headers
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+        // Blockquotes
+        .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
+        // Bold & Italic
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        // Checkboxes
+        .replace(/- \[x\] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" checked disabled> <span>$1</span></div>')
+        .replace(/- \[ \] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" disabled> <span>$1</span></div>')
+        // Unordered lists
+        .replace(/^\- (.*$)/gim, '<li>$1</li>')
+        // Links
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent); text-decoration:none;">$1</a>')
+        // Paragraphs
+        .replace(/\n\n+/g, '</p><p>');
+
+      return '<p>' + html + '</p>';
+    }
+
+    // Relative Time Helper
+    function timeAgo(dateString) {
+      if (!dateString) return 'recently';
+      const date = new Date(dateString);
+      if (isNaN(date)) return dateString;
+      const seconds = Math.floor((new Date() - date) / 1000);
+      if (seconds < 60) return `${Math.max(1, seconds)}s ago`;
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes}m ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      return `${days}d ago`;
+    }
+
+    // API Fetch Helpers
+    async function apiFetch(endpoint) {
+      try {
+        const res = await fetch(endpoint);
+        if (!res.ok) return null;
+        return await res.json();
+      } catch (err) {
+        console.error('API Error', endpoint, err);
+        return null;
+      }
+    }
+
+    // Load All Data
+    async function refreshAll() {
+      const [searchData, incData, taskData, tagsData, healthData, auditData] = await Promise.all([
+        apiFetch('/search?limit=100'),
+        apiFetch('/incidents?all=1'),
+        apiFetch('/tasks?all=1'),
+        apiFetch('/tags'),
+        apiFetch('/healthz'),
+        apiFetch('/api/audit?limit=60')
+      ]);
+
+      if (searchData && searchData.hits) App.entries = searchData.hits;
+      if (incData && incData.incidents) App.incidents = incData.incidents;
+      if (taskData && taskData.tasks) App.tasks = taskData.tasks;
+      if (tagsData && tagsData.tags) App.tags = tagsData.tags;
+      if (healthData) App.health = healthData;
+      if (auditData && auditData.entries) App.audit = auditData.entries;
+
+      renderHeaderStats();
+      renderKnowledgeList();
+      renderIncidents();
+      renderTasks();
+      renderFeed();
+      buildTopology();
+    }
+
+    function renderHeaderStats() {
+      document.getElementById('statIndexed').textContent = `${App.entries.length} entries`;
+      const openInc = App.incidents.filter(i => i.status !== 'resolved').length;
+      const openIncEl = document.getElementById('statIncidents');
+      openIncEl.textContent = `${openInc} open`;
+      openIncEl.className = openInc > 0 ? 'stat-val red' : 'stat-val green';
+
+      const activeTasks = App.tasks.filter(t => t.status !== 'done').length;
+      document.getElementById('statTasks').textContent = `${activeTasks} active`;
+
+      document.getElementById('badgeKnowledgeCount').textContent = App.entries.length;
+      const incBadge = document.getElementById('badgeIncidentsCount');
+      incBadge.textContent = openInc;
+      incBadge.className = openInc > 0 ? 'tab-badge red' : 'tab-badge';
+
+      document.getElementById('badgeTasksCount').textContent = activeTasks;
+      document.getElementById('badgeFeedCount').textContent = App.audit.length;
+
+      // Render Tag Pills in Explorer
+      const tagContainer = document.getElementById('tagPills');
+      tagContainer.innerHTML = App.tags.slice(0, 15).map(t =>
+        `<a class="badge-tag" onclick="filterByTag('${t.tag}')">#${t.tag} <span style="opacity:0.6">${t.count}</span></a>`
+      ).join('');
+    }
+
+    // Filter Knowledge List
+    function getFilteredEntries() {
+      let list = [...App.entries];
+      if (App.currentFilter === 'knowledge') list = list.filter(e => e.kind === 'knowledge');
+      else if (App.currentFilter === 'incident') list = list.filter(e => e.kind === 'incident');
+      else if (App.currentFilter === 'task') list = list.filter(e => e.kind === 'task');
+
+      if (App.searchQuery.trim()) {
+        const q = App.searchQuery.toLowerCase();
+        list = list.filter(e =>
+          (e.title && e.title.toLowerCase().includes(q)) ||
+          (e.key && e.key.toLowerCase().includes(q)) ||
+          (e.tags && e.tags.some(t => t.toLowerCase().includes(q))) ||
+          (e.body && e.body.toLowerCase().includes(q))
+        );
+      }
+      return list;
+    }
+
+    function renderKnowledgeList() {
+      const list = getFilteredEntries();
+      const container = document.getElementById('knowledgeList');
+
+      if (!list.length) {
+        container.innerHTML = `<div style="padding: 30px; text-align:center; color: var(--text-muted);">No entries matching criteria</div>`;
+        return;
+      }
+
+      container.innerHTML = list.map(item => {
+        const isSel = item.key === App.selectedKey;
+        const kindBadge = item.kind === 'incident'
+          ? `<span class="badge badge-incident">incident</span>`
+          : item.kind === 'task'
+            ? `<span class="badge badge-task">task</span>`
+            : `<span class="badge badge-knowledge">knowledge</span>`;
+
+        return `
+          <div class="item-card ${isSel ? 'selected' : ''}" onclick="selectEntry('${item.key}')">
+            <div class="card-top">
+              <span class="item-title">${escapeHtml(item.title || item.key)}</span>
+              ${kindBadge}
+            </div>
+            <div class="item-key">${item.key}</div>
+            <div class="item-meta">
+              <span>${timeAgo(item.updated_at || item.committed_at)}</span>
+              ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${t}</span>`).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Auto-select first item if none selected
+      if (!App.selectedKey && list.length > 0) {
+        selectEntry(list[0].key);
+      }
+    }
+
+    async function selectEntry(key) {
+      App.selectedKey = key;
+      renderKnowledgeList();
+
+      const detailEl = document.getElementById('detailView');
+      detailEl.innerHTML = `<div style="padding: 40px; text-align:center; color: var(--text-muted);">Loading ${key}...</div>`;
+
+      const [entryData, historyData] = await Promise.all([
+        apiFetch(`/knowledge/${encodeURIComponent(key)}`),
+        apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
+      ]);
+
+      if (!entryData) {
+        detailEl.innerHTML = `<div class="detail-empty">Error loading entry ${key}</div>`;
+        return;
+      }
+
+      const e = entryData;
+      const historyList = (historyData && historyData.history) ? historyData.history : [];
+
+      detailEl.innerHTML = `
+        <div class="detail-header">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+              <span class="badge badge-${e.kind || 'knowledge'}">${e.kind || 'knowledge'}</span>
+              <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent);">${e.key}</span>
+              ${e.sha ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${e.sha.slice(0,7)}</span>` : ''}
+            </div>
+            <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title)}</h1>
+            <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+              ${(e.tags || []).map(t => `<span class="badge-tag">#${t}</span>`).join('')}
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn sm" onclick="navigator.clipboard.writeText('kyb get ${e.key}')">📋 Copy CLI</button>
+          </div>
+        </div>
+
+        <div class="detail-tabs">
+          <button class="detail-tab active" onclick="switchDetailTab('content')">Document</button>
+          <button class="detail-tab" onclick="switchDetailTab('history')">History (${historyList.length})</button>
+          <button class="detail-tab" onclick="switchDetailTab('diff')">Diff</button>
+          <button class="detail-tab" onclick="switchDetailTab('raw')">Raw</button>
+        </div>
+
+        <div class="detail-body" id="detailBodyContent">
+          <div class="prose">${renderMarkdown(e.body)}</div>
+        </div>
+        <div class="detail-body" id="detailBodyHistory" style="display:none;">
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            ${historyList.map(h => `
+              <div class="block-box" style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <div style="font-weight:600; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
+                  <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${h.author || 'agent'} • ${timeAgo(h.committed_at)}</div>
+                </div>
+                <div style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${h.sha.slice(0,7)}</div>
+              </div>
+            `).join('') || '<div style="color:var(--text-muted);">No revision history found.</div>'}
+          </div>
+        </div>
+        <div class="detail-body" id="detailBodyDiff" style="display:none;">
+          <div id="diffViewContainer" style="color:var(--text-muted);">Loading diff...</div>
+        </div>
+        <div class="detail-body" id="detailBodyRaw" style="display:none;">
+          <pre style="background:#06080c; border:1px solid var(--border); padding:16px; border-radius:6px; font-family:var(--font-mono); font-size:12px; color:var(--text); white-space:pre-wrap;">${escapeHtml(e.body)}</pre>
+        </div>
+      `;
+
+      // Pre-load diff if multiple revisions exist
+      if (historyList.length >= 2) {
+        loadDiff(key, historyList[1].sha, historyList[0].sha);
+      } else {
+        document.getElementById('diffViewContainer').innerHTML = '<div style="color:var(--text-muted);">Only 1 version exists; no diff available.</div>';
+      }
+    }
+
+    async function loadDiff(key, fromSha, toSha) {
+      const diffData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${fromSha}&to=${toSha}`);
+      const container = document.getElementById('diffViewContainer');
+      if (!diffData || !diffData.diff) {
+        container.innerHTML = '<div style="color:var(--text-muted);">No textual changes between revisions.</div>';
+        return;
+      }
+
+      const lines = diffData.diff.split('\n').map(line => {
+        let cls = '';
+        if (line.startsWith('+') && !line.startsWith('+++')) cls = 'diff-add';
+        else if (line.startsWith('-') && !line.startsWith('---')) cls = 'diff-del';
+        else if (line.startsWith('@@')) cls = 'diff-hunk';
+        return `<div class="diff-line ${cls}">${escapeHtml(line)}</div>`;
+      }).join('');
+
+      container.innerHTML = `<div class="diff-container">${lines}</div>`;
+    }
+
+    function switchDetailTab(tab) {
+      document.querySelectorAll('.detail-tab').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('detailBodyContent').style.display = tab === 'content' ? 'block' : 'none';
+      document.getElementById('detailBodyHistory').style.display = tab === 'history' ? 'block' : 'none';
+      document.getElementById('detailBodyDiff').style.display = tab === 'diff' ? 'block' : 'none';
+      document.getElementById('detailBodyRaw').style.display = tab === 'raw' ? 'block' : 'none';
+    }
+
+    // Incidents Rendering
+    function renderIncidents(filter = 'all') {
+      let list = [...App.incidents];
+      if (filter !== 'all') list = list.filter(i => i.status === filter);
+
+      const openCount = App.incidents.filter(i => i.status !== 'resolved').length;
+      const banner = document.getElementById('incidentAlertBanner');
+      if (openCount > 0) {
+        banner.className = 'alert-banner';
+        document.getElementById('incidentBannerTitle').textContent = `⚠️ ${openCount} Active Incident(s) in Progress`;
+        document.getElementById('incidentBannerSub').textContent = `One or more services are degraded or undergoing active mitigation.`;
+      } else {
+        banner.className = 'alert-banner healthy';
+        document.getElementById('incidentBannerTitle').textContent = '🛡️ All Systems Operational';
+        document.getElementById('incidentBannerSub').textContent = 'All recorded incidents have verified resolutions and passed health checks.';
+      }
+
+      const grid = document.getElementById('incidentCardsGrid');
+      if (!list.length) {
+        grid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align:center; color:var(--text-muted);">No incidents matching status filter.</div>';
+        return;
+      }
+
+      grid.innerHTML = list.map(inc => `
+        <div class="incident-card ${inc.status}">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <div>
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                <span class="badge badge-${inc.status}">${inc.status}</span>
+                <span class="badge badge-${inc.severity || 'medium'}">${inc.severity || 'medium'}</span>
+                <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${inc.key}</span>
+              </div>
+              <h3 style="font-size:15px; font-weight:700; color:#fff;">${escapeHtml(inc.title)}</h3>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim);">
+            <div><strong>Service:</strong> <span class="badge-tag">${inc.service || 'infrastructure'}</span></div>
+            ${(inc.hosts && inc.hosts.length) ? `<div><strong>Hosts:</strong> ${inc.hosts.join(', ')}</div>` : ''}
+          </div>
+
+          ${inc.detection ? `
+            <div class="block-box">
+              <div class="block-label">Executable Detection Check</div>
+              <code>${escapeHtml(inc.detection)}</code>
+            </div>
+          ` : ''}
+
+          ${inc.resolution ? `
+            <div class="resolution-callout">
+              <div class="block-label" style="color:var(--green)">Resolution Post-Mortem</div>
+              <div>${escapeHtml(inc.resolution)}</div>
+            </div>
+          ` : ''}
+
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px;">
+            <span>Detected: ${timeAgo(inc.detected_at || inc.started_at)}</span>
+            <button class="btn sm" onclick="selectEntry('${inc.key}'); switchTab('search');">Full Report →</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function filterIncidents(status) {
+      renderIncidents(status);
+    }
+
+    // Tasks Kanban Rendering
+    function renderTasks() {
+      const colOpen = document.getElementById('colOpen');
+      const colProg = document.getElementById('colInProgress');
+      const colBlock = document.getElementById('colBlocked');
+      const colDone = document.getElementById('colDone');
+
+      const groups = { open: [], in_progress: [], blocked: [], done: [] };
+      App.tasks.forEach(t => {
+        const s = (t.status || 'open').toLowerCase();
+        if (groups[s]) groups[s].push(t);
+        else groups.open.push(t);
+      });
+
+      document.getElementById('colOpenCount').textContent = groups.open.length;
+      document.getElementById('colInProgressCount').textContent = groups.in_progress.length;
+      document.getElementById('colBlockedCount').textContent = groups.blocked.length;
+      document.getElementById('colDoneCount').textContent = groups.done.length;
+
+      const renderCard = (t) => `
+        <div class="task-card" onclick="selectEntry('${t.key}'); switchTab('search');">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span class="badge badge-${t.priority || 'medium'}">${t.priority || 'normal'}</span>
+            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${t.assignee || 'unassigned'}</span>
+          </div>
+          <div style="font-weight:600; font-size:13px; color:#fff;">${escapeHtml(t.title)}</div>
+          ${t.blocked_reason ? `
+            <div style="background:var(--amber-dim); border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:6px; font-size:11px; color:var(--amber);">
+              <strong>Blocked:</strong> ${escapeHtml(t.blocked_reason)}
+            </div>
+          ` : ''}
+          <div style="font-size:10.5px; color:var(--text-muted); font-family:var(--font-mono);">${t.key}</div>
+        </div>
+      `;
+
+      colOpen.innerHTML = groups.open.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
+      colProg.innerHTML = groups.in_progress.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
+      colBlock.innerHTML = groups.blocked.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
+      colDone.innerHTML = groups.done.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:12px;">Empty</div>';
+    }
+
+    // Live Feed Rendering
+    function renderFeed() {
+      const tbody = document.getElementById('feedTableBody');
+      if (!App.audit || !App.audit.length) return;
+
+      tbody.innerHTML = App.audit.map(item => {
+        const isOk = item.status >= 200 && item.status < 300;
+        const statusBadge = isOk
+          ? `<span style="color:var(--green); font-family:var(--font-mono); font-weight:700;">${item.status} OK</span>`
+          : `<span style="color:var(--red); font-family:var(--font-mono); font-weight:700;">${item.status} ERR</span>`;
+
+        return `
+          <tr>
+            <td style="font-family:var(--font-mono); color:var(--text-dim);">${timeAgo(item.ts)}</td>
+            <td><span class="method-badge method-${item.method}">${item.method}</span></td>
+            <td><code style="color:var(--text);">${escapeHtml(item.path)}${item.query ? '?' + escapeHtml(item.query) : ''}</code></td>
+            <td>${statusBadge}</td>
+            <td style="font-family:var(--font-mono); color:var(--text-muted);">${item.ms}ms</td>
+            <td style="font-family:var(--font-mono); color:var(--text-muted); font-size:11px;">${item.ip}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Force-Directed Graph Engine
+    function buildTopology() {
+      const nodes = [];
+      const links = [];
+      const nodeMap = new Map();
+
+      // Add Knowledge / Service Nodes
+      App.entries.forEach(e => {
+        const isInc = e.kind === 'incident';
+        const isTask = e.kind === 'task';
+        const node = {
+          id: e.key,
+          label: e.title || e.key,
+          type: isInc ? 'incident' : isTask ? 'task' : 'knowledge',
+          service: e.service || (e.tags && e.tags[0]) || 'system',
+          radius: isInc ? 12 : 9,
+          color: isInc ? '#ef4444' : isTask ? '#f59e0b' : '#00b3c4',
+          x: (Math.random() - 0.5) * 400 + 400,
+          y: (Math.random() - 0.5) * 300 + 300,
+          vx: 0,
+          vy: 0
+        };
+        nodes.push(node);
+        nodeMap.set(e.key, node);
+      });
+
+      // Add Links based on service grouping and knowledge references
+      App.entries.forEach(e => {
+        if (e.knowledge && Array.isArray(e.knowledge)) {
+          e.knowledge.forEach(targetKey => {
+            if (nodeMap.has(targetKey)) {
+              links.push({ source: nodeMap.get(e.key), target: nodeMap.get(targetKey) });
+            }
+          });
+        }
+        // Link tasks to parent tasks
+        if (e.parent_task && nodeMap.has(e.parent_task)) {
+          links.push({ source: nodeMap.get(e.key), target: nodeMap.get(e.parent_task) });
+        }
+      });
+
+      App.graphNodes = nodes;
+      App.graphLinks = links;
+      initCanvasGraph();
+    }
+
+    let graphAnimId = null;
+    function initCanvasGraph() {
+      const canvas = document.getElementById('topoCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      function resize() {
+        canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio;
+        canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      let width = canvas.parentElement.clientWidth;
+      let height = canvas.parentElement.clientHeight;
+
+      // Physics loop
+      function step() {
+        const nodes = App.graphNodes;
+        const links = App.graphLinks;
+
+        // Repulsion
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const dx = nodes[j].x - nodes[i].x;
+            const dy = nodes[j].y - nodes[i].y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            if (dist < 220) {
+              const f = (220 - dist) / dist * 0.08;
+              nodes[i].vx -= dx * f;
+              nodes[i].vy -= dy * f;
+              nodes[j].vx += dx * f;
+              nodes[j].vy += dy * f;
+            }
+          }
+        }
+
+        // Attraction along links
+        links.forEach(l => {
+          const dx = l.target.x - l.source.x;
+          const dy = l.target.y - l.source.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const f = (dist - 80) * 0.005;
+          l.source.vx += dx * f;
+          l.source.vy += dy * f;
+          l.target.vx -= dx * f;
+          l.target.vy -= dy * f;
+        });
+
+        // Center gravity and velocity update
+        const cx = width / 2;
+        const cy = height / 2;
+        nodes.forEach(n => {
+          n.vx += (cx - n.x) * 0.001;
+          n.vy += (cy - n.y) * 0.001;
+          n.vx *= 0.88;
+          n.vy *= 0.88;
+          n.x += n.vx;
+          n.y += n.vy;
+        });
+
+        // Render
+        ctx.clearRect(0, 0, width, height);
+
+        // Draw Links
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        links.forEach(l => {
+          ctx.beginPath();
+          ctx.moveTo(l.source.x, l.source.y);
+          ctx.lineTo(l.target.x, l.target.y);
+          ctx.stroke();
+        });
+
+        // Draw Nodes
+        nodes.forEach(n => {
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+          ctx.fillStyle = n.color;
+          ctx.shadowColor = n.color;
+          ctx.shadowBlur = 8;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+
+          // Node Label
+          ctx.fillStyle = '#f0f4fa';
+          ctx.font = '10.5px ui-monospace, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(n.label.slice(0, 20), n.x, n.y + n.radius + 12);
+        });
+
+        graphAnimId = requestAnimationFrame(step);
+      }
+
+      if (graphAnimId) cancelAnimationFrame(graphAnimId);
+      step();
+
+      // Node selection click
+      canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        for (const n of App.graphNodes) {
+          const dx = n.x - mx;
+          const dy = n.y - my;
+          if (Math.sqrt(dx * dx + dy * dy) <= n.radius + 4) {
+            selectEntry(n.id);
+            switchTab('search');
+            break;
+          }
+        }
+      });
+    }
+
+    // Tab Navigation & Hash Routing
+    function switchTab(tabName) {
+      App.activeTab = tabName;
+      document.querySelectorAll('.nav-tab').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-tab') === tabName);
+      });
+      document.querySelectorAll('.tab-content').forEach(c => {
+        c.classList.toggle('active', c.id === `tab-${tabName}`);
+      });
+      window.location.hash = `#/${tabName}`;
+
+      if (tabName === 'graph') {
+        setTimeout(initCanvasGraph, 50);
+      }
+    }
+
+    function filterByTag(tag) {
+      document.getElementById('globalSearch').value = tag;
+      App.searchQuery = tag;
+      switchTab('search');
+      renderKnowledgeList();
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Init Event Listeners
+    window.addEventListener('DOMContentLoaded', () => {
+      // Tab click events
+      document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+          e.preventDefault();
+          switchTab(tab.getAttribute('data-tab'));
+        });
+      });
+
+      // Filter chips in explorer
+      document.querySelectorAll('.chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          App.currentFilter = chip.getAttribute('data-filter');
+          renderKnowledgeList();
+        });
+      });
+
+      // Global search typing
+      const searchEl = document.getElementById('globalSearch');
+      searchEl.addEventListener('input', (e) => {
+        App.searchQuery = e.target.value;
+        if (App.activeTab !== 'search') switchTab('search');
+        renderKnowledgeList();
+      });
+
+      // Keyboard shortcuts
+      window.addEventListener('keydown', (e) => {
+        if (e.key === '/' && document.activeElement !== searchEl) {
+          e.preventDefault();
+          searchEl.focus();
+        }
+      });
+
+      // Initial hash route
+      const hash = window.location.hash.replace('#/', '');
+      if (['search', 'incidents', 'tasks', 'graph', 'feed'].includes(hash)) {
+        switchTab(hash);
+      }
+
+      // Initial load & 4s polling
+      refreshAll();
+      setInterval(refreshAll, 4000);
+    });
+  </script>
+</body>
+</html>

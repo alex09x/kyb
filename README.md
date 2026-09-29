@@ -26,7 +26,7 @@ truth that survives between sessions and across machines.
 
 <br/>
 
-[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Incidents**](#incident-reports) · [**Agent skill**](#the-agent-skill) · [**MCP**](#mcp) · [**HTTP API**](#http-api) · [**Citation**](#citation)
+[**Quick start**](#quick-start) · [**How it works**](#how-it-works) · [**Incidents**](#incident-reports) · [**Agent skill**](#the-agent-skill) · [**MCP**](#mcp) · [**Web UI**](#web-ui-and-control-room) · [**HTTP API**](#http-api) · [**Citation**](#citation)
 
 </div>
 
@@ -281,10 +281,25 @@ need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses 
 
 ---
 
+## Web UI and Control Room
+
+`kyb-server` embeds a zero-dependency, dark-mode Web UI served directly at `http://<host>:9310/`:
+
+* **Live Fleet Feed**: real-time activity stream of agent reads, writes, and tool executions from the audit log.
+* **Interactive Topology Graph**: 2D force-directed map visualizing services, hosts, dependencies, and linked incidents.
+* **Incident Control Center**: status board (Open / Mitigated / Resolved), executable detection check commands, and mandatory post-mortem resolutions.
+* **Agent Task Kanban**: columns for Backlog, In Progress, Blocked (with reasons highlighted), and Closed tasks.
+* **Knowledge Explorer**: instant search, full Markdown document rendering, revision histories, and line-by-line visual git diffs.
+
+---
+
 ## HTTP API
 
 | Method | Path | What it does |
 |---|---|---|
+| `GET` | `/` | Web UI & Control Room (zero-dependency single-page application) |
+| `GET` | `/api/audit` | `?limit=50` — recent operations from the JSONL audit log, newest first |
+| `GET` | `/knowledge/{key}/diff` | `?from=<sha>&to=<sha>` — unified git diff between two revisions |
 | `POST` | `/knowledge` | upsert by key. Body: `{key, title, body, tags?, refs?}` → `{key, sha, changed, action}`. Identical content = `changed:false`, no commit |
 | `GET` | `/knowledge/{key}` | the entry (kind-specific fields included); archived incidents/tasks come back with `archived:true`; `?at=<sha>` returns a version from history |
 | `GET` | `/knowledge/{key}/history` | `{key, versions:[{sha, committed_at, message, change}]}`, newest first |

@@ -279,7 +279,7 @@ async fn forward(
     // Carry the caller through, so the audit log attributes an MCP-driven write
     // to the machine that asked for it rather than to nobody.
     if let Some(info) = connect {
-        req.extensions_mut().insert(info.clone());
+        req.extensions_mut().insert(*info);
     }
 
     let resp = st.api.clone().oneshot(req).await.expect("the router is infallible");

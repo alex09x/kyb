@@ -5,6 +5,7 @@ mod index;
 mod mcp;
 mod model;
 mod store;
+mod web;
 
 use anyhow::Result;
 use axum::extract::rejection::QueryRejection;
@@ -31,6 +32,7 @@ pub struct AppState {
     /// One lock for ALL writes: Tantivy allows a single IndexWriter and git
     /// commits are strictly sequential anyway. Search takes no locks.
     writer: Mutex<IndexWriter>,
+    pub(crate) audit_path: std::path::PathBuf,
 }
 
 type St = State<Arc<AppState>>;
@@ -107,7 +109,14 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
             None
         }
     };
-    Ok(Arc::new(AppState { store, index, audit, semantic, writer: Mutex::new(writer) }))
+    Ok(Arc::new(AppState {
+        store,
+        index,
+        audit,
+        semantic,
+        writer: Mutex::new(writer),
+        audit_path: cfg.audit_path.clone(),
+    }))
 }
 
 // No auth on purpose: we listen on 127.0.0.1 / the internal network only
@@ -120,6 +129,8 @@ fn build_app(state: Arc<AppState>) -> Router {
 
 fn api_router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/", get(web::serve_ui))
+        .route("/api/audit", get(web::api_audit))
         .route("/healthz", get(healthz))
         .route("/knowledge", post(upsert))
         .route("/knowledge/{key}", get(get_one).delete(remove))
@@ -2062,7 +2073,7 @@ mod api_tests {
         assert_eq!(v["unknown_knowledge"], json!(["landing-architecture"]));
 
         // status omitted -> open
-        let (_, v) = call(&app, "GET", &format!("/knowledge/inc-2026-07-21-landing-gap"), None).await;
+        let (_, v) = call(&app, "GET", "/knowledge/inc-2026-07-21-landing-gap", None).await;
         assert_eq!(v["status"], "open");
         assert_eq!(v["kind"], "incident");
 
@@ -2150,7 +2161,7 @@ mod api_tests {
         // the file is gone — "how did we fix it" lands here
         let (_, v) = call(&app, "GET", "/search?q=memory%20limit&kind=incident", None).await;
         assert_eq!(v["count"], 1, "{v}");
-        assert_eq!(v["hits"][0]["resolution"].as_str().unwrap().contains("2G"), true);
+        assert!(v["hits"][0]["resolution"].as_str().unwrap().contains("2G"));
         assert_eq!(v["hits"][0]["is_head"], true);
 
         // parking an archived report back to mitigated reopens it (the file
@@ -3350,5 +3361,28 @@ mod published_claims {
             assert!(cli.contains(flag), "the docs promise {flag} but the CLI does not parse it");
         }
         assert!(cli.contains("  diff)"), "the docs promise `kyb diff` but the CLI has no such verb");
+    }
+
+    #[tokio::test]
+    async fn web_ui_served_at_root() {
+        let (app, _data, _idx) = app_with_tmp();
+        let req = axum::http::Request::builder().uri("/").body(axum::body::Body::empty()).unwrap();
+        let resp = tower::ServiceExt::oneshot(app.clone(), req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ctype = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ctype.contains("text/html"), "expected text/html, got {ctype}");
+        let bytes = http_body_util::BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let body_str = String::from_utf8_lossy(&bytes);
+        assert!(body_str.contains("KYB — Fleet Memory & Control Room"));
+        assert!(body_str.contains("topoCanvas"));
+    }
+
+    #[tokio::test]
+    async fn api_audit_returns_entries() {
+        let (app, _data, _idx) = app_with_tmp();
+        let (st, v) = call(&app, "GET", "/api/audit", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(v.get("entries").is_some());
+        assert!(v.get("count").is_some());
     }
 }
