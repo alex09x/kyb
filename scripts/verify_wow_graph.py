@@ -95,15 +95,16 @@ def main():
             f.write(base64.b64decode(snap2['data']))
         print(f"Saved: {path2}")
 
-    # 4. Clear search, click on canvas center area to select a node and trigger Neighborhood Focus Mode
-    print("Clearing search input...")
+    # 4. Clear search, close any modal, and click on node
+    print("Clearing search input and ensuring clean state...")
+    client.call('pressKey', {'tabId': tab_id, 'key': 'Escape'})
+    time.sleep(0.3)
     client.call('type', {'tabId': tab_id, 'selector': '#topoSearchInput', 'text': '', 'clearFirst': True})
     time.sleep(0.5)
 
-    # Click on the canvas near the center where nodes cluster (e.g. x=750, y=500 in viewport)
+    # Click on a node (e.g. RINGFIRE or CH_PROXY)
     print("Clicking a node to trigger Neighborhood Spotlight & Interactive HUD...")
-    # Let's inspect canvas position or click slightly right of center
-    client.call('click', {'tabId': tab_id, 'x': 850, 'y': 520})
+    client.call('click', {'tabId': tab_id, 'x': 450, 'y': 240})
     time.sleep(1.2)
 
     print("Capturing 3: Neighborhood Focus Spotlight, Photon Pulses & Interactive Floating HUD...")
