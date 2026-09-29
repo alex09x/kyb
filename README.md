@@ -22,6 +22,7 @@ truth that survives between sessions and across machines.
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
+[![skills.sh](https://skills.sh/b/alex09x/kyb/kyb)](https://skills.sh/alex09x/kyb/kyb)
 
 <br/>
 
@@ -236,6 +237,12 @@ Idempotent: sections are delimited by markers and updated in place. The skill en
 governance that keeps a shared base alive — always query before adding, overwrite the same
 key instead of inventing synonyms, only verified facts, English entries, file incidents when
 something breaks and fold the lesson back into knowledge after resolving.
+
+Alternatively, install the skill into any supported agent workspace using the open skills CLI:
+
+```sh
+npx skills add alex09x/kyb
+```
 
 ---
 
