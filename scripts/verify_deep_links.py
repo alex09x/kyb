@@ -39,7 +39,16 @@ def get_kyb_host():
         with open(os.path.expanduser("~/.config/kyb/host")) as f:
             return f.read().strip()
     except Exception:
-        return "192.168.2.168"
+        pass
+    try:
+        with open("scripts/fleet.local.sh") as f:
+            for line in f:
+                if line.startswith("SERVER="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    return val.split("@")[-1]
+    except Exception:
+        pass
+    return "127.0.0.1"
 
 def save_screenshot(client, tab_id, filename):
     res = client.call('screenshot', {'tabId': tab_id})
