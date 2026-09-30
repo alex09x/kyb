@@ -47,6 +47,8 @@ pub struct VersionInfo {
     pub committed_at: String,
     pub message: String,
     pub change: String, // added|modified|deleted
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 /// One version of one key from history — the unit of indexing.
@@ -209,6 +211,27 @@ impl Store {
             return Ok(None);
         };
         Ok(Some(commit.time().seconds()))
+    }
+
+    /// Commit details (sha, time, author, message) of any resolvable git revision.
+    pub fn commit_details(&self, rev: &str) -> Result<Option<(String, i64, String, String)>> {
+        let repo = self.repo()?;
+        let Ok(obj) = repo.revparse_single(rev) else {
+            return Ok(None);
+        };
+        let Ok(commit) = obj.peel_to_commit() else {
+            return Ok(None);
+        };
+        let sha = commit.id().to_string();
+        let time = commit.time().seconds();
+        let author_name = commit.author().name().map(|n| n.to_string()).unwrap_or_default();
+        let author = if author_name.is_empty() || author_name == "kyb" {
+            "Alexander Panasenko <alex@prod.codes>".to_string()
+        } else {
+            author_name
+        };
+        let msg = commit.summary().unwrap_or("").to_string();
+        Ok(Some((sha, time, author, msg)))
     }
 
     fn commit_path(&self, rel: &str, msg: &str, delete: bool) -> Result<(String, i64)> {
@@ -462,12 +485,19 @@ impl Store {
             if changes.contains(&"added") && changes.contains(&"deleted") {
                 continue;
             }
+            let author_name = commit.author().name().map(|n| n.to_string()).unwrap_or_default();
+            let author = if author_name.is_empty() || author_name == "kyb" {
+                "Alexander Panasenko <alex@prod.codes>".to_string()
+            } else {
+                author_name
+            };
             for change in changes {
                 out.push(VersionInfo {
                     sha: oid.to_string(),
                     committed_at: iso(commit.time().seconds()),
                     message: commit.summary().unwrap_or("").to_string(),
                     change: change.into(),
+                    author: Some(author.clone()),
                 });
             }
         }

@@ -1105,34 +1105,105 @@ async fn diff(State(st): St, Path(key): Path<String>, Q(q): Q<DiffQ>) -> Reply {
         );
     };
 
-    let mut sides = vec![];
-    for rev in [&from_rev, &to_rev] {
-        match st.store.get_at(&key, rev) {
-            Err(e) => return err500(e),
-            Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": format!("'{key}' does not exist at revision '{rev}'")})),
-                )
+    let resolve_side = |rev: &str| -> Result<Option<(String, String, String, String, bool, model::Entry)>, anyhow::Error> {
+        let deduce_kind = || {
+            if key.starts_with(model::TASK_PREFIX) {
+                model::KIND_TASK.to_string()
+            } else if key.starts_with(model::INCIDENT_PREFIX) {
+                model::KIND_INCIDENT.to_string()
+            } else {
+                model::KIND_KNOWLEDGE.to_string()
             }
-            Ok(Some(entry)) => {
-                let at = st.store.rev_time(rev).ok().flatten().map(iso_secs).unwrap_or_default();
-                sides.push((entry, at));
+        };
+
+        if rev == "initial" || rev == "empty" {
+            let mut empty = model::Entry::default();
+            empty.key = key.clone();
+            empty.kind = deduce_kind();
+            return Ok(Some((
+                "initial".to_string(),
+                String::new(),
+                "Initial State".to_string(),
+                "Initial creation".to_string(),
+                false,
+                empty,
+            )));
+        }
+
+        let Some((sha, time, author, msg)) = st.store.commit_details(rev)? else {
+            return Ok(None);
+        };
+        let committed_at = iso_secs(time);
+
+        match st.store.get_at(&key, &sha)? {
+            Some(entry) => Ok(Some((sha, committed_at, author, msg, true, entry))),
+            None => {
+                let in_hist = versions.iter().any(|v| v.sha == sha || v.sha.starts_with(&sha) || sha.starts_with(&v.sha));
+                if in_hist {
+                    let mut archived = model::Entry::default();
+                    archived.key = key.clone();
+                    archived.kind = deduce_kind();
+                    archived.status = "archived".to_string();
+                    archived.title = format!("(Archived: {key})");
+                    Ok(Some((sha, committed_at, author, msg, false, archived)))
+                } else {
+                    Ok(None)
+                }
             }
         }
-    }
-    let (to_entry, to_at) = sides.pop().expect("two sides pushed");
-    let (from_entry, from_at) = sides.pop().expect("two sides pushed");
+    };
+
+    let from_side = match resolve_side(&from_rev) {
+        Err(e) => return err500(e),
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("'{key}' does not exist at revision '{from_rev}'")})),
+            );
+        }
+    };
+
+    let to_side = match resolve_side(&to_rev) {
+        Err(e) => return err500(e),
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": format!("'{key}' does not exist at revision '{to_rev}'")})),
+            );
+        }
+    };
+
+    let (from_sha, from_at, from_author, from_msg, from_exists, from_entry) = from_side;
+    let (to_sha, to_at, to_author, to_msg, to_exists, to_entry) = to_side;
+
     let (fields, body) = model::diff_entries(&from_entry, &to_entry);
+    let changed = !fields.is_empty() || !body.added.is_empty() || !body.removed.is_empty();
+
     (
         StatusCode::OK,
         Json(json!({
             "key": key,
-            "from": {"rev": from_rev, "committed_at": from_at},
-            "to": {"rev": to_rev, "committed_at": to_at},
-            "changed": !fields.is_empty() || !body.added.is_empty() || !body.removed.is_empty(),
+            "from": {
+                "rev": from_sha,
+                "committed_at": from_at,
+                "author": from_author,
+                "message": from_msg,
+                "exists": from_exists,
+            },
+            "to": {
+                "rev": to_sha,
+                "committed_at": to_at,
+                "author": to_author,
+                "message": to_msg,
+                "exists": to_exists,
+            },
+            "changed": changed,
             "fields": fields,
             "body": body,
+            "from_entry": entry_json(&from_entry, !from_exists),
+            "to_entry": entry_json(&to_entry, !to_exists),
         })),
     )
 }
@@ -1758,6 +1829,29 @@ mod api_tests {
             call(&app, "GET", &format!("/knowledge/svc/diff?from={newest}&to={oldest}"), None).await;
         assert_eq!(v["body"]["removed"][0], "the port is 9090");
         assert_eq!(v["body"]["added"][0], "the port is 8080");
+
+        // initial revision diff: comparing from empty initial state
+        let (st, v) =
+            call(&app, "GET", &format!("/knowledge/svc/diff?from=initial&to={oldest}"), None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["changed"], true);
+        assert_eq!(v["from"]["exists"], false);
+        assert_eq!(v["to"]["exists"], true);
+        assert_eq!(v["body"]["added"][0], "the port is 8080");
+
+        // diff includes commit details (author, message) and entries
+        assert!(v["to"]["author"].as_str().is_some());
+        assert!(v["to"]["message"].as_str().is_some());
+        assert_eq!(v["to_entry"]["key"], "svc");
+
+        // archiving an item does not break diff
+        call(&app, "POST", "/tasks", Some(json!({"key": "task-clean-logs", "title": "Clean logs", "body": "clear /tmp/logs"}))).await;
+        call(&app, "POST", "/tasks/task-clean-logs/resolve", Some(json!({"resolution": "done"}))).await;
+        let (st, v) = call(&app, "GET", "/knowledge/task-clean-logs/diff", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["changed"], true);
+        assert_eq!(v["to"]["exists"], false);
+        assert_eq!(v["to_entry"]["status"], "archived");
 
         // an unresolvable revision is a 404, never a 500
         let (st, _) = call(&app, "GET", "/knowledge/svc/diff?from=zzz&to=zzz", None).await;

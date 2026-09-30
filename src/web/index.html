@@ -752,7 +752,242 @@
     }
     .prose th { background: rgba(255, 255, 255, 0.03); color: var(--text); font-weight: 600; }
 
-    /* Diff View */
+    /* Enhanced Diff View (Linear / GitHub Style) */
+    .diff-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+    }
+    .diff-picker-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .diff-picker-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+    }
+    .diff-select {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      padding: 5px 10px;
+      border-radius: 4px;
+      outline: none;
+      font-family: var(--font-mono);
+      max-width: 280px;
+    }
+    .diff-select:focus {
+      border-color: var(--accent);
+    }
+    .diff-view-toggles {
+      display: flex;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .diff-view-toggle-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .diff-view-toggle-btn.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    /* Metadata Diff Table */
+    .diff-metadata-section {
+      margin-bottom: 16px;
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .diff-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .diff-meta-grid {
+      display: flex;
+      flex-direction: column;
+    }
+    .diff-meta-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 24px 1fr;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      gap: 12px;
+    }
+    .diff-meta-row:last-child {
+      border-bottom: none;
+    }
+    .diff-meta-field {
+      font-weight: 600;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      text-transform: capitalize;
+    }
+    .diff-meta-before {
+      color: #f87171;
+      word-break: break-word;
+      font-family: var(--font-mono);
+      background: rgba(239, 68, 68, 0.08);
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+    .diff-meta-arrow {
+      color: var(--text-dim);
+      text-align: center;
+      font-size: 13px;
+    }
+    .diff-meta-after {
+      color: #34d399;
+      word-break: break-word;
+      font-family: var(--font-mono);
+      background: rgba(16, 185, 129, 0.08);
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    /* Side-by-Side (Split) View */
+    .diff-split-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: #06080c;
+    }
+    .diff-split-col {
+      overflow-x: auto;
+      min-width: 0;
+    }
+    .diff-split-col:first-child {
+      border-right: 1px solid var(--border);
+    }
+    .diff-split-header {
+      padding: 8px 12px;
+      background: var(--card-subtle);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .diff-split-header.before {
+      border-top: 2px solid #ef4444;
+    }
+    .diff-split-header.after {
+      border-top: 2px solid #10b981;
+    }
+    .diff-split-row {
+      display: flex;
+      min-height: 22px;
+      line-height: 20px;
+    }
+    .diff-gutter {
+      width: 44px;
+      min-width: 44px;
+      padding: 0 6px;
+      text-align: right;
+      color: var(--text-dim);
+      user-select: none;
+      border-right: 1px solid rgba(255, 255, 255, 0.04);
+      background: rgba(0, 0, 0, 0.25);
+      font-size: 11px;
+    }
+    .diff-cell {
+      flex: 1;
+      padding: 0 8px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .diff-row-del {
+      background: rgba(239, 68, 68, 0.12);
+      color: #fca5a5;
+    }
+    .diff-row-add {
+      background: rgba(16, 185, 129, 0.12);
+      color: #86efac;
+    }
+    .diff-row-empty {
+      background: rgba(255, 255, 255, 0.015);
+    }
+
+    /* Unified View */
+    .diff-unified-container {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: #06080c;
+    }
+    .diff-unified-row {
+      display: flex;
+      min-height: 22px;
+      line-height: 20px;
+    }
+    .diff-unified-gutters {
+      display: flex;
+      user-select: none;
+      border-right: 1px solid rgba(255, 255, 255, 0.04);
+      background: rgba(0, 0, 0, 0.25);
+      font-size: 11px;
+    }
+    .diff-unified-num {
+      width: 40px;
+      min-width: 40px;
+      padding: 0 6px;
+      text-align: right;
+      color: var(--text-dim);
+    }
+    .diff-unified-mark {
+      width: 22px;
+      text-align: center;
+      font-weight: 700;
+    }
+    .diff-unified-text {
+      flex: 1;
+      padding: 0 8px;
+      white-space: pre;
+    }
     .diff-container {
       font-family: var(--font-mono);
       font-size: 12px;
@@ -1824,7 +2059,12 @@
       activeResolveKey: null,
       pendingHighlight: null,
       pendingGraphNode: null,
-      isBackendSearchResults: false
+      isBackendSearchResults: false,
+      diffViewMode: 'split',
+      diffCurrentKey: null,
+      diffFromSha: null,
+      diffToSha: null,
+      currentHistoryList: []
     };
 
     // Toast Notification System
@@ -2496,11 +2736,14 @@
       `;
 
       // Pre-load diff if multiple revisions exist
+      App.currentHistoryList = historyList;
       if (historyList.length >= 2) {
         loadDiff(e.key, historyList[1].sha, historyList[0].sha);
+      } else if (historyList.length === 1) {
+        loadDiff(e.key, 'initial', historyList[0].sha);
       } else {
         const diffCont = document.getElementById('diffViewContainer');
-        if (diffCont) diffCont.innerHTML = '<div style="color:var(--text-muted);">Only 1 version exists; no diff available.</div>';
+        if (diffCont) diffCont.innerHTML = '<div style="color:var(--text-muted); padding:20px; text-align:center;">No revision history recorded for this entry.</div>';
       }
     }
 
@@ -2543,47 +2786,484 @@
       }
     }
 
+    let currentDiffData = null;
+
+    function computeLineDiff(textA, textB) {
+      const linesA = (textA !== undefined && textA !== null) ? String(textA).split('\n') : [];
+      const linesB = (textB !== undefined && textB !== null) ? String(textB).split('\n') : [];
+      const n = linesA.length;
+      const m = linesB.length;
+
+      if (n === 0 && m === 0) {
+        return { splitRows: [], unifiedRows: [], linesA, linesB, hasChanges: false };
+      }
+      if (n === 0) {
+        const splitRows = linesB.map((b, idx) => ({
+          left: null,
+          right: { num: idx + 1, text: b, type: 'add' }
+        }));
+        const unifiedRows = linesB.map((b, idx) => ({
+          oldNum: null,
+          newNum: idx + 1,
+          type: 'add',
+          mark: '+',
+          text: b
+        }));
+        return { splitRows, unifiedRows, linesA, linesB, hasChanges: true };
+      }
+      if (m === 0) {
+        const splitRows = linesA.map((a, idx) => ({
+          left: { num: idx + 1, text: a, type: 'del' },
+          right: null
+        }));
+        const unifiedRows = linesA.map((a, idx) => ({
+          oldNum: idx + 1,
+          newNum: null,
+          type: 'del',
+          mark: '-',
+          text: a
+        }));
+        return { splitRows, unifiedRows, linesA, linesB, hasChanges: true };
+      }
+
+      if (n > 1500 || m > 1500) {
+        const maxLen = Math.max(n, m);
+        const splitRows = [];
+        const unifiedRows = [];
+        for (let i = 0; i < maxLen; i++) {
+          const a = i < n ? linesA[i] : null;
+          const b = i < m ? linesB[i] : null;
+          if (a === b) {
+            splitRows.push({
+              left: { num: i + 1, text: a, type: 'equal' },
+              right: { num: i + 1, text: b, type: 'equal' }
+            });
+            unifiedRows.push({ oldNum: i + 1, newNum: i + 1, type: 'equal', mark: ' ', text: a });
+          } else {
+            if (a !== null) {
+              splitRows.push({
+                left: { num: i + 1, text: a, type: 'del' },
+                right: b !== null ? { num: i + 1, text: b, type: 'add' } : null
+              });
+              unifiedRows.push({ oldNum: i + 1, newNum: null, type: 'del', mark: '-', text: a });
+            }
+            if (b !== null && a === null) {
+              splitRows.push({
+                left: null,
+                right: { num: i + 1, text: b, type: 'add' }
+              });
+              unifiedRows.push({ oldNum: null, newNum: i + 1, type: 'add', mark: '+', text: b });
+            }
+          }
+        }
+        return { splitRows, unifiedRows, linesA, linesB, hasChanges: true };
+      }
+
+      const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < m; j++) {
+          if (linesA[i] === linesB[j]) {
+            dp[i + 1][j + 1] = dp[i][j] + 1;
+          } else {
+            dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+          }
+        }
+      }
+
+      let i = n, j = m;
+      const ops = [];
+      while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && linesA[i - 1] === linesB[j - 1]) {
+          ops.push({ type: 'equal', lineA: linesA[i - 1], lineB: linesB[j - 1], numA: i, numB: j });
+          i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+          ops.push({ type: 'add', lineB: linesB[j - 1], numB: j });
+          j--;
+        } else {
+          ops.push({ type: 'del', lineA: linesA[i - 1], numA: i });
+          i--;
+        }
+      }
+      ops.reverse();
+
+      let hasChanges = false;
+      const unifiedRows = [];
+      for (const op of ops) {
+        if (op.type === 'equal') {
+          unifiedRows.push({ oldNum: op.numA, newNum: op.numB, type: 'equal', mark: ' ', text: op.lineA });
+        } else if (op.type === 'del') {
+          hasChanges = true;
+          unifiedRows.push({ oldNum: op.numA, newNum: null, type: 'del', mark: '-', text: op.lineA });
+        } else if (op.type === 'add') {
+          hasChanges = true;
+          unifiedRows.push({ oldNum: null, newNum: op.numB, type: 'add', mark: '+', text: op.lineB });
+        }
+      }
+
+      const splitRows = [];
+      let k = 0;
+      while (k < ops.length) {
+        const op = ops[k];
+        if (op.type === 'equal') {
+          splitRows.push({
+            left: { num: op.numA, text: op.lineA, type: 'equal' },
+            right: { num: op.numB, text: op.lineB, type: 'equal' }
+          });
+          k++;
+        } else {
+          const dels = [];
+          const adds = [];
+          while (k < ops.length && ops[k].type !== 'equal') {
+            if (ops[k].type === 'del') dels.push(ops[k]);
+            else if (ops[k].type === 'add') adds.push(ops[k]);
+            k++;
+          }
+          const maxLen = Math.max(dels.length, adds.length);
+          for (let r = 0; r < maxLen; r++) {
+            const d = dels[r];
+            const a = adds[r];
+            splitRows.push({
+              left: d ? { num: d.numA, text: d.lineA, type: 'del' } : null,
+              right: a ? { num: a.numB, text: a.lineB, type: 'add' } : null
+            });
+          }
+        }
+      }
+
+      return { splitRows, unifiedRows, linesA, linesB, hasChanges };
+    }
+
     async function loadDiff(key, fromSha, toSha) {
+      App.diffCurrentKey = key;
+      App.diffFromSha = fromSha;
+      App.diffToSha = toSha;
+
       const container = document.getElementById('diffViewContainer');
-      container.innerHTML = `<div style="color:var(--text-muted);">Calculating revision diff ${fromSha.slice(0,7)}..${toSha.slice(0,7)}...</div>`;
-      const diffData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${fromSha}&to=${toSha}`);
-      if (!diffData || !diffData.changed) {
-        container.innerHTML = '<div style="color:var(--text-muted);">No textual or metadata changes between these revisions.</div>';
-        return;
+      if (!container) return;
+
+      container.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px; padding:24px; color:var(--text-muted); font-family:var(--font-mono); font-size:12px;">
+          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent);"></span>
+          Сравнение ревизий ${fromSha.slice(0, 7)} ➔ ${toSha.slice(0, 7)}...
+        </div>
+      `;
+
+      if (!App.currentHistoryList || App.currentHistoryList.length === 0 || (App.currentHistoryList[0] && App.currentHistoryList[0].key !== key)) {
+        const hData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/history`);
+        if (hData && hData.versions) {
+          App.currentHistoryList = hData.versions;
+        }
+      }
+      const historyList = App.currentHistoryList || [];
+
+      let diffData = null;
+      try {
+        diffData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${encodeURIComponent(fromSha)}&to=${encodeURIComponent(toSha)}`);
+      } catch (_) {}
+
+      if (!diffData) {
+        const isFromInitial = fromSha === 'initial' || fromSha === 'empty';
+        const fromHist = historyList.find(h => h.sha === fromSha);
+        const toHist = historyList.find(h => h.sha === toSha);
+
+        const [fromSnap, toSnap] = await Promise.all([
+          isFromInitial ? Promise.resolve(null) : (fromHist && fromHist.change === 'deleted' ? Promise.resolve(null) : apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${encodeURIComponent(fromSha)}`)),
+          (toHist && toHist.change === 'deleted') ? Promise.resolve(null) : apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${encodeURIComponent(toSha)}`)
+        ]);
+
+        const fromEntry = fromSnap || {
+          key,
+          title: `(Empty Initial State)`,
+          body: '',
+          status: isFromInitial ? 'initial' : (fromHist && fromHist.change === 'deleted' ? 'archived' : 'open')
+        };
+        const toEntry = toSnap || {
+          key,
+          title: `(Archived: ${key})`,
+          body: '',
+          status: (toHist && toHist.change === 'deleted') ? 'archived' : 'open'
+        };
+
+        const fields = [];
+        if (fromEntry.status !== toEntry.status) {
+          fields.push({ field: 'status', from: fromEntry.status || 'open', to: toEntry.status || 'archived' });
+        }
+        if (fromEntry.title !== toEntry.title && fromEntry.title && toEntry.title) {
+          fields.push({ field: 'title', from: fromEntry.title, to: toEntry.title });
+        }
+        if (fromEntry.assignee !== toEntry.assignee) {
+          fields.push({ field: 'assignee', from: fromEntry.assignee || 'unassigned', to: toEntry.assignee || 'unassigned' });
+        }
+        if (fromEntry.priority !== toEntry.priority) {
+          fields.push({ field: 'priority', from: fromEntry.priority || 'normal', to: toEntry.priority || 'normal' });
+        }
+
+        diffData = {
+          key,
+          from: {
+            rev: fromSha,
+            committed_at: fromHist ? fromHist.committed_at : '',
+            author: fromHist ? (fromHist.author || 'Alexander Panasenko <alex@prod.codes>') : 'Initial State',
+            message: fromHist ? fromHist.message : 'Initial Creation',
+            exists: !isFromInitial && (!fromHist || fromHist.change !== 'deleted')
+          },
+          to: {
+            rev: toSha,
+            committed_at: toHist ? toHist.committed_at : '',
+            author: toHist ? (toHist.author || 'Alexander Panasenko <alex@prod.codes>') : '',
+            message: toHist ? toHist.message : 'Updated',
+            exists: !toHist || toHist.change !== 'deleted'
+          },
+          changed: true,
+          fields,
+          body: { added: [], removed: [] },
+          from_entry: fromEntry,
+          to_entry: toEntry
+        };
       }
 
-      let html = '';
-      if (diffData.fields && diffData.fields.length > 0) {
-        html += '<div style="margin-bottom:14px;"><div style="font-weight:700; font-size:12px; color:var(--accent); margin-bottom:6px;">Changed Metadata Fields:</div>';
-        html += diffData.fields.map(f => `
-          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:4px; padding:6px 10px; margin-bottom:4px; font-size:12px;">
-            <strong style="color:var(--text);">${escapeHtml(f.field)}:</strong>
-            <span style="color:var(--red); text-decoration:line-through; margin:0 6px;">${escapeHtml(String(f.from || 'none'))}</span>
-            <span>→</span>
-            <span style="color:var(--green); font-weight:600; margin-left:6px;">${escapeHtml(String(f.to || 'none'))}</span>
+      if (!diffData.from_entry || !diffData.to_entry) {
+        const [fSnap, tSnap] = await Promise.all([
+          fromSha === 'initial' ? Promise.resolve(null) : apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${encodeURIComponent(fromSha)}`),
+          apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${encodeURIComponent(toSha)}`)
+        ]);
+        if (!diffData.from_entry) diffData.from_entry = fSnap || { key, body: '' };
+        if (!diffData.to_entry) diffData.to_entry = tSnap || { key, body: '' };
+      }
+
+      currentDiffData = diffData;
+      renderCurrentDiff();
+    }
+
+    function renderCurrentDiff() {
+      const container = document.getElementById('diffViewContainer');
+      if (!container || !currentDiffData) return;
+
+      const diff = currentDiffData;
+      const historyList = App.currentHistoryList || [];
+      const viewMode = App.diffViewMode || 'split';
+
+      const fromSha = (diff.from && diff.from.rev) || App.diffFromSha;
+      const toSha = (diff.to && diff.to.rev) || App.diffToSha;
+
+      const fromEntry = diff.from_entry || {};
+      const toEntry = diff.to_entry || {};
+
+      const lineDiff = computeLineDiff(fromEntry.body || '', toEntry.body || '');
+
+      let html = `
+        <div class="diff-toolbar">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <div class="diff-picker-group">
+              <span class="diff-picker-label">До (Было):</span>
+              <select id="diffFromSelect" class="diff-select" onchange="onDiffRevisionChange()">
+                ${fromSha === 'initial' ? `<option value="initial" selected>(Initial Creation / Empty State)</option>` : ''}
+                ${historyList.map(h => `
+                  <option value="${escapeHtml(h.sha)}" ${h.sha === fromSha ? 'selected' : ''}>
+                    ${h.sha.slice(0, 7)} — ${escapeHtml(h.message || 'commit')} (${timeAgo(h.committed_at)})
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+
+            <button class="btn sm" onclick="swapDiffRevisions()" title="Поменять ревизии местами" style="padding:4px 8px;">⇄</button>
+
+            <div class="diff-picker-group">
+              <span class="diff-picker-label">После (Стало):</span>
+              <select id="diffToSelect" class="diff-select" onchange="onDiffRevisionChange()">
+                ${historyList.map(h => `
+                  <option value="${escapeHtml(h.sha)}" ${h.sha === toSha ? 'selected' : ''}>
+                    ${h.sha.slice(0, 7)} — ${escapeHtml(h.message || 'commit')} (${timeAgo(h.committed_at)})
+                  </option>
+                `).join('')}
+              </select>
+            </div>
           </div>
-        `).join('');
-        html += '</div>';
+
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div class="diff-view-toggles">
+              <button class="diff-view-toggle-btn ${viewMode === 'split' ? 'active' : ''}" onclick="setDiffViewMode('split')">Split (До / После)</button>
+              <button class="diff-view-toggle-btn ${viewMode === 'unified' ? 'active' : ''}" onclick="setDiffViewMode('unified')">Unified</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const fromMsg = (diff.from && diff.from.message) || '';
+      const toMsg = (diff.to && diff.to.message) || '';
+      const fromAuthor = (diff.from && diff.from.author) || 'Alexander Panasenko <alex@prod.codes>';
+      const toAuthor = (diff.to && diff.to.author) || 'Alexander Panasenko <alex@prod.codes>';
+      const fromTime = (diff.from && diff.from.committed_at) ? timeAgo(diff.from.committed_at) : '';
+      const toTime = (diff.to && diff.to.committed_at) ? timeAgo(diff.to.committed_at) : '';
+
+      const fields = diff.fields || [];
+      if (fields.length > 0) {
+        html += `
+          <div class="diff-metadata-section">
+            <div class="diff-section-title">
+              <span>Что изменилось в свойствах (${fields.length})</span>
+              <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); text-transform:none;">До (Было) ➔ После (Стало)</span>
+            </div>
+            <div class="diff-meta-grid">
+              ${fields.map(f => {
+                const label = f.field.replace(/_/g, ' ');
+                const fromVal = f.from || '(пусто)';
+                const toVal = f.to || '(пусто)';
+                return `
+                  <div class="diff-meta-row">
+                    <div class="diff-meta-field">${escapeHtml(label)}</div>
+                    <div class="diff-meta-before">${escapeHtml(fromVal)}</div>
+                    <div class="diff-meta-arrow">➔</div>
+                    <div class="diff-meta-after">${escapeHtml(toVal)}</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
       }
 
-      const bodyAdded = (diffData.body && diffData.body.added) || [];
-      const bodyRemoved = (diffData.body && diffData.body.removed) || [];
+      html += `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim);">
+            Текст документа ${lineDiff.hasChanges ? `(${lineDiff.splitRows.filter(r => (r.left && r.left.type === 'del') || (r.right && r.right.type === 'add')).length} строк затронуто)` : '(Без изменений)'}
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">
+            ${lineDiff.linesA.length} строк ➔ ${lineDiff.linesB.length} строк
+          </div>
+        </div>
+      `;
 
-      if (bodyAdded.length > 0 || bodyRemoved.length > 0) {
-        html += '<div style="font-weight:700; font-size:12px; color:var(--accent); margin-bottom:6px;">Body Content Changes:</div>';
-        html += '<div class="diff-container">';
-        bodyRemoved.forEach(line => {
-          html += `<div class="diff-line diff-del">- ${escapeHtml(line)}</div>`;
-        });
-        bodyAdded.forEach(line => {
-          html += `<div class="diff-line diff-add">+ ${escapeHtml(line)}</div>`;
-        });
-        html += '</div>';
-      } else if (!diffData.fields || diffData.fields.length === 0) {
-        html += '<div style="color:var(--text-muted);">No changes recorded.</div>';
+      if (!lineDiff.hasChanges && fields.length === 0) {
+        html += `
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:6px; padding:30px; text-align:center; color:var(--text-muted); font-size:13px;">
+            Между ревизиями ${fromSha.slice(0, 7)} и ${toSha.slice(0, 7)} изменений нет — документ и метаданные полностью идентичны.
+          </div>
+        `;
+      } else if (!lineDiff.hasChanges) {
+        html += `
+          <div style="background:var(--card-subtle); border:1px solid var(--border); border-radius:6px; padding:20px; text-align:center; color:var(--text-muted); font-size:12px; margin-bottom:14px;">
+            Текст документа не изменялся в этом коммите (изменились только свойства в блоке выше).
+          </div>
+        `;
+      } else if (viewMode === 'split') {
+        html += `
+          <div class="diff-split-container">
+            <div class="diff-split-col">
+              <div class="diff-split-header before">
+                <div>
+                  <span style="font-weight:700; color:#f87171; margin-right:6px;">ДО (БЫЛО):</span>
+                  <span style="font-family:var(--font-mono);">${fromSha.slice(0, 7)}</span>
+                  <span style="margin-left:6px; color:var(--text);">${escapeHtml(fromMsg)}</span>
+                </div>
+                <div style="font-size:10px; color:var(--text-dim);">${escapeHtml(fromAuthor)} • ${fromTime}</div>
+              </div>
+              <div class="diff-split-content">
+                ${lineDiff.splitRows.map(r => {
+                  if (!r.left) {
+                    return `<div class="diff-split-row diff-row-empty"><div class="diff-gutter"></div><div class="diff-cell"></div></div>`;
+                  }
+                  const rowClass = r.left.type === 'del' ? 'diff-row-del' : '';
+                  const prefix = r.left.type === 'del' ? '- ' : '  ';
+                  return `
+                    <div class="diff-split-row ${rowClass}">
+                      <div class="diff-gutter">${r.left.num}</div>
+                      <div class="diff-cell">${escapeHtml(prefix + r.left.text)}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <div class="diff-split-col">
+              <div class="diff-split-header after">
+                <div>
+                  <span style="font-weight:700; color:#34d399; margin-right:6px;">ПОСЛЕ (СТАЛО):</span>
+                  <span style="font-family:var(--font-mono);">${toSha.slice(0, 7)}</span>
+                  <span style="margin-left:6px; color:var(--text);">${escapeHtml(toMsg)}</span>
+                </div>
+                <div style="font-size:10px; color:var(--text-dim);">${escapeHtml(toAuthor)} • ${toTime}</div>
+              </div>
+              <div class="diff-split-content">
+                ${lineDiff.splitRows.map(r => {
+                  if (!r.right) {
+                    return `<div class="diff-split-row diff-row-empty"><div class="diff-gutter"></div><div class="diff-cell"></div></div>`;
+                  }
+                  const rowClass = r.right.type === 'add' ? 'diff-row-add' : '';
+                  const prefix = r.right.type === 'add' ? '+ ' : '  ';
+                  return `
+                    <div class="diff-split-row ${rowClass}">
+                      <div class="diff-gutter">${r.right.num}</div>
+                      <div class="diff-cell">${escapeHtml(prefix + r.right.text)}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="diff-unified-container">
+            <div class="diff-split-header" style="background:var(--card-subtle); border-bottom:1px solid var(--border);">
+              <span style="font-family:var(--font-mono);">${fromSha.slice(0, 7)} (${fromTime}) ➔ ${toSha.slice(0, 7)} (${toTime})</span>
+              <span style="color:var(--text);">${escapeHtml(toMsg)}</span>
+            </div>
+            ${lineDiff.unifiedRows.map(r => {
+              const rowClass = r.type === 'del' ? 'diff-row-del' : (r.type === 'add' ? 'diff-row-add' : '');
+              return `
+                <div class="diff-unified-row ${rowClass}">
+                  <div class="diff-unified-gutters">
+                    <div class="diff-unified-num">${r.oldNum || ''}</div>
+                    <div class="diff-unified-num">${r.newNum || ''}</div>
+                  </div>
+                  <div class="diff-unified-mark" style="color:${r.type === 'del' ? '#f87171' : (r.type === 'add' ? '#34d399' : 'var(--text-dim)')};">${r.mark}</div>
+                  <div class="diff-unified-text">${escapeHtml(r.text)}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
       }
 
       container.innerHTML = html;
+    }
+
+    function onDiffRevisionChange() {
+      const fromSel = document.getElementById('diffFromSelect');
+      const toSel = document.getElementById('diffToSelect');
+      if (!fromSel || !toSel || !App.diffCurrentKey) return;
+      loadDiff(App.diffCurrentKey, fromSel.value, toSel.value);
+    }
+
+    function swapDiffRevisions() {
+      if (!App.diffCurrentKey || !App.diffFromSha || !App.diffToSha) return;
+      loadDiff(App.diffCurrentKey, App.diffToSha, App.diffFromSha);
+    }
+
+    function setDiffViewMode(mode) {
+      App.diffViewMode = mode;
+      renderCurrentDiff();
+    }
+
+    async function openDiffForCommit(key, sha) {
+      if (!key) return;
+      showToast(`Loading diff for ${sha.slice(0, 7)}...`, 'info');
+      const histData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/history`);
+      const versions = (histData && histData.versions) || [];
+      App.currentHistoryList = versions;
+
+      const idx = versions.findIndex(v => v.sha === sha);
+      let fromSha = 'initial';
+      let toSha = sha;
+      if (idx !== -1 && idx < versions.length - 1) {
+        fromSha = versions[idx + 1].sha;
+      }
+
+      await selectEntry(key);
+      switchDetailTab('diff');
+      switchTab('search');
+      await loadDiff(key, fromSha, toSha);
     }
 
     async function inspectRevision(key, sha) {
@@ -3193,7 +3873,7 @@
               <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
               ${item.key ? `
                 <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchTab('search');">View</button>
-                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchDetailTab('diff'); switchTab('search');">Diff</button>
+                <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit('${escapeHtml(item.key)}', '${escapeHtml(item.sha)}');">Diff</button>
               ` : ''}
             </div>
           </a>
