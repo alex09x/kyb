@@ -4055,7 +4055,7 @@
     // did to that entry, even when the commit touched other files too.
     App.ledDiffs = App.ledDiffs || new Map();
     async function ledFetchDiffs(events) {
-      const want = events.filter(e => e.key && e.action !== 'created' && !App.ledDiffs.has(e.sha)).slice(0, 15);
+      const want = events.filter(e => e.key && e.action !== 'created' && !App.ledDiffs.has(e.sha)).slice(0, 30);
       if (!want.length) return false;
       await Promise.all(want.map(async e => {
         try {
@@ -4072,11 +4072,11 @@
         if (['updated_at'].includes(f.field)) continue;
         rows.push(`<div class="fld">${escapeHtml(f.field)}: <em>${escapeHtml(String(f.from ?? '∅'))}</em> → ${escapeHtml(String(f.to ?? '∅'))}</div>`);
       }
+      // The whole change, every time. The point of the ledger is that nothing
+      // needs a click to be seen.
       const rm = (d.body?.removed || []).filter(l => l.trim()), ad = (d.body?.added || []).filter(l => l.trim());
-      rm.slice(0, 2).forEach(l => rows.push(`<div class="del">− ${escapeHtml(l)}</div>`));
-      ad.slice(0, 3).forEach(l => rows.push(`<div class="add">+ ${escapeHtml(l)}</div>`));
-      const rest = Math.max(0, rm.length - 2) + Math.max(0, ad.length - 3);
-      if (rest) rows.push(`<div class="more">… ${rest} more changed line${rest > 1 ? 's' : ''}</div>`);
+      rm.forEach(l => rows.push(`<div class="del">− ${escapeHtml(l)}</div>`));
+      ad.forEach(l => rows.push(`<div class="add">+ ${escapeHtml(l)}</div>`));
       return rows.length ? `<div class="led-d">${rows.join('')}</div>` : '';
     }
 
