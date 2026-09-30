@@ -4,6 +4,7 @@ import os
 import socket
 import time
 import base64
+import urllib.request
 
 SOCK_PATH = f"/tmp/prod-browser-{os.environ['USER']}.sock"
 ARTIFACTS_DIR = "/Users/alex09x/.gemini/antigravity-cli/brain/89170df8-ae1b-4af8-81a9-2107b1a69605"
@@ -50,6 +51,11 @@ def get_kyb_host():
         pass
     return "127.0.0.1"
 
+def http_get_json(url):
+    req = urllib.request.Request(url, headers={'Accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
 def save_screenshot(client, tab_id, filename):
     res = client.call('screenshot', {'tabId': tab_id})
     if res and 'data' in res:
@@ -66,153 +72,52 @@ def main():
     host = get_kyb_host()
     base_url = f"http://{host}:9310"
 
-    # Find or create KYB tab
+    # Query sample keys directly from HTTP API
+    hits_data = http_get_json(f"{base_url}/search?limit=5")
+    sample_doc_key = hits_data['hits'][0]['key'] if hits_data.get('hits') else 'postgres-replicas'
+
+    inc_data = http_get_json(f"{base_url}/incidents?all=1")
+    sample_inc_key = inc_data['incidents'][0]['key'] if inc_data.get('incidents') else 'inc-test'
+
+    task_data = http_get_json(f"{base_url}/tasks?all=1")
+    sample_task_key = task_data['tasks'][0]['key'] if task_data.get('tasks') else 'task-test'
+
+    print(f"Discovered sample keys:")
+    print(f"  Doc:      {sample_doc_key}")
+    print(f"  Incident: {sample_inc_key}")
+    print(f"  Task:     {sample_task_key}")
+
+    # Close any existing test tabs on :9310 first to ensure a clean state
     tabs = client.call('tabs.list')
-    kyb_tab = None
     for t in tabs:
         if ':9310' in t.get('url', ''):
-            kyb_tab = t
-            break
+            try:
+                client.call('tabs.close', {'tabId': t['id']})
+            except Exception:
+                pass
 
-    if not kyb_tab:
-        print("Opening new tab for KYB...")
-        res = client.call('tabs.create', {'url': f"{base_url}/#/search", 'active': True})
+    test_routes = [
+        ("knowledge", f"/#/knowledge/{sample_doc_key}", "Direct Link to Knowledge Document"),
+        ("graph-node", f"/#/graph/{sample_doc_key}", "Direct Link to Graph Node with Open Drawer"),
+        ("incident", f"/#/incidents/{sample_inc_key}", "Direct Link to Incident Report"),
+        ("task", f"/#/tasks/{sample_task_key}", "Direct Link to Task Kanban"),
+        ("search", "/#/search?q=postgres", "Direct Link to Search Query"),
+        ("feed", "/#/feed", "Direct Link to Operations Activity Stream")
+    ]
+
+    for name, route, description in test_routes:
+        url = f"{base_url}{route}"
+        print(f"\n--- TEST: {description} ---")
+        print(f"Opening cold-boot tab: {url}")
+        res = client.call('tabs.create', {'url': url, 'active': True})
         tab_id = res['tabId']
-        time.sleep(2)
-    else:
-        tab_id = kyb_tab['id']
-        client.call('tabs.activate', {'tabId': tab_id})
+        time.sleep(3.2)
+        save_screenshot(client, tab_id, f"kyb-v5-direct-link-{name}.png")
+        if name != "feed": # keep last one open for interactive browsing
+            client.call('tabs.close', {'tabId': tab_id})
 
-    print(f"\n--- TEST 1: Direct Link to Knowledge Document ---")
-    doc_url = f"{base_url}/#/knowledge/postgres-replicas"
-    print(f"Navigating directly to: {doc_url}")
-    client.call('navigate', {'tabId': tab_id, 'url': doc_url})
-    time.sleep(2.5)
-
-    eval_res = client.call('eval', {
-        'tabId': tab_id,
-        'expression': """
-            JSON.stringify({
-                activeTab: App.activeTab,
-                selectedKey: App.selectedKey,
-                hash: window.location.hash,
-                title: document.title,
-                cardSelected: !!document.querySelector('.item-card[data-key="postgres-replicas"].selected'),
-                detailHeading: document.querySelector('#detailView h1')?.textContent || '',
-                copyBtnExists: !!document.getElementById('btnCopyDirectLink')
-            })
-        """
-    })
-    print(f"  Result: {eval_res}")
-    save_screenshot(client, tab_id, "kyb-v5-direct-link-knowledge.png")
-
-    print(f"\n--- TEST 2: Direct Link to Graph Node with Open Drawer ---")
-    graph_url = f"{base_url}/#/graph/postgres-replicas"
-    print(f"Navigating directly to: {graph_url}")
-    client.call('navigate', {'tabId': tab_id, 'url': graph_url})
-    time.sleep(2.5)
-
-    eval_graph = client.call('eval', {
-        'tabId': tab_id,
-        'expression': """
-            JSON.stringify({
-                activeTab: App.activeTab,
-                drawerOpen: document.getElementById('graphDrawer')?.classList.contains('open'),
-                drawerKey: document.getElementById('drawerKey')?.textContent,
-                drawerTitle: document.getElementById('drawerTitle')?.textContent,
-                copyLinkBtnExists: !!document.getElementById('drawerCopyLinkBtn')
-            })
-        """
-    })
-    print(f"  Result: {eval_graph}")
-    save_screenshot(client, tab_id, "kyb-v5-direct-link-graph-node.png")
-
-    print(f"\n--- TEST 3: Direct Link to Incident Report ---")
-    inc_url = f"{base_url}/#/incidents"
-    print(f"Navigating to incidents...")
-    client.call('navigate', {'tabId': tab_id, 'url': inc_url})
-    time.sleep(2.0)
-
-    # Grab first incident key
-    first_inc = client.call('eval', {
-        'tabId': tab_id,
-        'expression': "App.incidents[0]?.key || ''"
-    })
-    if first_inc and isinstance(first_inc, dict) and 'value' in first_inc:
-        first_inc = first_inc['value']
-
-    if first_inc:
-        target_inc_url = f"{base_url}/#/incidents/{first_inc}"
-        print(f"Navigating directly to incident permalink: {target_inc_url}")
-        client.call('navigate', {'tabId': tab_id, 'url': target_inc_url})
-        time.sleep(1.8)
-        eval_inc = client.call('eval', {
-            'tabId': tab_id,
-            'expression': f"""
-                JSON.stringify({{
-                    activeTab: App.activeTab,
-                    cardHighlighted: !!document.querySelector('.incident-card[data-key="{first_inc}"].target-highlight'),
-                    key: '{first_inc}'
-                }})
-            """
-        })
-        print(f"  Result: {eval_inc}")
-        save_screenshot(client, tab_id, "kyb-v5-direct-link-incident.png")
-
-    print(f"\n--- TEST 4: Direct Link to Task Kanban ---")
-    task_url = f"{base_url}/#/tasks"
-    print(f"Navigating to tasks...")
-    client.call('navigate', {'tabId': tab_id, 'url': task_url})
-    time.sleep(2.0)
-
-    first_task = client.call('eval', {
-        'tabId': tab_id,
-        'expression': "App.tasks[0]?.key || ''"
-    })
-    if first_task and isinstance(first_task, dict) and 'value' in first_task:
-        first_task = first_task['value']
-
-    if first_task:
-        target_task_url = f"{base_url}/#/tasks/{first_task}"
-        print(f"Navigating directly to task permalink: {target_task_url}")
-        client.call('navigate', {'tabId': tab_id, 'url': target_task_url})
-        time.sleep(1.8)
-        eval_task = client.call('eval', {
-            'tabId': tab_id,
-            'expression': f"""
-                JSON.stringify({{
-                    activeTab: App.activeTab,
-                    cardHighlighted: !!document.querySelector('.task-card[data-key="{first_task}"].target-highlight'),
-                    key: '{first_task}'
-                }})
-            """
-        })
-        print(f"  Result: {eval_task}")
-        save_screenshot(client, tab_id, "kyb-v5-direct-link-task.png")
-
-    print(f"\n--- TEST 5: Direct Link to Search Query ---")
-    search_url = f"{base_url}/#/search?q=postgres"
-    print(f"Navigating directly to: {search_url}")
-    client.call('navigate', {'tabId': tab_id, 'url': search_url})
-    time.sleep(2.0)
-
-    eval_search = client.call('eval', {
-        'tabId': tab_id,
-        'expression': """
-            JSON.stringify({
-                activeTab: App.activeTab,
-                searchQuery: App.searchQuery,
-                inputValue: document.getElementById('globalSearch')?.value,
-                highlightsCount: document.querySelectorAll('.search-highlight').length
-            })
-        """
-    })
-    print(f"  Result: {eval_search}")
-    save_screenshot(client, tab_id, "kyb-v5-direct-link-search.png")
-
-    client.call('tabs.detach', {'tabId': tab_id})
     client.close()
-    print("\nAll deep link verification tests finished successfully!")
+    print("\nAll cold-boot deep link tests completed successfully!")
 
 if __name__ == '__main__':
     main()

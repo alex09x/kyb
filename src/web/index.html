@@ -1865,9 +1865,9 @@
         `;
       }).join('');
 
-      // Auto-select first item if none selected or current not in list
-      if (!App.selectedKey && list.length > 0) {
-        selectEntry(list[0].key, true);
+      // Auto-select first item ONLY if on search tab and none is selected
+      if (App.activeTab === 'search' && !App.selectedKey && list.length > 0) {
+        selectEntry(list[0].key, false);
       }
     }
 
@@ -4487,6 +4487,11 @@
         if (root === 'knowledge' || root === 'doc') {
           const key = paramKey || params.get('key');
           if (App.activeTab !== 'search') switchTab('search', false);
+          if (searchEl && searchEl.value) {
+            searchEl.value = '';
+            App.searchQuery = '';
+            renderKnowledgeList();
+          }
           if (key) {
             const rev = params.get('rev') || params.get('at');
             selectEntry(key, false).then(() => {
@@ -4558,7 +4563,9 @@
       window.addEventListener('popstate', applyRoute);
 
       // Initial load & 4s polling
-      refreshAll();
+      refreshAll().then(() => {
+        applyRoute();
+      });
       setInterval(refreshAll, 4000);
     });
   </script>
