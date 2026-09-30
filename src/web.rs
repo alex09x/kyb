@@ -13,12 +13,19 @@ use std::sync::Arc;
 pub const UI_HTML: &str = include_str!("web/index.html");
 
 pub async fn serve_ui() -> impl IntoResponse {
+    let content = if let Ok(path) = std::env::var("KYB_UI_PATH") {
+        std::fs::read_to_string(&path).unwrap_or_else(|_| UI_HTML.to_string())
+    } else if let Ok(custom) = std::fs::read_to_string("/data/index.html") {
+        custom
+    } else {
+        UI_HTML.to_string()
+    };
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
             (header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
         ],
-        UI_HTML,
+        content,
     )
 }
 
