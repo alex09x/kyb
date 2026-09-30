@@ -88,29 +88,22 @@
       font-size: 15px;
       letter-spacing: -0.2px;
     }
-    .live-pulse {
+    .system-status {
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 11px;
-      font-family: var(--font-mono);
-      color: var(--green);
-      background: var(--green-dim);
-      padding: 2px 8px;
-      border-radius: 12px;
-      border: 1px solid rgba(16, 185, 129, 0.25);
+      font-size: 11.5px;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.04);
+      padding: 3px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
     }
-    .live-dot {
-      width: 7px;
-      height: 7px;
-      background: var(--green);
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      background: #10b981;
       border-radius: 50%;
-      box-shadow: 0 0 8px var(--green);
-      animation: pulse 2s infinite ease-in-out;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.8); }
     }
 
     /* Tabs */
@@ -616,8 +609,8 @@
       text-decoration: underline;
     }
     @keyframes targetGlow {
-      0% { box-shadow: 0 0 0 3px rgba(0, 179, 196, 0.9), 0 0 24px rgba(0, 179, 196, 0.6); }
-      50% { box-shadow: 0 0 0 4px rgba(0, 229, 255, 1), 0 0 35px rgba(0, 229, 255, 0.9); }
+      0% { box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3); }
+      50% { box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.6), 0 8px 24px rgba(0, 0, 0, 0.4); }
       100% { box-shadow: 0 0 0 1px var(--border); }
     }
     .target-highlight {
@@ -974,31 +967,32 @@
     .node-hud {
       position: absolute;
       pointer-events: auto;
-      background: rgba(13, 17, 26, 0.94);
-      border: 1px solid rgba(0, 229, 255, 0.4);
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 12px 14px;
       font-size: 12px;
-      color: #fff;
+      color: var(--text);
       display: none;
       z-index: 30;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), 0 0 15px rgba(0, 229, 255, 0.2);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
       backdrop-filter: blur(14px);
       max-width: 340px;
     }
     .node-hud-btn {
-      background: rgba(0, 229, 255, 0.15);
-      border: 1px solid rgba(0, 229, 255, 0.35);
-      color: #00e5ff;
-      border-radius: 4px;
-      padding: 4px 10px;
+      background: var(--hover);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 10px;
       font-size: 11px;
       cursor: pointer;
-      font-weight: 600;
-      transition: background 0.1s ease;
+      font-weight: 500;
+      transition: all 0.15s ease;
     }
     .node-hud-btn:hover {
-      background: rgba(0, 229, 255, 0.35);
+      background: var(--active);
+      border-color: var(--border-light);
     }
 
     /* Sliding Graph Inspector Drawer */
@@ -1009,16 +1003,16 @@
       bottom: 14px;
       width: 380px;
       max-width: calc(100% - 28px);
-      background: rgba(10, 14, 22, 0.96);
-      border: 1px solid rgba(0, 229, 255, 0.35);
-      border-radius: 12px;
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 229, 255, 0.15);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
       backdrop-filter: blur(16px);
       z-index: 35;
       display: flex;
       flex-direction: column;
       transform: translateX(120%);
-      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
       pointer-events: auto;
     }
     .graph-drawer.open {
@@ -1317,28 +1311,33 @@
       <div class="brand-logo">KYB</div>
       <div>
         <div class="brand-title">Know Your Business</div>
-        <div style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">Agent Fleet Memory & Control Room</div>
+        <div style="font-size: 11px; color: var(--text-muted);">Infrastructure Canon & Fleet Memory</div>
       </div>
     </a>
 
     <nav class="nav-tabs">
       <a href="#/search" class="nav-tab active" data-tab="search">
-        <span>🔍 Knowledge</span>
-        <span class="tab-badge teal" id="badgeKnowledgeCount">0</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+        <span>Knowledge</span>
+        <span class="tab-badge" id="badgeKnowledgeCount">0</span>
       </a>
       <a href="#/incidents" class="nav-tab" data-tab="incidents">
-        <span>🚨 Incidents</span>
-        <span class="tab-badge" id="badgeIncidentsCount">0</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Incidents</span>
+        <span class="tab-badge red" id="badgeIncidentsCount">0</span>
       </a>
       <a href="#/tasks" class="nav-tab" data-tab="tasks">
-        <span>📋 Tasks</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 12 2 2 4-4"/></svg>
+        <span>Tasks</span>
         <span class="tab-badge" id="badgeTasksCount">0</span>
       </a>
       <a href="#/graph" class="nav-tab" data-tab="graph">
-        <span>🕸️ Topology</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        <span>Topology</span>
       </a>
       <a href="#/feed" class="nav-tab" data-tab="feed">
-        <span>⚡ Activity</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Activity</span>
         <span class="tab-badge" id="badgeFeedCount">0</span>
       </a>
     </nav>
@@ -1350,11 +1349,11 @@
         <span class="kbd-shortcut">/</span>
       </div>
       <button class="btn primary sm" id="btnOpenNew" onclick="openNewModal()">+ New</button>
-      <button class="btn sm icon-only" title="Keyboard Shortcuts (?)" onclick="openShortcutsModal()">⌨️</button>
-      <button class="btn sm icon-only" id="refreshBtn" title="Force Refresh (R)" onclick="manualRefresh()">🔄</button>
-      <div class="live-pulse">
-        <span class="live-dot"></span>
-        <span id="daemonLabel">DAEMON ONLINE</span>
+      <button class="btn sm icon-only" title="Keyboard Shortcuts (?)" onclick="openShortcutsModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="8.01"/><line x1="10" y1="8" x2="10" y2="8.01"/><line x1="14" y1="8" x2="14" y2="8.01"/><line x1="18" y1="8" x2="18" y2="8.01"/><line x1="6" y1="12" x2="6" y2="12.01"/><line x1="10" y1="12" x2="10" y2="12.01"/><line x1="14" y1="12" x2="14" y2="12.01"/><line x1="18" y1="12" x2="18" y2="12.01"/><line x1="7" y1="16" x2="17" y2="16"/></svg></button>
+      <button class="btn sm icon-only" id="refreshBtn" title="Force Refresh (R)" onclick="manualRefresh()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg></button>
+      <div class="system-status" title="Fleet connection active">
+        <span class="status-dot"></span>
+        <span id="daemonLabel">Connected</span>
       </div>
     </div>
   </header>
@@ -1362,33 +1361,26 @@
   <!-- Metrics Subheader -->
   <section class="stats-bar">
     <div class="stat-item">
-      <span>Indexed:</span>
-      <span class="stat-val accent" id="statIndexed">0 keys</span>
+      <span>Total entries:</span>
+      <span class="stat-val" id="statIndexed">0</span>
     </div>
     <div class="stat-dot"></div>
     <div class="stat-item">
-      <span>Incidents:</span>
-      <span class="stat-val" id="statIncidents">0 open</span>
+      <span>Open incidents:</span>
+      <span class="stat-val" id="statIncidents">0</span>
     </div>
     <div class="stat-dot"></div>
     <div class="stat-item">
-      <span>Agent Tasks:</span>
-      <span class="stat-val" id="statTasks">0 active</span>
+      <span>Active tasks:</span>
+      <span class="stat-val" id="statTasks">0</span>
     </div>
     <div class="stat-dot"></div>
     <div class="stat-item">
-      <span>Engine:</span>
-      <span class="stat-val green" id="statEngine">BM25 + CPU Vector (~5ms)</span>
+      <span>Canon:</span>
+      <span class="stat-val" id="statRev" style="font-family:var(--font-mono);">head</span>
     </div>
-    <div class="stat-dot"></div>
-    <div class="stat-item">
-      <span>Git Canon:</span>
-      <span class="stat-val" id="statRev">head</span>
-    </div>
-    <div class="stat-dot"></div>
     <div class="stat-item" style="margin-left: auto;">
-      <span style="color: var(--text-muted);">Synced:</span>
-      <span class="stat-val" style="color: var(--text-muted); font-size:11px;" id="statLastSync">just now</span>
+      <span style="color: var(--text-muted); font-size:11.5px;">Last sync: <span id="statLastSync" style="color: var(--text-dim);">just now</span></span>
     </div>
   </section>
 
@@ -1442,9 +1434,9 @@
       <div class="incidents-container">
         <div id="incidentAlertBanner" class="alert-banner healthy">
           <div style="display:flex; align-items:center; gap:12px;">
-            <span style="font-size: 24px;" id="incidentBannerIcon">🛡️</span>
+            <span id="incidentBannerIcon" style="display:flex; align-items:center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
             <div>
-              <div style="font-weight: 700; font-size: 15px;" id="incidentBannerTitle">All Systems Operational</div>
+              <div style="font-weight: 600; font-size: 15px;" id="incidentBannerTitle">All Systems Operational</div>
               <div style="font-size: 12px; color: var(--text-dim);" id="incidentBannerSub">No active or unmitigated incidents recorded across the agent fleet.</div>
             </div>
           </div>
@@ -1524,41 +1516,41 @@
 
         <div class="graph-overlay">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <div style="font-weight: 700; color: #fff; font-size:13px; letter-spacing:0.5px;">🌐 Fleet Topology</div>
+            <div style="font-weight: 600; color: var(--text); font-size:13px;">Fleet Architecture</div>
             <span class="tab-badge teal" id="topoNodeCountBadge">0 nodes</span>
           </div>
 
           <div style="margin-bottom:8px;">
-            <input type="text" id="topoSearchInput" class="form-input" style="padding:4px 8px; font-size:11px; height:26px; border-radius:4px; width:100%;" placeholder="🔍 Highlight in graph..." oninput="setTopoSearch(this.value)">
-            <div id="topoSearchCount" style="font-size:10px; color:var(--accent); margin-top:3px; display:none;"></div>
+            <input type="text" id="topoSearchInput" class="form-input" style="padding:5px 8px; font-size:12px; border-radius:5px; width:100%;" placeholder="Filter nodes in graph..." oninput="setTopoSearch(this.value)">
+            <div id="topoSearchCount" style="font-size:11px; color:var(--accent); margin-top:3px; display:none;"></div>
           </div>
 
-          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:4px; font-size:11px; color: var(--text-dim);">
-            <span style="font-weight:600; color:var(--text-muted);">Layout Perspective:</span>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; margin-top:4px;">
-              <button class="chip active" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">🪐 Orbit Cluster</button>
-              <button class="chip" id="layoutRadarBtn" onclick="setGraphLayout('radar')">🎯 Radar Rings</button>
-              <button class="chip" id="layoutHierarchyBtn" onclick="setGraphLayout('hierarchy')">🌲 Hierarchy</button>
-              <button class="chip" id="layoutGridBtn" onclick="setGraphLayout('grid')">🗂️ Service Grid</button>
+          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
+            <div style="font-size:10.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Layout View</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px;">
+              <button class="chip active" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">Cluster</button>
+              <button class="chip" id="layoutRadarBtn" onclick="setGraphLayout('radar')">Concentric</button>
+              <button class="chip" id="layoutHierarchyBtn" onclick="setGraphLayout('hierarchy')">Hierarchy</button>
+              <button class="chip" id="layoutGridBtn" onclick="setGraphLayout('grid')">Service Grid</button>
             </div>
           </div>
 
-          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:6px; font-size:11px; color: var(--text-dim);">
-            <span style="font-weight:600; color:var(--text-muted);">Filter Elements:</span>
-            <div style="display:flex; gap:4px; margin-top:4px; flex-wrap:wrap;">
+          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px;">
+            <div style="font-size:10.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Filter Elements</div>
+            <div style="display:flex; gap:4px; flex-wrap:wrap;">
               <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
-              <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">📘 Doc</button>
-              <button class="chip" id="gFilterIncidents" onclick="setGraphFilter('incident')">🚨 Inc</button>
-              <button class="chip" id="gFilterTasks" onclick="setGraphFilter('task')">📋 Task</button>
+              <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">Docs</button>
+              <button class="chip" id="gFilterIncidents" onclick="setGraphFilter('incident')">Incidents</button>
+              <button class="chip" id="gFilterTasks" onclick="setGraphFilter('task')">Tasks</button>
             </div>
           </div>
 
-          <div style="border-top:1px solid var(--border); padding-top:6px; margin-top:6px; font-size:10.5px;">
-            <div class="graph-legend-item"><span class="legend-color" style="background:#00e5ff; border:1px solid #fff;"></span> Service Hubs (⚙️)</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#a855f7; border-radius:2px;"></span> Host Hubs (🖥️)</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#00b3c4;"></span> Knowledge Articles</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#ef4444;"></span> Fleet Incidents</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#f59e0b;"></span> Agent Tasks</div>
+          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px; font-size:11px; display:flex; flex-direction:column; gap:4px;">
+            <div class="graph-legend-item"><span class="legend-color" style="background:#38bdf8;"></span> Services</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#a78bfa;"></span> Fleet Hosts</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#94a3b8;"></span> Knowledge Base</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#f43f5e;"></span> Incidents</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#fbbf24;"></span> Tasks</div>
           </div>
         </div>
 
@@ -1575,30 +1567,30 @@
             <h2 id="drawerTitle" style="font-size:15px; font-weight:700; color:#fff; margin-bottom:8px;">Title</h2>
             <div id="drawerMeta" style="font-size:11.5px; color:var(--text-muted); margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
             <div style="border-top:1px solid var(--border); padding-top:10px; margin-bottom:12px;">
-              <div style="font-size:11px; font-weight:700; color:var(--accent); text-transform:uppercase; margin-bottom:6px;">Connected Infrastructure</div>
+              <div style="font-size:10.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Connected Infrastructure</div>
               <div id="drawerLinks" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
             </div>
             <div style="border-top:1px solid var(--border); padding-top:10px;">
-              <div style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px;">Document Body Preview</div>
+              <div style="font-size:10.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Document Summary</div>
               <div id="drawerContent" class="prose" style="font-size:12px; max-height:260px; overflow-y:auto; background:var(--card-subtle); padding:10px; border-radius:6px;"></div>
             </div>
           </div>
           <div class="graph-drawer-footer" id="drawerFooter">
-            <a href="#" class="btn sm primary" id="drawerOpenFullBtn">📖 Open Full Page</a>
-            <button class="btn sm" id="drawerEditBtn">✏️ Quick Edit</button>
-            <button class="btn sm" id="drawerCenterBtn">🎯 Center Camera</button>
-            <button class="btn sm" id="drawerCopyBtn">📋 Copy Key</button>
-            <button class="btn sm" id="drawerCopyLinkBtn">🔗 Copy Link</button>
+            <a href="#" class="btn sm primary" id="drawerOpenFullBtn">Open Full Doc →</a>
+            <button class="btn sm" id="drawerEditBtn">Edit</button>
+            <button class="btn sm" id="drawerCenterBtn">Center</button>
+            <button class="btn sm" id="drawerCopyBtn">Copy Key</button>
+            <button class="btn sm" id="drawerCopyLinkBtn">Link</button>
           </div>
         </div>
 
         <div class="graph-controls-bar">
-          <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">⚡ Reheat</button>
-          <button class="btn sm" onclick="fitGraphCamera()">🎯 Fit All</button>
-          <button class="btn sm" onclick="zoomGraph(1.25)">➕ Zoom</button>
-          <button class="btn sm" onclick="zoomGraph(0.8)">➖ Zoom</button>
-          <button class="btn sm" onclick="unpinAllGraphNodes()">📌 Unpin All</button>
-          <button class="btn sm" onclick="resetGraphCamera()">⟲ Reset</button>
+          <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">Stabilize</button>
+          <button class="btn sm" onclick="fitGraphCamera()">Fit to View</button>
+          <button class="btn sm" onclick="zoomGraph(1.2)">+ Zoom</button>
+          <button class="btn sm" onclick="zoomGraph(0.8)">− Zoom</button>
+          <button class="btn sm" onclick="unpinAllGraphNodes()">Unpin All</button>
+          <button class="btn sm" onclick="resetGraphCamera()">Reset</button>
         </div>
       </div>
     </div>
@@ -1608,17 +1600,17 @@
       <div class="feed-container">
         <div class="feed-toolbar">
           <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-weight:700; font-size:13.5px; color:#fff;">⚡ Fleet Activity & Git Canon Changelog</span>
+            <span style="font-weight:600; font-size:13.5px; color:var(--text);">Fleet Activity & Changelog</span>
             <span class="tab-badge teal" id="feedCountBadge">0 operations</span>
           </div>
           <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
             <span style="font-size:12px; color:var(--text-muted);">Filter:</span>
-            <button class="chip active" id="actFilterAll" onclick="setActivityFilter('all')">All Operations</button>
-            <button class="chip" id="actFilterKnowledge" onclick="setActivityFilter('knowledge')">📘 Knowledge</button>
-            <button class="chip" id="actFilterIncidents" onclick="setActivityFilter('incident')">🚨 Incidents</button>
-            <button class="chip" id="actFilterTasks" onclick="setActivityFilter('task')">📋 Tasks</button>
-            <button class="chip" id="actFilterSearches" onclick="setActivityFilter('search')">🔍 Agent Searches</button>
-            <button class="btn sm" id="feedPauseBtn" onclick="toggleFeedPause()">⏸ Pause Stream</button>
+            <button class="chip active" id="actFilterAll" onclick="setActivityFilter('all')">All</button>
+            <button class="chip" id="actFilterKnowledge" onclick="setActivityFilter('knowledge')">Knowledge</button>
+            <button class="chip" id="actFilterIncidents" onclick="setActivityFilter('incident')">Incidents</button>
+            <button class="chip" id="actFilterTasks" onclick="setActivityFilter('task')">Tasks</button>
+            <button class="chip" id="actFilterSearches" onclick="setActivityFilter('search')">Searches</button>
+            <button class="btn sm" id="feedPauseBtn" onclick="toggleFeedPause()">Pause Stream</button>
             <button class="btn sm" onclick="clearFeedTable()">Clear View</button>
           </div>
         </div>
@@ -1642,9 +1634,9 @@
       </div>
 
       <div style="display:flex; border-bottom:1px solid var(--border); background:var(--card-subtle); padding:4px 20px 0 20px; gap:8px;">
-        <button class="chip active" id="modalTypeKnowledge" onclick="switchNewModalType('knowledge')">📘 Knowledge</button>
-        <button class="chip" id="modalTypeIncident" onclick="switchNewModalType('incident')">🚨 Incident</button>
-        <button class="chip" id="modalTypeTask" onclick="switchNewModalType('task')">📋 Task</button>
+        <button class="chip active" id="modalTypeKnowledge" onclick="switchNewModalType('knowledge')">Knowledge</button>
+        <button class="chip" id="modalTypeIncident" onclick="switchNewModalType('incident')">Incident</button>
+        <button class="chip" id="modalTypeTask" onclick="switchNewModalType('task')">Task</button>
       </div>
 
       <div class="modal-body" id="newModalBody">
@@ -2085,7 +2077,7 @@
             <div class="item-meta">
               <span>${timeAgo(item.updated_at || item.committed_at)}</span>
               ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
-              ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">🕒 ${revCount} revs</span>` : ''}
+              ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">${revCount} revs</span>` : ''}
             </div>
           </a>
         `;
@@ -2164,7 +2156,7 @@
                 <span class="badge badge-task">TASK</span>
                 <span class="hero-key">${escapeHtml(e.key)}</span>
                 <span class="hero-attribution">
-                  <span>👤 Created by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
+                  <span>Created by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
                   <span>•</span>
                   <span>${createdAt ? timeAgo(createdAt) : 'recent'}</span>
                 </span>
@@ -2177,24 +2169,24 @@
 
               <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 ${isOpen ? `
-                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">▶ Start (In Progress)</button>
-                  <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">⚠️ Block</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">✔ Resolve / Done</button>
+                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Start Progress</button>
+                  <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Block Task</button>
+                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Task</button>
                 ` : ''}
                 ${isProgress ? `
-                  <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">⚠️ Block Task</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">✔ Resolve / Done</button>
-                  <button class="btn sm" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">↩ Move to Backlog</button>
+                  <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Block Task</button>
+                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Task</button>
+                  <button class="btn sm" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">Move to Backlog</button>
                 ` : ''}
                 ${isBlocked ? `
-                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">▶ Unblock & Resume</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">✔ Resolve / Done</button>
-                  <button class="btn sm" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">↩ Move to Backlog</button>
+                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Unblock & Resume</button>
+                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Task</button>
+                  <button class="btn sm" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">Move to Backlog</button>
                 ` : ''}
                 ${isDone ? `
-                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">↩ Re-open Task</button>
+                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Re-open Task</button>
                 ` : ''}
-                <a href="#/tasks/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(e.key)}', 'tasks')">📋 Kanban View →</a>
+                <a href="#/tasks/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(e.key)}', 'tasks')">Kanban View →</a>
               </div>
             </div>
 
@@ -2216,7 +2208,7 @@
               </div>
               ${isBlocked ? `
                 <div style="margin-left:auto; display:flex; align-items:center; gap:6px;">
-                  <span class="badge badge-blocked" style="font-size:11.5px; font-weight:700; padding:3px 8px;">⚠️ CURRENTLY BLOCKED</span>
+                  <span class="badge badge-blocked" style="font-size:11.5px; font-weight:700; padding:3px 8px;">CURRENTLY BLOCKED</span>
                 </div>
               ` : ''}
             </div>
@@ -2235,14 +2227,14 @@
                 <div class="meta-cell-label">Priority Level</div>
                 <div class="meta-cell-value">
                   <span class="badge badge-${(e.priority || 'medium').toLowerCase()}" style="font-size:12px; font-weight:600;">
-                    ${e.priority === 'critical' ? '🔴' : e.priority === 'high' ? '🟠' : e.priority === 'low' ? '⚪' : '🔵'} ${(e.priority || 'normal').toUpperCase()}
+                    ${(e.priority || 'normal').toUpperCase()}
                   </span>
                 </div>
               </div>
               <div class="meta-cell">
                 <div class="meta-cell-label">Assignee</div>
-                <div class="meta-cell-value" style="font-weight:600; display:flex; align-items:center; gap:5px;">
-                  <span>👤</span> <span>${escapeHtml(e.assignee || 'Unassigned')}</span>
+                <div class="meta-cell-value" style="font-weight:600;">
+                  <span>${escapeHtml(e.assignee || 'Unassigned')}</span>
                 </div>
               </div>
               <div class="meta-cell">
@@ -2256,8 +2248,8 @@
             ${e.blocked_reason ? `
               <div class="hero-callout hero-callout-warning">
                 <div class="callout-header">
-                  <strong>⚠️ Blocked Reason:</strong>
-                  <button class="btn sm primary" style="padding:2px 8px; font-size:11px;" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">▶ Unblock</button>
+                  <strong>Blocked Reason:</strong>
+                  <button class="btn sm primary" style="padding:2px 8px; font-size:11px;" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Unblock</button>
                 </div>
                 <div>${escapeHtml(e.blocked_reason)}</div>
               </div>
@@ -2266,7 +2258,7 @@
             ${e.resolution ? `
               <div class="hero-callout hero-callout-success">
                 <div class="callout-header">
-                  <strong>✔ Resolution & Verification Outcome:</strong>
+                  <strong>Resolution & Verification Outcome:</strong>
                   ${e.resolved_at ? `<span style="font-size:11px; opacity:0.8;">Resolved: ${timeAgo(e.resolved_at)}</span>` : ''}
                 </div>
                 <div style="white-space:pre-wrap;">${escapeHtml(e.resolution)}</div>
@@ -2274,7 +2266,7 @@
             ` : ''}
 
             <div class="hero-section-divider">
-              <span>📋 Task Acceptance Criteria & Work Specification</span>
+              <span>Task Acceptance Criteria & Work Specification</span>
             </div>
           </div>
         `;
@@ -2287,7 +2279,7 @@
                 <span class="badge badge-incident">INCIDENT</span>
                 <span class="hero-key">${escapeHtml(e.key)}</span>
                 <span class="hero-attribution">
-                  <span>🚨 Reported by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
+                  <span>Reported by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
                   <span>•</span>
                   <span>${createdAt ? timeAgo(createdAt) : 'recent'}</span>
                 </span>
@@ -2295,9 +2287,9 @@
 
               <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 ${!isResolved ? `
-                  <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">✔ Resolve Incident</button>
+                  <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Incident</button>
                 ` : ''}
-                <a href="#/incidents/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(e.key)}', 'incidents')">🚨 Incidents View →</a>
+                <a href="#/incidents/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(e.key)}', 'incidents')">Incidents View →</a>
               </div>
             </div>
 
@@ -2338,7 +2330,7 @@
                 <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); font-weight:700;">Linked Runbooks:</span>
                 ${e.knowledge.map(k => `
                   <a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, '${escapeHtml(k)}', 'knowledge')">
-                    📖 ${escapeHtml(k)}
+                    ${escapeHtml(k)}
                   </a>
                 `).join(' ')}
               </div>
@@ -2348,7 +2340,7 @@
               <div class="block-box" style="margin-bottom:12px;">
                 <div class="block-label" style="display:flex; justify-content:space-between; align-items:center;">
                   <span>Executable Detection Check / Blast Radius Verification:</span>
-                  <button class="btn sm" style="padding:2px 6px; font-size:10.5px;" onclick="copyToClipboard('${escapeHtml(e.detection)}', 'Check command copied!')">📋 Copy Command</button>
+                  <button class="btn sm" style="padding:2px 6px; font-size:10.5px;" onclick="copyToClipboard('${escapeHtml(e.detection)}', 'Check command copied!')">Copy Command</button>
                 </div>
                 <code>${escapeHtml(e.detection)}</code>
               </div>
@@ -2357,7 +2349,7 @@
             ${e.resolution ? `
               <div class="hero-callout hero-callout-success">
                 <div class="callout-header">
-                  <strong>✔ Resolution & Root Cause Post-Mortem:</strong>
+                  <strong>Resolution & Root Cause Post-Mortem:</strong>
                   ${e.resolved_at ? `<span style="font-size:11px; opacity:0.8;">Resolved: ${timeAgo(e.resolved_at)}</span>` : ''}
                 </div>
                 <div style="white-space:pre-wrap;">${escapeHtml(e.resolution)}</div>
@@ -2365,7 +2357,7 @@
             ` : ''}
 
             <div class="hero-section-divider">
-              <span>🚨 Incident Description, Impact & Diagnostic Log</span>
+              <span>Incident Description, Impact & Diagnostic Log</span>
             </div>
           </div>
         `;
@@ -2416,19 +2408,19 @@
             </div>
             ${historyList.length > 1 ? `
               <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.3); border-radius:4px; padding:3px 8px; margin-top:8px; font-size:11px; color:#a78bfa; cursor:pointer;" onclick="switchDetailTab('history')">
-                <span>🕒</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 <strong>${historyList.length} revisions in Git canon</strong>
                 <span style="opacity:0.8;">— click to view timeline →</span>
               </div>
             ` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink('#/knowledge/${encodeURIComponent(e.key)}')">🔗 Link</button>
-            <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(e.key)}')">🌐 Graph</a>
-            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${escapeHtml(e.key)}')">✏️ Edit</button>
-            <button class="btn sm" onclick="copyToClipboard('kyb get ${escapeHtml(e.key)}', 'CLI command copied!')">📋 CLI</button>
-            <button class="btn sm" onclick="copyEntryBody('${escapeHtml(e.key)}')">📋 Markdown</button>
-            <button class="btn sm" onclick="copyToClipboard('${escapeHtml(e.key)}', 'Key copied!')">🏷️ Key</button>
+            <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink('#/knowledge/${encodeURIComponent(e.key)}')">Link</button>
+            <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(e.key)}')">Graph</a>
+            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${escapeHtml(e.key)}')">Edit</button>
+            <button class="btn sm" onclick="copyToClipboard('kyb get ${escapeHtml(e.key)}', 'CLI command copied!')">CLI</button>
+            <button class="btn sm" onclick="copyEntryBody('${escapeHtml(e.key)}')">Markdown</button>
+            <button class="btn sm" onclick="copyToClipboard('${escapeHtml(e.key)}', 'Key copied!')">Key</button>
           </div>
         </div>
 
@@ -2446,7 +2438,7 @@
             <div class="recent-activity-panel">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                 <span style="font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); display:flex; align-items:center; gap:6px;">
-                  <span>🕒</span> Recent Canon Activity (${historyList.length} revision${historyList.length === 1 ? '' : 's'} recorded)
+                  Recent Canon Activity (${historyList.length} revision${historyList.length === 1 ? '' : 's'} recorded)
                 </span>
                 <button class="btn sm" onclick="switchDetailTab('history')">Full Git History →</button>
               </div>
@@ -2460,7 +2452,7 @@
                         <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${timeAgo(h.committed_at)}</span>
                       </div>
                       <div style="font-size:11px; color:var(--text-dim); font-family:var(--font-mono); margin-top:2px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <span>👤 ${escapeHtml(h.author || 'Alexander Panasenko <alex@prod.codes>')}</span>
+                        <span>${escapeHtml(h.author || 'Alexander Panasenko <alex@prod.codes>')}</span>
                         <span style="color:var(--accent);">${h.sha.slice(0, 7)}</span>
                         ${idx < historyList.length - 1 ? `<a href="javascript:void(0)" onclick="loadDiff('${escapeHtml(e.key)}', '${escapeHtml(historyList[idx+1].sha)}', '${escapeHtml(h.sha)}'); switchDetailTab('diff');" style="color:var(--accent); text-decoration:none;">diff vs prev</a>` : ''}
                       </div>
@@ -2485,9 +2477,9 @@
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
                   <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent); background:var(--card-subtle); padding:2px 6px; border-radius:4px;">${h.sha.slice(0,7)}</span>
-                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}')">👁️ View</button>
-                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(historyList[idx+1].sha)}', '${escapeHtml(h.sha)}'); switchDetailTab('diff');">🔀 Diff vs Prev</button>` : ''}
-                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}', '${escapeHtml(historyList[0].sha)}'); switchDetailTab('diff');">⚡ vs Head</button>` : ''}
+                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}')">View</button>
+                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(historyList[idx+1].sha)}', '${escapeHtml(h.sha)}'); switchDetailTab('diff');">Diff vs Prev</button>` : ''}
+                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}', '${escapeHtml(historyList[0].sha)}'); switchDetailTab('diff');">vs Head</button>` : ''}
                 </div>
               </a>
             `).join('') || '<div style="color:var(--text-muted); padding:20px; text-align:center;">No revision history found.</div>'}
@@ -2720,12 +2712,12 @@
       const banner = document.getElementById('incidentAlertBanner');
       if (openCount > 0) {
         banner.className = 'alert-banner';
-        document.getElementById('incidentBannerIcon').textContent = '⚠️';
+        document.getElementById('incidentBannerIcon').innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
         document.getElementById('incidentBannerTitle').textContent = `${openCount} Active Incident(s) in Progress`;
         document.getElementById('incidentBannerSub').textContent = `One or more services are degraded or undergoing active mitigation.`;
       } else {
         banner.className = 'alert-banner healthy';
-        document.getElementById('incidentBannerIcon').textContent = '🛡️';
+        document.getElementById('incidentBannerIcon').innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
         document.getElementById('incidentBannerTitle').textContent = 'All Systems Operational';
         document.getElementById('incidentBannerSub').textContent = 'All recorded incidents have verified resolutions and passed health checks.';
       }
@@ -2754,8 +2746,8 @@
               </h3>
             </div>
             <div style="display:flex; gap:6px;">
-              <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">🔗 Link</button>
-              <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">✏️ Edit</button>
+              <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">Link</button>
+              <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">Edit</button>
               ${inc.status !== 'resolved' ? `
                 <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(inc.key)}', '${escapeHtml(inc.title)}')">Resolve</button>
               ` : ''}
@@ -2784,7 +2776,7 @@
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px; margin-top:10px;">
             <span>Detected: ${timeAgo(inc.detected_at || inc.started_at)}</span>
             <div style="display:flex; gap:8px;">
-              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">🌐 In Topology</a>
+              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">In Topology</a>
               <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
             </div>
           </div>
@@ -2874,12 +2866,12 @@
         <div class="task-card" data-key="${escapeHtml(t.key)}" id="task-${escapeHtml(t.key)}" draggable="true" ondragstart="handleDragStart(event, '${escapeHtml(t.key)}')">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div style="display:flex; align-items:center; gap:6px;">
-              <span class="badge badge-${t.priority || 'medium'}" style="font-size:10.5px; font-weight:600;">${t.priority === 'critical' ? '🔴' : t.priority === 'high' ? '🟠' : t.priority === 'low' ? '⚪' : '🔵'} ${(t.priority || 'normal').toUpperCase()}</span>
+              <span class="badge badge-${t.priority || 'medium'}" style="font-size:10.5px; font-weight:600;">${(t.priority || 'normal').toUpperCase()}</span>
               <a href="#/tasks/${encodeURIComponent(t.key)}" style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'tasks')">${escapeHtml(t.key)}</a>
             </div>
             <div style="display:flex; align-items:center; gap:4px;">
-              <button class="btn sm icon-only" title="Copy direct link" onclick="event.stopPropagation(); copyDirectLink('#/tasks/${encodeURIComponent(t.key)}')">🔗</button>
-              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">👤 ${escapeHtml(t.assignee || 'unassigned')}</span>
+              <button class="btn sm icon-only" title="Copy direct link" onclick="event.stopPropagation(); copyDirectLink('#/tasks/${encodeURIComponent(t.key)}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${escapeHtml(t.assignee || 'unassigned')}</span>
             </div>
           </div>
           <div style="font-weight:600; font-size:13px; color:#fff; margin:6px 0 4px 0;">
@@ -2903,20 +2895,20 @@
 
           ${t.blocked_reason ? `
             <div style="background:var(--amber-dim); border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:6px; font-size:11px; color:var(--amber); margin-bottom:6px;">
-              <strong>⚠️ Blocked:</strong> ${escapeHtml(t.blocked_reason)}
+              <strong>Blocked:</strong> ${escapeHtml(t.blocked_reason)}
             </div>
           ` : ''}
 
           ${t.resolution ? `
             <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:6px; font-size:11px; color:var(--green); margin-bottom:6px;">
-              <strong>✔ Resolved:</strong> ${escapeHtml(t.resolution)}
+              <strong>Resolved:</strong> ${escapeHtml(t.resolution)}
             </div>
           ` : ''}
 
           <div class="task-actions-row" onclick="event.stopPropagation()" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
             <div style="display:flex; gap:4px; align-items:center;">
               <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">Doc →</a>
-              <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">✏️</button>
+              <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">Edit</button>
             </div>
             <div style="display:flex; gap:4px; align-items:center;">
               <select class="form-select" onchange="moveTaskTo(this.value, '${escapeHtml(t.key)}', '${escapeHtml(t.title)}'); this.value='';" style="padding:2px 6px; font-size:11px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
@@ -2927,17 +2919,17 @@
                 <option value="done" ${isDone ? 'disabled' : ''}>Done</option>
               </select>
 
-              ${t.status === 'open' ? `<button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">▶ Start</button>` : ''}
+              ${t.status === 'open' ? `<button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">Start</button>` : ''}
               ${t.status === 'in_progress' ? `
-                <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">⚠️ Block</button>
-                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">✔ Done</button>
+                <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Block</button>
+                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Done</button>
               ` : ''}
               ${t.status === 'blocked' ? `
-                <button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">▶ Resume</button>
-                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">✔ Done</button>
+                <button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">Resume</button>
+                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Done</button>
               ` : ''}
               ${isDone ? `
-                <button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">↩ Reopen</button>
+                <button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">Reopen</button>
               ` : ''}
             </div>
           </div>
@@ -3127,20 +3119,20 @@
           return `
             <a href="#/search?q=${encodeURIComponent(item.query)}" class="activity-card search" onclick="handleSearchFeedClick(event, '${escapeHtml(item.query)}')">
               <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                <div class="activity-icon">🔍</div>
+                <div class="activity-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
                 <div style="min-width:0;">
                   <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-weight:700; font-size:13.5px; color:#fff;">Agent Search Query</span>
+                    <span style="font-weight:600; font-size:13.5px; color:var(--text);">Agent Search Query</span>
                     <span class="badge badge-tag" style="font-size:10px;">QUERY</span>
-                    <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:700;">"${escapeHtml(item.query)}"</span>
+                    <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:600;">"${escapeHtml(item.query)}"</span>
                   </div>
                   <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                    Hybrid BM25 and vector memory query • <code style="color:var(--text-dim);">GET /search?q=${escapeHtml(item.query)}</code>
+                    Hybrid search • <code style="color:var(--text-dim);">GET /search?q=${escapeHtml(item.query)}</code>
                   </div>
                 </div>
               </div>
               <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
-                <span class="latency-badge latency-fast">⚡ ${Math.max(1, item.ms)}ms</span>
+                <span class="latency-badge latency-fast">${Math.max(1, item.ms)}ms</span>
                 <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${item.ip}</span>
                 <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
                 <button class="btn sm" onclick="event.stopPropagation(); setGlobalSearchQuery('${escapeHtml(item.query)}')">Search →</button>
@@ -3156,19 +3148,21 @@
         const isCreated = item.action === 'created';
         const isArchived = item.action === 'archived' || item.action === 'retracted';
 
-        let icon = '📘';
+        let icon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
         let cardType = 'mutation';
         if (isInc) {
-          icon = isResolved ? '🛡️' : '🚨';
+          icon = isResolved
+            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`
+            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
           cardType = isResolved ? 'mutation' : 'error';
         } else if (isTask) {
-          icon = isResolved ? '✅' : '📋';
+          icon = isResolved
+            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`
+            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`;
           cardType = 'mutation';
         } else if (isArchived) {
-          icon = '🗑️';
+          icon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
           cardType = 'retraction';
-        } else if (isCreated) {
-          icon = '✨';
         }
 
         const actionColor = isCreated ? 'var(--green)' : isResolved ? '#10b981' : isArchived ? 'var(--red)' : 'var(--accent)';
@@ -3181,25 +3175,25 @@
               <div class="activity-icon">${icon}</div>
               <div style="min-width:0;">
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <span style="font-weight:700; font-size:13.5px; color:#fff;">${escapeHtml(docTitle)}</span>
-                  <span class="badge" style="background:rgba(255,255,255,0.06); color:${actionColor}; border:1px solid ${actionColor}; font-size:10px; font-weight:700; text-transform:uppercase;">${item.action}</span>
+                  <span style="font-weight:600; font-size:13.5px; color:var(--text);">${escapeHtml(docTitle)}</span>
+                  <span class="badge" style="background:rgba(255,255,255,0.06); color:${actionColor}; border:1px solid ${actionColor}; font-size:10px; font-weight:600; text-transform:uppercase;">${item.action}</span>
                   <span class="badge badge-${item.kind}" style="font-size:10px;">${item.kind.toUpperCase()}</span>
                   ${item.key ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${item.key}</span>` : ''}
                 </div>
                 <div style="font-size:11.5px; color:var(--text-muted); margin-top:3px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <span style="color:var(--text); font-style:italic;">"${escapeHtml(item.message || 'Updated in canon')}"</span>
                   <span>•</span>
-                  <span>👤 ${escapeHtml(item.author)}</span>
-                  ${item.files && item.files.length ? `<span>• 📄 ${escapeHtml(item.files.join(', '))}</span>` : ''}
+                  <span>${escapeHtml(item.author)}</span>
+                  ${item.files && item.files.length ? `<span>• ${escapeHtml(item.files.join(', '))}</span>` : ''}
                 </div>
               </div>
             </div>
             <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-              <span class="rev-badge" title="Git Commit SHA">⚡ ${item.sha.slice(0, 7)}</span>
+              <span class="rev-badge" title="Git Commit SHA">${item.sha.slice(0, 7)}</span>
               <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
               ${item.key ? `
-                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchTab('search');">👁️ View</button>
-                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchDetailTab('diff'); switchTab('search');">🔀 Diff</button>
+                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchTab('search');">View</button>
+                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchDetailTab('diff'); switchTab('search');">Diff</button>
               ` : ''}
             </div>
           </a>
@@ -3342,7 +3336,7 @@
           service: svc,
           shape: 'hexagon',
           radius: 22,
-          color: '#00e5ff',
+          color: '#38bdf8',
           isHub: true,
           count: 0,
           x: prev ? prev.x : 450 + Math.cos(angle) * 190,
@@ -3747,8 +3741,8 @@
             }
           });
 
-          simulationAlpha *= 0.965;
-          if (simulationAlpha <= 0.002) {
+          simulationAlpha *= 0.92;
+          if (simulationAlpha <= 0.005) {
             simulationAlpha = 0;
             visibleNodes.forEach(n => { n.vx = 0; n.vy = 0; });
           }
@@ -3777,7 +3771,7 @@
         ctx.save();
         ctx.clearRect(0, 0, width, height);
 
-        // 1. Draw Infinite Cyber Blueprint Grid
+        // 1. Draw Subtle Dot Matrix Background
         const worldMinX = -camera.x / camera.zoom;
         const worldMinY = -camera.y / camera.zoom;
         const worldMaxX = (width - camera.x) / camera.zoom;
@@ -3786,74 +3780,24 @@
         ctx.translate(camera.x, camera.y);
         ctx.scale(camera.zoom, camera.zoom);
 
-        // Minor Grid
-        const minorStep = 60;
-        const startGridX = Math.floor(worldMinX / minorStep) * minorStep;
-        const endGridX = Math.ceil(worldMaxX / minorStep) * minorStep;
-        const startGridY = Math.floor(worldMinY / minorStep) * minorStep;
-        const endGridY = Math.ceil(worldMaxY / minorStep) * minorStep;
+        const dotStep = 32;
+        const startGridX = Math.floor(worldMinX / dotStep) * dotStep;
+        const endGridX = Math.ceil(worldMaxX / dotStep) * dotStep;
+        const startGridY = Math.floor(worldMinY / dotStep) * dotStep;
+        const endGridY = Math.ceil(worldMaxY / dotStep) * dotStep;
 
-        ctx.beginPath();
-        for (let gx = startGridX; gx <= endGridX; gx += minorStep) {
-          ctx.moveTo(gx, worldMinY);
-          ctx.lineTo(gx, worldMaxY);
-        }
-        for (let gy = startGridY; gy <= endGridY; gy += minorStep) {
-          ctx.moveTo(worldMinX, gy);
-          ctx.lineTo(worldMaxX, gy);
-        }
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.035)';
-        ctx.lineWidth = 0.5;
-        ctx.stroke();
-
-        // Major Grid with Crosshairs (+)
-        const majorStep = 240;
-        const startMajorX = Math.floor(worldMinX / majorStep) * majorStep;
-        const endMajorX = Math.ceil(worldMaxX / majorStep) * majorStep;
-        const startMajorY = Math.floor(worldMinY / majorStep) * majorStep;
-        const endMajorY = Math.ceil(worldMaxY / majorStep) * majorStep;
-
-        ctx.beginPath();
-        for (let gx = startMajorX; gx <= endMajorX; gx += majorStep) {
-          ctx.moveTo(gx, worldMinY);
-          ctx.lineTo(gx, worldMaxY);
-        }
-        for (let gy = startMajorY; gy <= endMajorY; gy += majorStep) {
-          ctx.moveTo(worldMinX, gy);
-          ctx.lineTo(worldMaxX, gy);
-        }
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.08)';
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-
-        // Precision Crosshairs
-        ctx.beginPath();
-        const chSize = 6;
-        for (let gx = startMajorX; gx <= endMajorX; gx += majorStep) {
-          for (let gy = startMajorY; gy <= endMajorY; gy += majorStep) {
-            ctx.moveTo(gx - chSize, gy);
-            ctx.lineTo(gx + chSize, gy);
-            ctx.moveTo(gx, gy - chSize);
-            ctx.lineTo(gx, gy + chSize);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        for (let gx = startGridX; gx <= endGridX; gx += dotStep) {
+          for (let gy = startGridY; gy <= endGridY; gy += dotStep) {
+            ctx.fillRect(gx, gy, 1.2, 1.2);
           }
         }
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.22)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
 
-        // 2. Draw Curved Bézier Spline Connectors
+        // 2. Draw Clean Bezier Connectors
         visibleLinks.forEach(l => {
           const isActive = activeNode && (l.source === activeNode || l.target === activeNode);
-          const dx = l.target.x - l.source.x;
-          const dy = l.target.y - l.source.y;
-          const dist = Math.hypot(dx, dy) || 1;
-          const nx = -dy / dist;
-          const ny = dx / dist;
-
-          // Controlled curvature based on node IDs
-          const curveOffset = Math.sin((l.source.id.charCodeAt(0) + l.target.id.charCodeAt(0)) % 10) * Math.min(26, dist * 0.12);
-          const cpX = (l.source.x + l.target.x) / 2 + nx * curveOffset;
-          const cpY = (l.source.y + l.target.y) / 2 + ny * curveOffset;
+          const cpX = (l.source.x + l.target.x) / 2;
+          const cpY = (l.source.y + l.target.y) / 2;
           l._cpX = cpX;
           l._cpY = cpY;
 
@@ -3863,256 +3807,169 @@
 
           if (activeNode) {
             if (isActive) {
-              ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
-              ctx.lineWidth = 2.4;
-              ctx.shadowColor = '#00e5ff';
-              ctx.shadowBlur = 10;
+              ctx.strokeStyle = '#38bdf8';
+              ctx.lineWidth = 1.8;
             } else {
               ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
               ctx.lineWidth = 0.6;
-              ctx.shadowBlur = 0;
             }
           } else {
             const isHubLink = l.target.isHub || l.source.isHub;
-            ctx.strokeStyle = isHubLink ? 'rgba(0, 229, 255, 0.16)' : 'rgba(255, 255, 255, 0.07)';
-            ctx.lineWidth = isHubLink ? 1.2 : 0.8;
-            ctx.shadowBlur = 0;
+            ctx.strokeStyle = isHubLink ? 'rgba(148, 163, 184, 0.16)' : 'rgba(148, 163, 184, 0.08)';
+            ctx.lineWidth = isHubLink ? 1.0 : 0.7;
           }
           ctx.stroke();
-          ctx.shadowBlur = 0;
         });
 
-        // 3. Draw Animated Streaming Photon Pulses Along Splines
-        const pulses = activeLinks.length > 0 ? activeLinks : visibleLinks.slice(0, 16);
-        pulses.forEach((l, idx) => {
-          const t = (animTick * 1.1 + idx * 0.28) % 1.0;
-          const cpX = l._cpX || (l.source.x + l.target.x) / 2;
-          const cpY = l._cpY || (l.source.y + l.target.y) / 2;
-
-          // Quadratic Bézier curve position: B(t) = (1-t)^2*P0 + 2(1-t)t*P1 + t^2*P2
-          const px = (1 - t) * (1 - t) * l.source.x + 2 * (1 - t) * t * cpX + t * t * l.target.x;
-          const py = (1 - t) * (1 - t) * l.source.y + 2 * (1 - t) * t * cpY + t * t * l.target.y;
-
-          ctx.beginPath();
-          ctx.arc(px, py, 2.8, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff';
-          ctx.shadowColor = '#00e5ff';
-          ctx.shadowBlur = 12;
-          ctx.fill();
-          ctx.shadowBlur = 0;
-        });
-
-        // 4. Draw Elastic Magnetic Tether While Dragging
-        if (draggedNode && (dragStartPos.x !== 0 || dragStartPos.y !== 0)) {
-          ctx.beginPath();
-          ctx.moveTo(dragStartPos.x, dragStartPos.y);
-          ctx.lineTo(draggedNode.x, draggedNode.y);
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = 'rgba(0, 229, 255, 0.6)';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-
-        // 5. Draw Cyber Micro-Cards & Hexagonal Hubs
+        // 3. Draw Nodes (Clean modern cards)
         visibleNodes.forEach(n => {
           const isCurrentActive = n === activeNode;
           const isConnected = connectedNodeSet ? connectedNodeSet.has(n) : true;
           const isSearchMatch = topoSearchQuery && (n.label.toLowerCase().includes(topoSearchQuery) || n.id.toLowerCase().includes(topoSearchQuery));
 
           let alpha = 1.0;
-          if (activeNode) alpha = isConnected ? 1.0 : 0.12;
-          if (topoSearchQuery) alpha = isSearchMatch ? 1.0 : Math.min(alpha, 0.18);
+          if (activeNode) alpha = isConnected ? 1.0 : 0.15;
+          if (topoSearchQuery) alpha = isSearchMatch ? 1.0 : Math.min(alpha, 0.2);
           ctx.globalAlpha = alpha;
 
-          // Pulsating Sonar Waves on Search Matches & Open Incidents
-          if (isSearchMatch || (n.type === 'incident' && !n.isHub)) {
-            const pulseColor = n.type === 'incident' ? '239, 68, 68' : '0, 229, 255';
-            for (let rIdx = 0; rIdx < 2; rIdx++) {
-              const ringProgress = (animTick * 1.4 + rIdx * 0.5) % 1.0;
-              const ringRadius = (n.radius || 16) + ringProgress * 28;
-              const ringAlpha = (1 - ringProgress) * 0.85;
-              ctx.beginPath();
-              ctx.arc(n.x, n.y, ringRadius, 0, Math.PI * 2);
-              ctx.strokeStyle = `rgba(${pulseColor}, ${ringAlpha})`;
-              ctx.lineWidth = 1.6;
-              ctx.stroke();
-            }
-          }
+          const isHighlighted = isCurrentActive || isSearchMatch;
 
-          // Pulsating Halo on Focused Node
-          if (n === focusedNode) {
-            const haloProgress = (Math.sin(animTick * 3) + 1) / 2;
-            ctx.beginPath();
-            ctx.arc(n.x, n.y, (n.radius || 18) + 10 + haloProgress * 5, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(0, 229, 255, ${0.4 + haloProgress * 0.4})`;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-          }
-
-          // --- NODE GEOMETRY RENDERING ---
-          if (n.shape === 'hexagon') {
-            // Service Hub Hexagon
-            const r = n.radius + (isCurrentActive ? 3 : 0);
-            ctx.beginPath();
-            for (let i = 0; i < 6; i++) {
-              const ang = (i * Math.PI / 3) + Math.PI / 6;
-              const hx = n.x + r * Math.cos(ang);
-              const hy = n.y + r * Math.sin(ang);
-              if (i === 0) ctx.moveTo(hx, hy);
-              else ctx.lineTo(hx, hy);
-            }
-            ctx.closePath();
-            ctx.fillStyle = '#061726';
-            ctx.fill();
-
-            ctx.strokeStyle = isCurrentActive ? '#ffffff' : '#00e5ff';
-            ctx.lineWidth = isCurrentActive ? 2.6 : 1.8;
-            ctx.shadowColor = '#00e5ff';
-            ctx.shadowBlur = isCurrentActive ? 22 : 12;
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-
-            // Center Symbol
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 12px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('⚙️', n.x, n.y);
-
-            // Satellite Count Badge
-            if (n.count !== undefined) {
-              const satX = n.x + r * 0.8;
-              const satY = n.y - r * 0.8;
-              ctx.beginPath();
-              ctx.arc(satX, satY, 8.5, 0, Math.PI * 2);
-              ctx.fillStyle = '#00e5ff';
-              ctx.fill();
-              ctx.fillStyle = '#000000';
-              ctx.font = 'bold 9px ui-monospace, sans-serif';
-              ctx.fillText(String(n.count), satX, satY);
-            }
-
-            // Monospace Title
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 11.5px ui-monospace, sans-serif';
-            ctx.fillText(n.label, n.x, n.y + r + 14);
-
-          } else if (n.shape === 'blade') {
-            // Host Blade Module
-            const w = n.width;
-            const h = n.height;
+          if (n.shape === 'hexagon' || n.type === 'service') {
+            // Service Card (width: 140, height: 36)
+            const w = 140;
+            const h = 36;
             const rx = n.x - w / 2;
             const ry = n.y - h / 2;
             const rad = 6;
 
             ctx.beginPath();
             ctx.roundRect(rx, ry, w, h, rad);
-            ctx.fillStyle = '#140c22';
+            ctx.fillStyle = isHighlighted ? '#1e293b' : '#0f172a';
             ctx.fill();
 
-            ctx.strokeStyle = isCurrentActive ? '#ffffff' : '#a855f7';
-            ctx.lineWidth = isCurrentActive ? 2.2 : 1.4;
-            ctx.shadowColor = '#a855f7';
-            ctx.shadowBlur = isCurrentActive ? 18 : 8;
+            ctx.strokeStyle = isHighlighted ? '#38bdf8' : 'rgba(56, 189, 248, 0.25)';
+            ctx.lineWidth = isHighlighted ? 1.8 : 1.0;
             ctx.stroke();
-            ctx.shadowBlur = 0;
 
-            // Green LED Status Indicator
+            // Service Dot
             ctx.beginPath();
-            ctx.arc(rx + 10, n.y, 3.5, 0, Math.PI * 2);
-            ctx.fillStyle = '#10b981';
-            ctx.shadowColor = '#10b981';
-            ctx.shadowBlur = 6;
+            ctx.arc(rx + 12, n.y, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#38bdf8';
             ctx.fill();
-            ctx.shadowBlur = 0;
 
-            // Text
-            ctx.fillStyle = '#f3e8ff';
-            ctx.font = 'bold 10px ui-monospace, sans-serif';
+            // Service Name
+            ctx.fillStyle = isHighlighted ? '#ffffff' : '#f1f5f9';
+            ctx.font = 'bold 11px ui-monospace, sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(n.label.slice(0, 14), rx + 20, n.y);
+            ctx.fillText(n.label.slice(0, 12), rx + 22, n.y);
 
-          } else {
-            // Micro-Card Capsule Pill
-            const w = n.width;
-            const h = n.height;
+            // Count Badge
+            if (n.count !== undefined) {
+              const countText = String(n.count);
+              ctx.font = '600 10px -apple-system, sans-serif';
+              const badgeW = Math.max(16, ctx.measureText(countText).width + 8);
+              const bx = rx + w - badgeW - 8;
+              const by = n.y - 8;
+              ctx.beginPath();
+              ctx.roundRect(bx, by, badgeW, 16, 8);
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+              ctx.fill();
+              ctx.fillStyle = '#94a3b8';
+              ctx.textAlign = 'center';
+              ctx.fillText(countText, bx + badgeW / 2, n.y);
+            }
+
+          } else if (n.shape === 'blade' || n.type === 'host') {
+            // Host Node Card (width: 130, height: 30)
+            const w = 130;
+            const h = 30;
             const rx = n.x - w / 2;
             const ry = n.y - h / 2;
-            const rad = 11;
+            const rad = 6;
 
             ctx.beginPath();
             ctx.roundRect(rx, ry, w, h, rad);
-            ctx.fillStyle = n.type === 'incident' ? '#260a0a' : n.type === 'task' ? '#241a06' : '#061a1e';
+            ctx.fillStyle = isHighlighted ? '#1e293b' : '#0f172a';
             ctx.fill();
 
-            ctx.strokeStyle = isCurrentActive ? '#ffffff' : n.color;
-            ctx.lineWidth = isCurrentActive ? 2.2 : 1.2;
-            ctx.shadowColor = n.color;
-            ctx.shadowBlur = isCurrentActive ? 16 : 6;
+            ctx.strokeStyle = isHighlighted ? '#a78bfa' : 'rgba(167, 139, 250, 0.25)';
+            ctx.lineWidth = isHighlighted ? 1.8 : 1.0;
             ctx.stroke();
-            ctx.shadowBlur = 0;
 
-            // Left Icon
-            const icon = n.type === 'incident' ? '🚨' : n.type === 'task' ? '📋' : '📘';
-            ctx.font = '10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(icon, rx + 11, n.y);
+            // Host Dot
+            ctx.beginPath();
+            ctx.arc(rx + 12, n.y, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#a78bfa';
+            ctx.fill();
 
-            // Label Text
-            ctx.fillStyle = '#f0f4fa';
+            // Host Label
+            ctx.fillStyle = isHighlighted ? '#ffffff' : '#e2e8f0';
             ctx.font = '10.5px ui-monospace, sans-serif';
             ctx.textAlign = 'left';
-            ctx.fillText(n.label.slice(0, 16), rx + 22, n.y);
+            ctx.textBaseline = 'middle';
+            ctx.fillText(n.label.slice(0, 14), rx + 22, n.y);
+
+          } else {
+            // Entry Capsule (width: ~110-140, height: 24)
+            const w = Math.min(140, Math.max(90, (n.label || '').length * 6 + 30));
+            const h = 24;
+            const rx = n.x - w / 2;
+            const ry = n.y - h / 2;
+            const rad = 5;
+
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, w, h, rad);
+            ctx.fillStyle = isHighlighted ? '#1e293b' : '#090d16';
+            ctx.fill();
+
+            const isInc = n.type === 'incident';
+            const isTask = n.type === 'task';
+            const dotColor = isInc ? '#f43f5e' : isTask ? '#fbbf24' : '#94a3b8';
+
+            ctx.strokeStyle = isHighlighted ? '#38bdf8' : (isInc ? 'rgba(244, 63, 94, 0.3)' : 'rgba(255, 255, 255, 0.08)');
+            ctx.lineWidth = 1.0;
+            ctx.stroke();
+
+            // Left Kind Dot
+            ctx.beginPath();
+            ctx.arc(rx + 9, n.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = dotColor;
+            ctx.fill();
+
+            // Label
+            ctx.fillStyle = isHighlighted ? '#ffffff' : '#cbd5e1';
+            ctx.font = '10px -apple-system, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(n.label.slice(0, 16), rx + 18, n.y);
           }
 
-          // Pin Indicator
+          // Pinned indicator
           if (n.pinned) {
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('📌', n.x + (n.width ? n.width / 2 - 2 : 14), n.y - (n.height ? n.height / 2 - 2 : 12));
+            ctx.beginPath();
+            ctx.arc(n.x + (n.width ? n.width / 2 - 8 : 28), n.y - (n.height ? n.height / 2 - 8 : 10), 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#f59e0b';
+            ctx.fill();
           }
         });
 
-        // 6. Draw Interactive Mini-Map (Radar Viewport HUD)
-        ctx.restore(); // Restore to screen coordinate space
+        // 4. Subtle Clean Minimap (Bottom-Left)
+        ctx.restore(); // Restore to screen coordinates
 
-        const mmW = 150;
-        const mmH = 95;
-        const mmX = 18;
-        const mmY = height - mmH - 18;
+        const mmW = 140;
+        const mmH = 85;
+        const mmX = 16;
+        const mmY = height - mmH - 16;
 
-        // Mini-Map Glass Box
         ctx.beginPath();
-        ctx.roundRect(mmX, mmY, mmW, mmH, 8);
-        ctx.fillStyle = 'rgba(8, 14, 22, 0.88)';
+        ctx.roundRect(mmX, mmY, mmW, mmH, 6);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
         ctx.fill();
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Mini-Map Header
-        ctx.fillStyle = 'rgba(0, 229, 255, 0.8)';
-        ctx.font = 'bold 9px ui-monospace, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText('🛰️ RADAR VIEWPORT', mmX + 8, mmY + 6);
-
-        // Rotating Radar Sweep Ray
-        const sweepAngle = (animTick * 1.5) % (Math.PI * 2);
-        const mmCx = mmX + mmW / 2;
-        const mmCy = mmY + mmH / 2 + 6;
-        ctx.beginPath();
-        ctx.moveTo(mmCx, mmCy);
-        ctx.arc(mmCx, mmCy, 36, sweepAngle, sweepAngle + 0.3);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(0, 229, 255, 0.08)';
-        ctx.fill();
-
-        // Mini-Map Node Dots
         const worldBounds = getTopologyBounds();
         const bW = Math.max(200, worldBounds.maxX - worldBounds.minX);
         const bH = Math.max(160, worldBounds.maxY - worldBounds.minY);
@@ -4120,28 +3977,28 @@
         visibleNodes.forEach(n => {
           const normX = (n.x - worldBounds.minX) / bW;
           const normY = (n.y - worldBounds.minY) / bH;
-          const dotX = mmX + 12 + normX * (mmW - 24);
-          const dotY = mmY + 22 + normY * (mmH - 32);
+          const dotX = mmX + 8 + normX * (mmW - 16);
+          const dotY = mmY + 8 + normY * (mmH - 16);
 
           ctx.beginPath();
-          ctx.arc(dotX, dotY, n.isHub ? 2.5 : 1.8, 0, Math.PI * 2);
-          ctx.fillStyle = n.color;
+          ctx.arc(dotX, dotY, n.isHub ? 2 : 1.2, 0, Math.PI * 2);
+          ctx.fillStyle = n.type === 'service' ? '#38bdf8' : n.type === 'host' ? '#a78bfa' : 'rgba(255, 255, 255, 0.3)';
           ctx.fill();
         });
 
-        // Mini-Map Camera Viewport Rectangle
+        // Camera viewport on minimap
         const camNormMinX = (worldMinX - worldBounds.minX) / bW;
         const camNormMinY = (worldMinY - worldBounds.minY) / bH;
         const camNormMaxX = (worldMaxX - worldBounds.minX) / bW;
         const camNormMaxY = (worldMaxY - worldBounds.minY) / bH;
 
-        const vpX = Math.max(mmX + 4, Math.min(mmX + mmW - 4, mmX + 12 + camNormMinX * (mmW - 24)));
-        const vpY = Math.max(mmY + 16, Math.min(mmY + mmH - 4, mmY + 22 + camNormMinY * (mmH - 32)));
-        const vpW = Math.min(mmW - 8, Math.max(12, (camNormMaxX - camNormMinX) * (mmW - 24)));
-        const vpH = Math.min(mmH - 24, Math.max(8, (camNormMaxY - camNormMinY) * (mmH - 32)));
+        const vpX = Math.max(mmX + 2, Math.min(mmX + mmW - 2, mmX + 8 + camNormMinX * (mmW - 16)));
+        const vpY = Math.max(mmY + 2, Math.min(mmY + mmH - 2, mmY + 8 + camNormMinY * (mmH - 16)));
+        const vpW = Math.min(mmW - 4, Math.max(8, (camNormMaxX - camNormMinX) * (mmW - 16)));
+        const vpH = Math.min(mmH - 4, Math.max(8, (camNormMaxY - camNormMinY) * (mmH - 16)));
 
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+        ctx.lineWidth = 1;
         ctx.strokeRect(vpX, vpY, vpW, vpH);
 
         graphAnimId = requestAnimationFrame(step);
@@ -4259,7 +4116,7 @@
           const moved = Math.hypot(draggedNode.x - dragStartPos.x, draggedNode.y - dragStartPos.y);
           if (moved > 10) {
             draggedNode.pinned = true;
-            showToast(`📌 Pinned ${draggedNode.label} (Double-click to unpin)`, 'info');
+            showToast(`Pinned ${draggedNode.label} (Double-click to unpin)`, 'info');
           }
           draggedNode = null;
         }
@@ -4323,7 +4180,7 @@
       metaEl.innerHTML = `
         <span>Type: <strong style="color:#fff;">${node.type.toUpperCase()}</strong></span>
         ${node.service ? `<span>Service: <strong style="color:var(--accent);">${escapeHtml(node.service)}</strong></span>` : ''}
-        ${node.pinned ? `<span style="color:var(--amber);">📌 PINNED</span>` : ''}
+        ${node.pinned ? `<span style="color:var(--amber); font-weight:600;">PINNED</span>` : ''}
       `;
 
       // Connected infrastructure chips
@@ -4335,7 +4192,7 @@
       if (connNodes.length > 0) {
         linksEl.innerHTML = connNodes.map(c => `
           <a href="#/graph/${encodeURIComponent(c.id)}" class="badge badge-tag" style="cursor:pointer; text-decoration:none;" onclick="handleGraphChipClick(event, '${escapeHtml(c.id)}')">
-            ${c.shape === 'blade' ? '🖥️' : c.shape === 'hexagon' ? '⚙️' : '📄'} ${escapeHtml(c.label)}
+            ${escapeHtml(c.label)}
           </a>
         `).join('');
       } else {
@@ -4446,7 +4303,7 @@
     function toggleGraphPhysics() {
       App.graphPhysics = true;
       reheatSimulation(1.0);
-      showToast('⚡ Physics simulation reheated', 'info');
+      showToast('Graph layout stabilized', 'info');
     }
 
     function fitGraphCamera() {
@@ -4482,7 +4339,7 @@
         y: height / 2 - midY * targetZoom,
         zoom: targetZoom
       };
-      showToast('🎯 Centered fleet topology', 'info');
+      showToast('Centered topology view', 'info');
     }
 
     function zoomGraph(factor) {
