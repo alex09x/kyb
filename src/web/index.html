@@ -4542,14 +4542,26 @@
             document.title = 'KYB — Cyber Topology';
           }
         } else if (root === 'search') {
-          const q = params.get('q') || params.get('query') || params.get('tag') || '';
+          const q = params.get('q') || params.get('query') || '';
+          const tag = params.get('tag') || '';
+          const term = q || tag;
           if (App.activeTab !== 'search') switchTab('search', false);
-          if (q) {
-            if (searchEl) searchEl.value = q;
-            App.searchQuery = q;
-            renderKnowledgeList();
+          if (term) {
+            if (searchEl) searchEl.value = term;
+            App.searchQuery = term;
+            apiFetch(`/search?q=${encodeURIComponent(term)}&limit=100`).then(data => {
+              if (data && data.hits) {
+                App.entries = data.hits;
+                renderKnowledgeList();
+                if (data.hits.length > 0 && !App.selectedKey) {
+                  selectEntry(data.hits[0].key, false);
+                }
+              } else {
+                renderKnowledgeList();
+              }
+            });
           }
-          document.title = q ? `KYB — Search: ${q}` : 'KYB — Fleet Knowledge';
+          document.title = term ? `KYB — Search: ${term}` : 'KYB — Fleet Knowledge';
         } else if (root === 'feed' || root === 'activity') {
           if (App.activeTab !== 'feed') switchTab('feed', false);
           document.title = 'KYB — Fleet Operations Feed';
