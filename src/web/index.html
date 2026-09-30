@@ -2482,9 +2482,7 @@
       }
 
       const res = await apiPost(`/incidents/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
-        resolution: outcome,
-        outcome,
-        author
+        resolution: outcome
       });
 
       if (res.ok) {
@@ -2703,9 +2701,7 @@
       }
 
       const res = await apiPost(`/tasks/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
-        resolution: outcome,
-        outcome,
-        author
+        resolution: outcome
       });
 
       if (res.ok) {
