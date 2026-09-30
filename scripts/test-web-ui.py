@@ -310,7 +310,7 @@ def main():
 
     if not target_tab:
         print(" [!] No active tab pointing to :9310 found. Opening tab...")
-        open_res = pb_call("tabs.create", {"url": f"{SERVER_URL}/#/search"})
+        open_res = pb_call("tabs.create", {"url": f"{SERVER_URL}/?v=3#/search"})
         tab_id = open_res.get("result", {}).get("tabId")
         time.sleep(2)
     else:
@@ -322,7 +322,7 @@ def main():
     time.sleep(0.5)
 
     # Navigate to #/search to guarantee starting on Knowledge tab
-    pb_call("navigate", {"tabId": tab_id, "url": f"{SERVER_URL}/#/search"})
+    pb_call("navigate", {"tabId": tab_id, "url": f"{SERVER_URL}/?v=3#/search"})
     time.sleep(1.0)
     pb_call("pressKey", {"tabId": tab_id, "key": "1"})
     time.sleep(1.0)
@@ -368,9 +368,14 @@ def main():
     time.sleep(0.8)
     insp = pb_call("inspect", {"tabId": tab_id})
     url = insp.get("result", {}).get("url", "")
-    has_zoom = any("Zoom" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    has_stabilize = any(e.get("name") in ["Stabilize", "Pause", "Fit to View"] for e in insp.get("result", {}).get("elements", []))
-    log_test("Topology Graph & Camera Controls (key: 4)", "graph" in url and has_zoom and has_stabilize, url)
+    elements = insp.get("result", {}).get("elements", [])
+    has_zoom = any("Zoom" in e.get("name", "") for e in elements)
+    has_stabilize = any(e.get("name") in ["Stabilize", "Pause", "Fit to View"] for e in elements)
+    success = "graph" in url and has_zoom and has_stabilize
+    if not success:
+        print(f"DEBUG: url={url}, has_zoom={has_zoom}, has_stabilize={has_stabilize}")
+        print("Elements found:", [e.get("name") for e in elements if e.get("name")])
+    log_test("Topology Graph & Camera Controls (key: 4)", success, url)
 
     # Test 6: Tab Switching to Live Feed & Method Filters
     pb_call("pressKey", {"tabId": tab_id, "key": "5"})

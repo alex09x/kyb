@@ -7,27 +7,29 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23111520'/><path d='M8 7h4v7l6-7h5l-7 7.5L24 25h-5l-6-8.5V25H8V7z' fill='%2300b3c4'/></svg>">
   <style>
     :root {
-      --bg: #0e0f11;
-      --card: #16181d;
-      --card-hover: #20232a;
-      --card-subtle: #101114;
-      --border: #2d2e33;
-      --border-light: #3d3f44;
-      --border-focus: #5e6ad2;
-      --accent: #5e6ad2;
-      --accent-glow: rgba(94, 106, 210, 0.15);
-      --accent-dim: rgba(94, 106, 210, 0.08);
-      --text: #f4f5f8;
-      --text-dim: #a1a3a7;
-      --text-muted: #737579;
-      --red: #e5484d;
-      --red-dim: rgba(229, 72, 77, 0.12);
-      --amber: #f7ce00;
-      --amber-dim: rgba(247, 206, 0, 0.12);
-      --green: #4cc38a;
-      --green-dim: rgba(76, 195, 138, 0.12);
-      --purple: #8b5cf6;
-      --purple-dim: rgba(139, 92, 246, 0.12);
+      /* Calm ops console: one accent, semantic color only where state demands it,
+         neutrals biased toward the accent hue so greys read as chosen. */
+      --bg: #0f1114;
+      --card: #15181d;
+      --card-hover: #1b1f26;
+      --card-subtle: #12141a;
+      --border: #262a33;
+      --border-light: #333846;
+      --border-focus: #8590d9;
+      --accent: #8590d9;
+      --accent-glow: rgba(133, 144, 217, 0.14);
+      --accent-dim: rgba(133, 144, 217, 0.09);
+      --text: #e8eaf0;
+      --text-dim: #9aa0ad;
+      --text-muted: #6b717e;
+      --red: #e06c6f;
+      --red-dim: rgba(224, 108, 111, 0.10);
+      --amber: #d9a441;
+      --amber-dim: rgba(217, 164, 65, 0.10);
+      --green: #5fb88f;
+      --green-dim: rgba(95, 184, 143, 0.10);
+      --purple: #9aa0ad;
+      --purple-dim: rgba(154, 160, 173, 0.08);
       --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
     }
@@ -1036,7 +1038,7 @@
     }
     .incident-cards {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
       gap: 16px;
     }
     .incident-card {
@@ -1536,6 +1538,44 @@
       from { transform: translateX(50px); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
+  
+    /* ===== Calm pass: quiet everything that is not state ===== */
+    .badge { font-weight: 500; letter-spacing: 0.4px; }
+    /* kind and neutral status: text only, no fill */
+    .badge-knowledge, .badge-task, .badge-open, .badge-low, .badge-normal, .badge-medium,
+    .badge-in_progress, .badge-in-progress {
+      background: transparent; color: var(--text-muted); border: 1px solid var(--border);
+    }
+    /* severity that needs attention keeps color, without heavy fill */
+    .badge-critical { background: var(--red-dim); color: var(--red); border-color: rgba(224,108,111,0.35); font-weight: 600; }
+    .badge-high     { background: transparent; color: var(--amber); border-color: rgba(217,164,65,0.4); font-weight: 600; }
+    .badge-mitigated, .badge-blocked { background: transparent; color: var(--amber); border-color: rgba(217,164,65,0.35); }
+    .badge-resolved, .badge-done { background: transparent; color: var(--green); border-color: rgba(95,184,143,0.35); }
+    .item-key { color: var(--text-muted); }
+    .card-affordance { display: none; }
+    .btn.success { background: transparent; color: var(--text); border-color: var(--border-light); }
+    .btn.success:hover { border-color: var(--green); color: var(--green); }
+    .btn.primary { font-weight: 500; }
+    .alert-banner { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--red); }
+    .alert-banner.healthy { background: var(--card); border-color: var(--border); border-left-color: var(--green); }
+    .incident-card.open { border-left-width: 3px; }
+    .incident-card.mitigated { border-left-width: 3px; }
+    .incident-card.resolved { border-left-width: 3px; border-left-color: var(--border-light); }
+    .incident-card h3 { color: var(--text); font-weight: 600; }
+    .note-blocked, .note-resolved {
+      border-left: 2px solid var(--amber); padding: 6px 10px; font-size: 11.5px;
+      color: var(--text-dim); margin-bottom: 6px; background: var(--card-subtle); border-radius: 0 4px 4px 0;
+    }
+    .note-blocked strong { color: var(--amber); }
+    .note-resolved { border-left-color: var(--green); }
+    .note-resolved strong { color: var(--green); }
+    .task-card:hover { transform: none; box-shadow: none; }
+    .chip.active { font-weight: 600; }
+    a.btn, a.btn:hover { text-decoration: none; }
+    .btn { white-space: nowrap; }
+    .task-actions-row, .task-actions-row > div { flex-wrap: wrap; row-gap: 6px; }
+    .btn.warning { background: transparent; color: var(--text); border-color: var(--border-light); }
+    .btn.warning:hover { border-color: var(--amber); color: var(--amber); }
   </style>
 </head>
 <body>
@@ -2295,10 +2335,10 @@
       container.innerHTML = list.map(item => {
         const isSel = item.key === App.selectedKey;
         const kindBadge = item.kind === 'incident'
-          ? `<span class="badge badge-incident">incident</span>`
+          ? `<span class="badge badge-${item.severity || 'incident'}">${item.severity ? escapeHtml(item.severity) : 'incident'}</span>`
           : item.kind === 'task'
             ? `<span class="badge badge-task">task</span>`
-            : `<span class="badge badge-knowledge">knowledge</span>`;
+            : '';
 
         const cached = App.detailCache.get(item.key);
         const revCount = (cached && cached.history && cached.history.length) || 0;
@@ -2320,7 +2360,6 @@
                 ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
                 ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">${revCount} revs</span>` : ''}
               </div>
-              <span class="card-affordance" style="font-size:11px; font-weight:600; color:var(--accent);">View Details &rarr;</span>
             </div>
           </a>
         `;
@@ -3499,20 +3538,17 @@
                   <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${escapeHtml(inc.key)}</span>
                 </a>
               </div>
-              <h3 style="font-size:15px; font-weight:700; color:#fff;">
+              <h3 style="font-size:15px; margin-top:6px;">
                 <a href="#/knowledge/${encodeURIComponent(inc.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">
                   ${escapeHtml(inc.title)}
                 </a>
               </h3>
             </div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button><a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
-              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
-              <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">Link</button>
-              <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">Edit</button>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
               ${inc.status !== 'resolved' ? `
                 <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(inc.key)}', '${escapeHtml(inc.title)}')">Resolve</button>
               ` : ''}
+              <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">Edit</button>
             </div>
           </div>
 
@@ -3541,10 +3577,11 @@
               ${inc.resolved_at ? `<span style="color:var(--green);">• Resolved: ${timeAgo(inc.resolved_at)}</span>` : ''}
             </div>
             <div style="display:flex; gap:6px; align-items:center;">
-              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">In Topology</a>
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button><a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button>
               <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
-              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
+              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">Topology</a>
+              <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">Link</button>
+              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full report →</a>
             </div>
           </div>
         </div>
@@ -3661,15 +3698,11 @@
           ` : ''}
 
           ${t.blocked_reason ? `
-            <div style="background:var(--amber-dim); border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:6px; font-size:11px; color:var(--amber); margin-bottom:6px;">
-              <strong>Blocked:</strong> ${escapeHtml(t.blocked_reason)}
-            </div>
+            <div class="note-blocked"><strong>Blocked</strong> · ${escapeHtml(t.blocked_reason)}</div>
           ` : ''}
 
           ${t.resolution ? `
-            <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:6px; font-size:11px; color:var(--green); margin-bottom:6px;">
-              <strong>Resolved:</strong> ${escapeHtml(t.resolution)}
-            </div>
+            <div class="note-resolved"><strong>Resolved</strong> · ${escapeHtml(t.resolution)}</div>
           ` : ''}
 
           <div class="task-actions-row" onclick="event.stopPropagation()" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
