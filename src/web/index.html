@@ -1618,6 +1618,17 @@
     .inc-peek .k { font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); }
     .inc-peek code { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:6px 10px; font-size:11.5px; display:block; color:var(--text-dim); white-space:pre-wrap; word-break:break-word; }
     .inc-peek .row { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
+    .inc-r.task { grid-template-columns:22px 18px minmax(0,1fr) 110px 140px 60px; }
+    .inc-r .st { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted); }
+    .inc-r .st.blocked { color:var(--amber); } .inc-r .st.in_progress { color:var(--accent); } .inc-r .st.done { color:var(--green); }
+    .inc-r .who { font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .inc-r .who.none { color:var(--text-muted); font-family:var(--font-sans); }
+    .inc-note { grid-column:3 / -1; margin:2px 0 4px; border-left:2px solid var(--amber); padding:4px 10px; font-size:12px; color:var(--text-dim); line-height:1.45; }
+    .inc-note b { color:var(--amber); font-weight:500; }
+    .inc-note.res { border-left-color:var(--green); } .inc-note.res b { color:var(--green); }
+    .inc-note .parent { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
+    .inc-note .parent a { color:var(--accent); text-decoration:none; }
+    .inc-r .acts { grid-column:3 / -1; display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 2px; }
     .inc-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
 
     /* ===== Change ledger: what moved, when, by whom - and what the text lost or gained ===== */
@@ -1797,47 +1808,18 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 3: AGENT TASKS ==================== -->
+    <!-- ==================== TAB 3: TASKS ==================== -->
     <div id="tab-tasks" class="tab-content">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
-        <div style="font-size:13px; color:var(--text-dim);">
-          Drag and drop cards between columns to transition status, or use quick action buttons.
+      <div class="inc">
+        <div class="inc-top" id="taskTop"></div>
+        <div class="inc-queue" id="taskQueue"></div>
+        <div class="inc-cmd" id="taskCmd"></div>
+        <div class="inc-hint">
+          <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> doc</span><span><kbd>m</kbd> move to&hellip;</span>
+          <span><kbd>x</kbd> done</span><span><kbd>e</kbd> edit</span><span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
+          <span style="margin-left:auto"><button class="btn sm" onclick="openNewModal('task')">+ Add task</button></span>
         </div>
-        <button class="btn sm primary" onclick="openNewModal('task')">+ Add Task</button>
-      </div>
-
-      <div class="kanban-board">
-        <div class="kanban-column" id="colOpenZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'open')">
-          <div class="column-header">
-            <span>Backlog / Open</span>
-            <span class="tab-badge" id="colOpenCount">0</span>
-          </div>
-          <div class="column-cards" id="colOpen"></div>
-        </div>
-
-        <div class="kanban-column" id="colProgZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'in_progress')">
-          <div class="column-header">
-            <span>In Progress</span>
-            <span class="tab-badge teal" id="colInProgressCount">0</span>
-          </div>
-          <div class="column-cards" id="colInProgress"></div>
-        </div>
-
-        <div class="kanban-column" id="colBlockZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'blocked')">
-          <div class="column-header">
-            <span>Blocked</span>
-            <span class="tab-badge amber" id="colBlockedCount">0</span>
-          </div>
-          <div class="column-cards" id="colBlocked"></div>
-        </div>
-
-        <div class="kanban-column" id="colDoneZone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'done')">
-          <div class="column-header">
-            <span>Done / Closed</span>
-            <span class="tab-badge" id="colDoneCount">0</span>
-          </div>
-          <div class="column-cards" id="colDone"></div>
-        </div>
+        <div id="taskRows"></div>
       </div>
     </div>
 
@@ -2125,6 +2107,10 @@
       incidentStatusFilter: 'all',
       incidentSeverityFilter: 'all',
       incidentQueue: null,
+      taskQueue: null,
+      taskStatusFilter: 'live',
+      taskCursor: 0,
+      taskKeyNav: false,
       incidentCursor: 0,
       incidentKeyNav: false,
       activityFilter: 'all',
@@ -3743,118 +3729,130 @@
     }
 
     // Tasks Kanban Rendering & Actions
-    function renderTasks() {
-      const colOpen = document.getElementById('colOpen');
-      const colProg = document.getElementById('colInProgress');
-      const colBlock = document.getElementById('colBlocked');
-      const colDone = document.getElementById('colDone');
-
-      const groups = { open: [], in_progress: [], blocked: [], done: [] };
-      App.tasks.forEach(t => {
-        const s = (t.status || 'open').toLowerCase();
-        if (s === 'done' || s === 'closed' || s === 'dropped' || s === 'resolved' || t.archived) {
-          groups.done.push(t);
-        } else if (groups[s]) {
-          groups[s].push(t);
-        } else {
-          groups.open.push(t);
-        }
-      });
-
-      document.getElementById('colOpenCount').textContent = groups.open.length;
-      document.getElementById('colInProgressCount').textContent = groups.in_progress.length;
-      document.getElementById('colBlockedCount').textContent = groups.blocked.length;
-      document.getElementById('colDoneCount').textContent = groups.done.length;
-
-      const renderCard = (t) => {
-        const s = (t.status || 'open').toLowerCase();
-        const isDone = s === 'done' || s === 'closed' || s === 'dropped' || s === 'resolved' || t.archived;
-        return `
-        <div class="task-card" data-key="${escapeHtml(t.key)}" id="task-${escapeHtml(t.key)}" draggable="true" ondragstart="handleDragStart(event, '${escapeHtml(t.key)}')">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span class="badge badge-${t.priority || 'medium'}" style="font-size:10.5px; font-weight:600;">${(t.priority || 'normal').toUpperCase()}</span>
-              <a href="#/tasks/${encodeURIComponent(t.key)}" style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'tasks')">${escapeHtml(t.key)}</a>
-            </div>
-            <div style="display:flex; align-items:center; gap:4px;">
-              <button class="btn sm icon-only" title="Copy direct link" onclick="event.stopPropagation(); copyDirectLink('#/tasks/${encodeURIComponent(t.key)}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
-              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${escapeHtml(t.assignee || 'unassigned')}</span>
-            </div>
-          </div>
-          <div style="font-weight:600; font-size:13px; color:#fff; margin:6px 0 4px 0;">
-            <a href="#/knowledge/${encodeURIComponent(t.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">
-              ${escapeHtml(t.title)}
-            </a>
-          </div>
-
-          ${t.parent_task ? `
-            <div style="font-size:10.5px; color:var(--text-dim); margin-bottom:6px; display:flex; align-items:center; gap:4px;">
-              <span>↳ Part of:</span>
-              <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" style="color:var(--accent); text-decoration:none; font-family:var(--font-mono);" onclick="handleCardClick(event, '${escapeHtml(t.parent_task)}', 'knowledge')">${escapeHtml(t.parent_task)}</a>
-            </div>
-          ` : ''}
-
-          ${t.body ? `
-            <div style="font-size:11.5px; color:var(--text-muted); line-height:1.4; margin-bottom:8px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
-              ${escapeHtml(t.body.slice(0, 140))}
-            </div>
-          ` : ''}
-
-          ${t.blocked_reason ? `
-            <div class="note-blocked"><strong>Blocked</strong> · ${escapeHtml(t.blocked_reason)}</div>
-          ` : ''}
-
-          ${t.resolution ? `
-            <div class="note-resolved"><strong>Resolved</strong> · ${escapeHtml(t.resolution)}</div>
-          ` : ''}
-
-          <div class="task-actions-row" onclick="event.stopPropagation()" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
-            <div style="display:flex; gap:4px; align-items:center;">
-              <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">Doc →</a>
-              <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(t.key)}')">Diff</button>
-              <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(t.key)}')">History</button>
-              <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">Edit</button>
-            </div>
-            <div style="display:flex; gap:4px; align-items:center;">
-              <select class="form-select" onchange="moveTaskTo(this.value, '${escapeHtml(t.key)}', '${escapeHtml(t.title)}'); this.value='';" style="padding:2px 6px; font-size:11px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
-                <option value="" disabled selected>Move to...</option>
-                <option value="open" ${t.status === 'open' ? 'disabled' : ''}>Backlog</option>
-                <option value="in_progress" ${t.status === 'in_progress' ? 'disabled' : ''}>In Progress</option>
-                <option value="blocked" ${t.status === 'blocked' ? 'disabled' : ''}>Blocked</option>
-                <option value="done" ${isDone ? 'disabled' : ''}>Done</option>
-              </select>
-
-              ${t.status === 'open' ? `<button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">Start</button>` : ''}
-              ${t.status === 'in_progress' ? `
-                <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Block</button>
-                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Done</button>
-              ` : ''}
-              ${t.status === 'blocked' ? `
-                <button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">Resume</button>
-                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Done</button>
-              ` : ''}
-              ${isDone ? `
-                <button class="btn sm primary" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">Reopen</button>
-              ` : ''}
-            </div>
-          </div>
-        </div>
-      `;
-      };
-
-      colOpen.innerHTML = groups.open.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No open tasks</div>';
-      colProg.innerHTML = groups.in_progress.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No tasks in progress</div>';
-      colBlock.innerHTML = groups.blocked.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No blocked tasks</div>';
-      colDone.innerHTML = groups.done.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No closed tasks</div>';
-
-      if (App.pendingHighlight && App.pendingHighlight.tab === 'tasks') {
-        const k = App.pendingHighlight.key;
-        if (highlightCard('tasks', k)) App.pendingHighlight = null;
-      }
+    // Tasks in the same language as incidents: three counts a person acts on,
+    // the filter shown as the command it is, rows underneath. Nothing hides
+    // behind the cursor - a blocked task shows its reason in the row.
+    const TASK_LIVE = t => !['done','closed','dropped','resolved'].includes((t.status || 'open').toLowerCase()) && !t.archived;
+    const TASK_QUEUES = [
+      { id: 'blocked', label: 'blocked', color: 'var(--amber)',
+        why: 'waiting on someone or something named in the reason',
+        flag: '--status blocked',
+        test: t => TASK_LIVE(t) && (t.status || '').toLowerCase() === 'blocked' },
+      { id: 'stalled', label: 'stalled', color: 'var(--accent)',
+        why: 'in progress, nothing changed for more than 3 days',
+        flag: '--status in_progress --stale 3d',
+        test: t => TASK_LIVE(t) && (t.status || '').toLowerCase() === 'in_progress' && (Date.now() - new Date(t.updated_at || 0).getTime()) > 3 * 86400e3 },
+      { id: 'unowned', label: 'unowned', color: 'var(--text)',
+        why: 'open, no assignee - nobody will pick it up by accident',
+        flag: '--status open --unassigned',
+        test: t => TASK_LIVE(t) && (t.status || 'open').toLowerCase() === 'open' && !(t.assignee || '').trim() },
+    ];
+    function taskSelectQueue(id) { App.taskQueue = App.taskQueue === id ? null : id; App.taskCursor = 0; renderTasks(); }
+    function taskSetStatus(st) { App.taskStatusFilter = st; App.taskCursor = 0; renderTasks(); }
+    function taskFiltered() {
+      let list = [...App.tasks];
+      const f = App.taskStatusFilter || 'live';
+      if (f === 'live') list = list.filter(TASK_LIVE);
+      else if (f === 'done') list = list.filter(t => !TASK_LIVE(t));
+      else list = list.filter(t => TASK_LIVE(t) && (t.status || 'open').toLowerCase() === f);
+      if (App.taskQueue) { const q = TASK_QUEUES.find(q => q.id === App.taskQueue); if (q) list = list.filter(q.test); }
+      const prio = { critical: 0, high: 1, medium: 2, normal: 2, low: 3 };
+      const sr = { blocked: 0, in_progress: 1, open: 2 };
+      list.sort((a, b) => (sr[(a.status||'open').toLowerCase()] ?? 2) - (sr[(b.status||'open').toLowerCase()] ?? 2)
+        || (prio[a.priority] ?? 2) - (prio[b.priority] ?? 2)
+        || new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+      return list;
     }
 
-    // Drag and Drop for Kanban
-    let draggedTaskKey = null;
+    function renderTasks() {
+      const top = document.getElementById('taskTop');
+      if (!top) return;
+      const live = App.tasks.filter(TASK_LIVE);
+      const by = st => live.filter(t => (t.status || 'open').toLowerCase() === st).length;
+      const f = App.taskStatusFilter || 'live';
+      top.innerHTML = `
+        <b>${live.length}</b><span>live</span>
+        <span style="color:var(--text-muted)">&middot;</span>
+        <span>${by('open')} open &middot; <span style="color:var(--accent)">${by('in_progress')}</span> in progress &middot; <span style="color:var(--amber)">${by('blocked')}</span> blocked</span>
+        <span style="color:var(--text-muted)">&middot; ${App.tasks.length - live.length} closed</span>
+        <span class="inc-chips">
+          ${[['live','live'],['open','open'],['in_progress','in progress'],['blocked','blocked'],['done','closed']].map(([k,l]) => `<button class="chip ${f === k ? 'active' : ''}" onclick="taskSetStatus('${k}')">${l}</button>`).join('')}
+        </span>`;
+
+      document.getElementById('taskQueue').innerHTML = TASK_QUEUES.map(q => {
+        const n = App.tasks.filter(q.test).length;
+        return `<div class="b ${App.taskQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" onclick="taskSelectQueue('${q.id}')">
+          <div class="h"><b style="color:${n ? q.color : ''}">${n}</b><span>${q.label}</span></div>
+          <div class="w">${q.why}</div><div class="k">${escapeHtml(q.flag)}</div></div>`;
+      }).join('');
+
+      const list = taskFiltered();
+      const parts = ['tasks'];
+      if (f !== 'live') parts.push('<i>--status</i> ' + f);
+      if (App.taskQueue) parts.push(TASK_QUEUES.find(q => q.id === App.taskQueue).flag.replace(/--(\S+)/g, '<i>--$1</i>'));
+      document.getElementById('taskCmd').innerHTML =
+        `<span class="p">kyb</span><span>${parts.join(' ')}</span><span class="cur"></span>
+         <span class="cnt">${list.length} of ${App.tasks.length}${f === 'live' ? ' &middot; live only' : ''}</span>`;
+
+      if (App.taskCursor == null || App.taskCursor >= list.length) App.taskCursor = 0;
+      const rows = document.getElementById('taskRows');
+      if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the queue filter.</div>`; return; }
+      rows.innerHTML = list.map((t, idx) => {
+        const cur = idx === App.taskCursor;
+        const st = (t.status || 'open').toLowerCase();
+        const done = !TASK_LIVE(t);
+        const pr = (t.priority || '').toLowerCase();
+        const dot = done ? 'resolved' : pr === 'critical' ? 'critical' : pr === 'high' ? 'high' : '';
+        const age = Math.max(0, Math.floor((Date.now() - new Date(t.updated_at || 0).getTime()) / 86400e3));
+        const note = st === 'blocked' && t.blocked_reason
+          ? `<div class="inc-note"><b>Blocked</b> &middot; ${escapeHtml(t.blocked_reason)}${t.parent_task ? ` <span class="parent">&middot; part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, '${escapeHtml(t.parent_task)}', 'knowledge')">${escapeHtml(t.parent_task)}</a></span>` : ''}</div>`
+          : done && t.resolution ? `<div class="inc-note res"><b>${st === 'dropped' ? 'Dropped' : 'Done'}</b> &middot; ${escapeHtml(t.resolution)}</div>`
+          : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, '${escapeHtml(t.parent_task)}', 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
+        const acts = cur ? `<div class="acts" onclick="event.stopPropagation()">
+            <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">&#9166; Doc</a>
+            ${!done ? `<select class="form-select" onchange="moveTaskTo(this.value, '${escapeHtml(t.key)}', '${escapeHtml(t.title)}'); this.value='';" style="padding:2px 6px; font-size:11px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
+              <option value="" disabled selected>m Move to…</option>
+              <option value="open" ${st === 'open' ? 'disabled' : ''}>Open</option>
+              <option value="in_progress" ${st === 'in_progress' ? 'disabled' : ''}>In progress</option>
+              <option value="blocked" ${st === 'blocked' ? 'disabled' : ''}>Blocked</option></select>
+            <button class="btn sm" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">x Done</button>` : `<button class="btn sm" onclick="moveTaskTo('open', '${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Reopen</button>`}
+            <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">e Edit</button>
+            <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(t.key)}')">d Diff</button>
+            <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(t.key)}')">h History</button>
+          </div>` : '';
+        return `<div class="inc-r task ${cur ? 'cur' : ''}" onclick="App.taskCursor=${idx}; renderTasks();" ondblclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">
+            <span class="n">${idx + 1}</span>
+            <span class="dot ${dot}"></span>
+            <div class="t"><b>${escapeHtml(t.title)}</b><span>${escapeHtml(t.key)}${pr && pr !== 'normal' && pr !== 'medium' ? ' · ' + escapeHtml(pr) : ''}</span></div>
+            <span class="st ${st}">${st.replace('_', ' ')}</span>
+            <span class="who ${t.assignee ? '' : 'none'}">${escapeHtml(t.assignee || 'unassigned')}</span>
+            <span class="age">${age}d</span>
+            ${note}${acts}
+          </div>`;
+      }).join('');
+      const curEl = rows.querySelector('.inc-r.cur');
+      if (curEl && App.taskKeyNav) { curEl.scrollIntoViewIfNeeded && curEl.scrollIntoViewIfNeeded(false); App.taskKeyNav = false; }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (App.activeTab !== 'tasks') return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+      if (document.querySelector('.modal-backdrop.open')) return;
+      const list = taskFiltered();
+      const cur = list[App.taskCursor || 0];
+      const claim = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+      if (e.key === 'j' || e.key === 'ArrowDown') { claim(); App.taskCursor = Math.min((App.taskCursor || 0) + 1, list.length - 1); App.taskKeyNav = true; renderTasks(); }
+      else if (e.key === 'k' || e.key === 'ArrowUp') { claim(); App.taskCursor = Math.max((App.taskCursor || 0) - 1, 0); App.taskKeyNav = true; renderTasks(); }
+      else if (e.key === 'Escape' && App.taskQueue) { claim(); taskSelectQueue(App.taskQueue); }
+      else if (!cur) return;
+      else if (e.key === 'Enter') { claim(); location.hash = '#/knowledge/' + encodeURIComponent(cur.key); }
+      else if (e.key === 'x' && TASK_LIVE(cur)) { claim(); openResolveTaskModal(cur.key, cur.title); }
+      else if (e.key === 'm' && TASK_LIVE(cur)) { claim(); const sel = document.querySelector('.inc-r.cur select'); sel && sel.focus(); }
+      else if (e.key === 'e') { claim(); openEditModal(cur.key); }
+      else if (e.key === 'd') { claim(); openDiffForEntry(cur.key); }
+      else if (e.key === 'h') { claim(); openHistoryForEntry(cur.key); }
+    }, true);
+
     function handleDragStart(e, key) {
       draggedTaskKey = key;
       e.dataTransfer.setData('text/plain', key);
