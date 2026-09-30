@@ -1669,31 +1669,23 @@
     /* ===== Versions: the chain on the left, what one version moved on the right ===== */
     .ver-line { display:inline-flex; gap:6px; margin-top:8px; font-size:11.5px; color:var(--text-muted); cursor:pointer; }
     .ver-line span { color:var(--accent); } .ver-line:hover span { text-decoration:underline; }
-    .ver { display:grid; grid-template-columns:300px minmax(0,1fr); border:1px solid var(--border); border-radius:8px; overflow:hidden; min-height:320px; }
-    .ver-list { border-right:1px solid var(--border); display:flex; flex-direction:column; background:var(--card-subtle); }
-    .ver-h { padding:10px 14px; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:8px; }
+    .ver { border:1px solid var(--border); border-radius:8px; overflow:hidden; display:flex; flex-direction:column; }
+    .ver-h { padding:10px 14px; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:8px; background:var(--card-subtle); }
     .ver-h .mono { text-transform:none; letter-spacing:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .ver-v { display:grid; grid-template-columns:14px minmax(0,1fr) auto; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); font-size:12px; align-items:start; cursor:pointer; }
-    .ver-v:hover { background:var(--card); } .ver-v.cur { background:var(--card); box-shadow:inset 3px 0 0 var(--accent); }
-    .ver-v .ln { display:flex; flex-direction:column; align-items:center; align-self:stretch; }
-    .ver-v .ln .dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); margin-top:4px; } .ver-v .ln .dot.acc { background:var(--accent); }
-    .ver-v .ln i { width:1px; flex:1; background:var(--border); margin-top:4px; }
-    .ver-v .w { display:flex; flex-direction:column; gap:2px; min-width:0; } .ver-v .w b { font-weight:500; color:var(--text); }
-    .ver-v .w span { font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .ver-v .pm { font-size:11px; white-space:nowrap; } .ver-v .pm ins { color:var(--green); text-decoration:none; } .ver-v .pm em { color:var(--red); font-style:normal; } .ver-v .pm span { color:var(--text-muted); }
-    .ver-body { display:flex; flex-direction:column; min-width:0; }
-    .ver-bh { padding:10px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; font-size:11.5px; color:var(--text-dim); flex-wrap:wrap; }
-    .ver-bh .sw { margin-left:auto; display:flex; gap:2px; }
-    .ver-bh .sw span { padding:2px 8px; border:1px solid var(--border); border-radius:4px; font-size:11px; color:var(--text-muted); cursor:pointer; }
-    .ver-bh .sw span.on { color:var(--text); border-color:var(--border-light); }
-    .ver-fld { display:grid; grid-template-columns:90px minmax(0,1fr); gap:6px 12px; padding:10px 16px; font-size:11.5px; border-bottom:1px solid var(--border); }
+    .ver-ev { border-bottom:1px solid var(--border); }
+    .ver-ev:last-child { border-bottom:0; }
+    .ver-bh { padding:10px 16px; display:flex; align-items:center; gap:12px; font-size:11.5px; color:var(--text-dim); flex-wrap:wrap; background:var(--card-subtle); }
+    .ver-bh .vn { color:var(--text); font-weight:600; } .ver-bh .dim { color:var(--text-muted); }
+    .ver-bh .pm ins { color:var(--green); text-decoration:none; } .ver-bh .pm em { color:var(--red); font-style:normal; } .ver-bh .pm span { color:var(--text-muted); }
+    .ver-bh .tx { margin-left:auto; color:var(--text-muted); font-size:11px; text-decoration:none; } .ver-bh .tx:hover { color:var(--accent); }
+    .ver-fld { display:grid; grid-template-columns:90px minmax(0,1fr); gap:6px 12px; padding:10px 16px; font-size:11.5px; border-top:1px solid var(--card-subtle); }
     .ver-fld .k { color:var(--text-muted); } .ver-fld .chg em { font-style:normal; color:var(--red); text-decoration:line-through; } .ver-fld .chg ins { color:var(--green); text-decoration:none; }
-    .ver-dif { font-family:var(--font-mono); font-size:11.5px; line-height:1.55; padding:10px 0; overflow-x:auto; }
+    .ver-dif { font-family:var(--font-mono); font-size:11.5px; line-height:1.55; padding:8px 0; }
     .ver-dif div { display:grid; grid-template-columns:28px minmax(0,1fr); padding:0 16px; } .ver-dif div span:last-child { white-space:pre-wrap; word-break:break-word; }
     .ver-dif div span:first-child { text-align:right; padding-right:10px; user-select:none; opacity:.6; }
     .ver-dif .a { color:var(--green); } .ver-dif .d { color:var(--red); }
-    .ver-text { padding:16px 20px; } .ver-empty { padding:24px 16px; color:var(--text-muted); font-size:12.5px; }
-    @media (max-width: 900px) { .ver { grid-template-columns:1fr; } .ver-list { border-right:0; border-bottom:1px solid var(--border); } }
+    .ver-note { padding:8px 16px 10px; font-size:11.5px; color:var(--text-muted); } .ver-note a { color:var(--accent); text-decoration:none; }
+    .ver-text { padding:12px 20px 16px; border-top:1px dashed var(--border); } .ver-empty { padding:24px 16px; color:var(--text-muted); font-size:12.5px; }
   </style>
 </head>
 <body>
@@ -2768,10 +2760,7 @@
         </div>
 
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
-          <div class="ver">
-            <div class="ver-list" id="verList"></div>
-            <div class="ver-body" id="verBody"><div class="ver-empty">Pick a version on the left.</div></div>
-          </div>
+          <div class="ver" id="verList"></div>
         </div>
 
         <div class="detail-body" id="detailBodyRaw" style="display:none;">
@@ -2779,108 +2768,78 @@
         </div>
       `;
 
-      // The pane is rebuilt on every 4s refresh; the reader's place in it must
-      // survive that. Reset only when the entry itself changed.
+      // The pane is rebuilt on every 4s refresh; the reader's tab must survive it.
       App.currentHistoryList = historyList;
       const sameKey = App.verKey === e.key;
-      if (!sameKey) App.detailTab = 'content';
+      if (!sameKey) { App.detailTab = 'content'; App.verTextOpen = new Set(); }
       App.verKey = e.key;
-      if (!sameKey || !historyList.some(v => v.sha === App.verSelected)) {
-        App.verSelected = historyList.length ? historyList[0].sha : null;
-        App.verMode = 'changes';
-      }
-      renderVersionList();
-      if (historyList.length) verSelect(App.verSelected, false);
-      else document.getElementById('verBody').innerHTML = '<div class="ver-empty">No versions recorded for this entry.</div>';
+      renderVersions();
       if (sameKey && App.detailTab && App.detailTab !== 'content') switchDetailTab(App.detailTab);
     }
 
-    // ---- Versions: the chain on the left, what one version changed on the right
-    App.verStats = App.verStats || new Map();   // `${key}@${sha}` -> {added, removed, fields}
+    // ---- Versions: the entry's own ledger. Every version, newest first, each
+    // with the whole of what it changed. Nothing to select, nothing to click.
+    App.verDiffs = App.verDiffs || new Map();   // `${key}@${sha}` -> diff | {created:true, lines}
+    App.verTextOpen = App.verTextOpen || new Set();
+    App.verSnaps = App.verSnaps || new Map();
     function verPrevSha(sha) {
       const h = App.currentHistoryList || [];
       const i = h.findIndex(v => v.sha === sha);
-      return i >= 0 && i < h.length - 1 ? h[i + 1].sha : 'initial';
+      return i >= 0 && i < h.length - 1 ? h[i + 1].sha : null;
     }
-    function renderVersionList() {
+    function verWho(v) { return (v.author || '').replace(/\s*<[^>]*>/, '').trim(); }
+    function verWhen(v) { return new Date(v.committed_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); }
+
+    function renderVersions() {
       const el = document.getElementById('verList');
       if (!el) return;
-      const h = App.currentHistoryList || [];
-      el.innerHTML = `<div class="ver-h"><span>${h.length} version${h.length === 1 ? '' : 's'}</span><span class="mono">kyb history ${escapeHtml(App.verKey || '')}</span></div>` +
+      const h = App.currentHistoryList || [], key = App.verKey;
+      if (!h.length) { el.innerHTML = '<div class="ver-empty">No versions recorded for this entry.</div>'; return; }
+      el.innerHTML = `<div class="ver-h"><span>${h.length} version${h.length === 1 ? '' : 's'} &middot; every change, in full</span><span class="mono">kyb history ${escapeHtml(key)}</span></div>` +
         h.map((v, i) => {
-          const st = App.verStats.get(`${App.verKey}@${v.sha}`);
-          const pm = st ? `${st.added ? `<ins>+${st.added}</ins>` : ''} ${st.removed ? `<em>&minus;${st.removed}</em>` : ''}${!st.added && !st.removed && st.fields ? `<span>${st.fields} field${st.fields === 1 ? '' : 's'}</span>` : ''}` : '<span class="dim">&hellip;</span>';
-          const n = h.length - i;
-          return `<div class="ver-v ${App.verSelected === v.sha ? 'cur' : ''}" onclick="verSelect('${escapeHtml(v.sha)}', true)" title="${escapeHtml(v.sha)}">
-            <div class="ln"><span class="dot ${App.verSelected === v.sha ? 'acc' : ''}"></span><i></i></div>
-            <div class="w"><b>v${n} &middot; ${new Date(v.committed_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}${v.change === 'added' ? ' &middot; created' : v.change === 'deleted' ? ' &middot; archived' : ''}</b>
-              <span>${escapeHtml((v.author || '').replace(/\s*<[^>]*>/, '') || (v.message || '').replace(/^kyb:\s*/, ''))}</span></div>
-            <span class="pm mono">${pm}</span>
+          const n = h.length - i, id = `${key}@${v.sha}`, d = App.verDiffs.get(id);
+          const who = verWho(v);
+          let stat = '<span class="dim">&hellip;</span>', body = '';
+          if (d && d.created) {
+            stat = `<ins>+${d.lines}</ins>`;
+            body = `<div class="ver-note">created &middot; ${d.lines} lines &middot; <a href="javascript:void(0)" onclick="verToggleText('${escapeHtml(v.sha)}')">${App.verTextOpen.has(v.sha) ? 'hide' : 'show'} the document as first written</a></div>`;
+          } else if (d) {
+            const fields = (d.fields || []).filter(f => f.field !== 'updated_at');
+            const rm = (d.body?.removed || []).filter(l => l.trim()), ad = (d.body?.added || []).filter(l => l.trim());
+            stat = `${ad.length ? `<ins>+${ad.length}</ins>` : ''} ${rm.length ? `<em>&minus;${rm.length}</em>` : ''}${!ad.length && !rm.length ? `<span>${fields.length} field${fields.length === 1 ? '' : 's'}</span>` : ''}`;
+            if (fields.length) body += `<div class="ver-fld">${fields.map(f => `<span class="k">${escapeHtml(f.field)}</span><span class="chg">${f.from ? `<em>${escapeHtml(String(f.from))}</em> &rarr; ` : ''}<ins>${escapeHtml(String(f.to ?? ''))}</ins></span>`).join('')}</div>`;
+            if (rm.length || ad.length) body += `<div class="ver-dif">${rm.map(l => `<div class="d"><span>&minus;</span><span>${escapeHtml(l)}</span></div>`).join('')}${ad.map(l => `<div class="a"><span>+</span><span>${escapeHtml(l)}</span></div>`).join('')}</div>`;
+            if (!fields.length && !rm.length && !ad.length) body += '<div class="ver-note">nothing in the text or the fields changed in this version</div>';
+          }
+          const snap = App.verTextOpen.has(v.sha) ? (App.verSnaps.get(id) ? `<div class="prose ver-text"><h3 style="margin-top:0">${escapeHtml(App.verSnaps.get(id).title || '')}</h3>${renderMarkdown(App.verSnaps.get(id).body || '')}</div>` : '<div class="ver-note">Loading&hellip;</div>') : '';
+          return `<div class="ver-ev">
+            <div class="ver-bh"><span class="mono vn">v${n}</span><span>${verWhen(v)}</span>${who ? `<span>${escapeHtml(who)}</span>` : ''}<span class="mono dim">${v.sha.slice(0, 7)}</span><span class="pm mono">${stat}</span>
+              ${!(d && d.created) ? `<a class="tx" href="javascript:void(0)" onclick="verToggleText('${escapeHtml(v.sha)}')">${App.verTextOpen.has(v.sha) ? 'hide text' : 'text at v' + n}</a>` : ''}</div>
+            ${body}${snap}
           </div>`;
         }).join('');
-      verLoadStats();
+      verLoadDiffs();
     }
-    async function verLoadStats() {
-      const h = (App.currentHistoryList || []).slice(0, 10);
-      const key = App.verKey;
-      const want = h.filter(v => !App.verStats.has(`${key}@${v.sha}`));
-      if (!want.length) return;
-      await Promise.all(want.map(async v => {
-        const from = verPrevSha(v.sha);
-        let st = { added: 0, removed: 0, fields: 0 };
-        if (from !== 'initial') {
-          const d = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${from}&to=${v.sha}`);
-          if (d) st = { added: (d.body?.added || []).filter(l => l.trim()).length, removed: (d.body?.removed || []).filter(l => l.trim()).length, fields: (d.fields || []).filter(f => f.field !== 'updated_at').length };
-        } else {
-          const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`);
-          st = { added: (snap?.body || '').split('\n').filter(l => l.trim()).length, removed: 0, fields: 0 };
-        }
-        App.verStats.set(`${key}@${v.sha}`, st);
-      }));
-      if (App.verKey === key) renderVersionList();
+    async function verLoadDiffs() {
+      const key = App.verKey, h = (App.currentHistoryList || []).slice(0, 25);
+      const want = h.filter(v => !App.verDiffs.has(`${key}@${v.sha}`));
+      const textWant = h.filter(v => App.verTextOpen.has(v.sha) && !App.verSnaps.has(`${key}@${v.sha}`));
+      if (!want.length && !textWant.length) return;
+      await Promise.all([
+        ...want.map(async v => {
+          const prev = verPrevSha(v.sha);
+          let d = null;
+          if (prev) d = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${prev}&to=${v.sha}`);
+          else { const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`); if (snap) App.verSnaps.set(`${key}@${v.sha}`, snap); d = { created: true, lines: (snap?.body || '').split('\n').filter(l => l.trim()).length }; }
+          App.verDiffs.set(`${key}@${v.sha}`, d || { fields: [], body: { added: [], removed: [] } });
+        }),
+        ...textWant.map(async v => { const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`); if (snap) App.verSnaps.set(`${key}@${v.sha}`, snap); }),
+      ]);
+      if (App.verKey === key) renderVersions();
     }
-    function verSelect(sha, switchTab_) {
-      App.verSelected = sha;
-      App.verMode = App.verMode || 'changes';
-      renderVersionList();
-      if (App.verMode === 'text') return verShowText();
-      loadDiff(App.verKey, verPrevSha(sha), sha);
-      if (switchTab_) switchDetailTab('history');
-    }
-    function verSetMode(m) { App.verMode = m; verSelect(App.verSelected, false); }
-    async function verShowText() {
-      const body = document.getElementById('verBody'); if (!body) return;
-      const h = App.currentHistoryList || []; const i = h.findIndex(v => v.sha === App.verSelected);
-      body.innerHTML = verHeader(h[i], i, h.length) + '<div class="ver-empty">Loading&hellip;</div>';
-      const snap = await apiFetch(`/knowledge/${encodeURIComponent(App.verKey)}?at=${App.verSelected}`);
-      if (!snap) { body.innerHTML = verHeader(h[i], i, h.length) + '<div class="ver-empty">This version is not readable (archived or retracted).</div>'; return; }
-      body.innerHTML = verHeader(h[i], i, h.length) + `<div class="prose ver-text"><h2 style="margin-top:0">${escapeHtml(snap.title || '')}</h2>${renderMarkdown(snap.body || '')}</div>`;
-    }
-    function verHeader(v, i, total) {
-      if (!v) return '';
-      const n = total - i, prev = verPrevSha(v.sha);
-      return `<div class="ver-bh">
-        <span class="mono">${prev === 'initial' ? 'created as' : `v${n - 1} &rarr;`} v${n}</span>
-        <span>${v.sha.slice(0, 7)} &middot; ${timeAgo(v.committed_at)}${v.author ? ' &middot; ' + escapeHtml(v.author.replace(/\s*<[^>]*>/, '')) : ''}</span>
-        <span class="sw"><span class="${App.verMode === 'changes' ? 'on' : ''}" onclick="verSetMode('changes')">changes</span><span class="${App.verMode === 'text' ? 'on' : ''}" onclick="verSetMode('text')">text at v${n}</span></span>
-      </div>`;
-    }
-    function renderVersionChange() {
-      const body = document.getElementById('verBody'); const d = currentDiffData;
-      if (!body || !d) return;
-      const h = App.currentHistoryList || []; const i = h.findIndex(v => v.sha === App.verSelected);
-      let html = verHeader(h[i], i, h.length);
-      const fields = (d.fields || []).filter(f => f.field !== 'updated_at');
-      if (fields.length) html += `<div class="ver-fld">${fields.map(f => `<span class="k">${escapeHtml(f.field)}</span><span class="chg">${f.from ? `<em>${escapeHtml(String(f.from))}</em> &rarr; ` : ''}<ins>${escapeHtml(String(f.to ?? '&empty;'))}</ins></span>`).join('')}</div>`;
-      const rm = d.body?.removed || [], ad = d.body?.added || [];
-      if (!rm.length && !ad.length && !fields.length) {
-        const t = d.to_entry && d.to_entry.body;
-        html += t ? `<div class="ver-dif">${t.split('\n').map((l, k) => `<div class="a"><span>${k + 1}</span><span>+ ${escapeHtml(l)}</span></div>`).join('')}</div>`
-                  : '<div class="ver-empty">Nothing in the text changed in this version.</div>';
-      } else {
-        html += `<div class="ver-dif">${rm.filter(l => l.trim()).map(l => `<div class="d"><span>&minus;</span><span>${escapeHtml(l)}</span></div>`).join('')}${ad.filter(l => l.trim()).map(l => `<div class="a"><span>+</span><span>${escapeHtml(l)}</span></div>`).join('')}</div>`;
-      }
-      body.innerHTML = html;
+    function verToggleText(sha) {
+      App.verTextOpen.has(sha) ? App.verTextOpen.delete(sha) : App.verTextOpen.add(sha);
+      renderVersions();
     }
 
     function copyEntryBody() {
@@ -3074,7 +3033,7 @@
       App.diffFromSha = fromSha;
       App.diffToSha = toSha;
 
-      const container = document.getElementById('diffViewContainer') || document.getElementById('verBody');
+      const container = document.getElementById('diffViewContainer');
       if (!container) return;
 
       if (!App.currentHistoryList || App.currentHistoryList.length === 0 || (App.currentHistoryList[0] && App.currentHistoryList[0].key !== key)) {
@@ -3161,7 +3120,7 @@
       }
 
       currentDiffData = diffData;
-      if (document.getElementById('verBody')) renderVersionChange(); else renderCurrentDiff();
+      renderCurrentDiff();
     }
 
     function renderCurrentDiff() {
