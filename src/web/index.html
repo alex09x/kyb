@@ -3266,6 +3266,83 @@
       await loadDiff(key, fromSha, toSha);
     }
 
+    async function openHistoryForEntry(key) {
+      if (!key) return;
+      await selectEntry(key);
+      switchDetailTab('history');
+      switchTab('search');
+    }
+
+    async function openDiffForEntry(key) {
+      if (!key) return;
+      await selectEntry(key);
+      switchDetailTab('diff');
+      switchTab('search');
+    }
+
+    async function toggleIncidentInlineHistory(key) {
+      const container = document.getElementById(`inc-inline-hist-${key}`);
+      if (!container) return;
+
+      if (container.style.display !== 'none') {
+        container.style.display = 'none';
+        return;
+      }
+
+      container.style.display = 'block';
+      container.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); display:flex; align-items:center; gap:6px;">
+            Git Revision History & Timeline
+          </span>
+          <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(key)}')">Full History View →</button>
+        </div>
+        <div style="color:var(--text-muted); font-size:12px; padding:8px 0;">Loading git revisions...</div>
+      `;
+
+      try {
+        const histData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/history`);
+        const versions = (histData && histData.versions) || [];
+        if (!versions.length) {
+          container.innerHTML = '<div style="color:var(--text-muted); font-size:12px; padding:6px 0;">No revision history recorded for this incident.</div>';
+          return;
+        }
+
+        container.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); display:flex; align-items:center; gap:6px;">
+              Git Revision History (${versions.length} revision${versions.length === 1 ? '' : 's'})
+            </span>
+            <div style="display:flex; gap:6px;">
+              <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(key)}')">Compare Diff</button>
+              <button class="btn sm primary" onclick="openHistoryForEntry('${escapeHtml(key)}')">Full History View →</button>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            ${versions.map((h, idx) => `
+              <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:4px; padding:6px 10px; font-size:11.5px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent); background:var(--card-subtle); padding:1px 5px; border-radius:3px;">${h.sha.slice(0, 7)}</span>
+                  <span style="font-weight:600; color:var(--text);">${escapeHtml(h.message || 'Updated')}</span>
+                  <span style="color:var(--text-muted); font-size:11px;">• ${timeAgo(h.committed_at)}</span>
+                  <span style="color:var(--text-dim); font-size:10.5px;">(${escapeHtml(h.author || 'Alexander Panasenko <alex@prod.codes>')})</span>
+                </div>
+                <div style="display:flex; gap:4px; align-items:center;">
+                  ${idx < versions.length - 1 ? `
+                    <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit('${escapeHtml(key)}', '${escapeHtml(h.sha)}')">Diff vs Prev</button>
+                  ` : `
+                    <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit('${escapeHtml(key)}', '${escapeHtml(h.sha)}')">Initial Diff</button>
+                  `}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<div style="color:var(--red); font-size:12px; padding:6px 0;">Failed to load history: ${escapeHtml(err.message || String(err))}</div>`;
+      }
+    }
+
     async function inspectRevision(key, sha) {
       showToast(`Loading snapshot ${sha.slice(0, 7)}...`, 'info');
       const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${encodeURIComponent(sha)}`);
@@ -3415,17 +3492,19 @@
               <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                 <span class="badge badge-${inc.status}">${inc.status}</span>
                 <span class="badge badge-${inc.severity || 'medium'}">${inc.severity || 'medium'}</span>
-                <a href="#/incidents/${encodeURIComponent(inc.key)}" class="direct-permalink" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'incidents')" title="Direct link to incident">
+                <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="direct-permalink" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')" title="Direct link to incident report">
                   <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${escapeHtml(inc.key)}</span>
                 </a>
               </div>
               <h3 style="font-size:15px; font-weight:700; color:#fff;">
-                <a href="#/incidents/${encodeURIComponent(inc.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'incidents')">
+                <a href="#/knowledge/${encodeURIComponent(inc.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">
                   ${escapeHtml(inc.title)}
                 </a>
               </h3>
             </div>
-            <div style="display:flex; gap:6px;">
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
               <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">Link</button>
               <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">Edit</button>
               ${inc.status !== 'resolved' ? `
@@ -3454,9 +3533,14 @@
           ` : ''}
 
           <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px; margin-top:10px;">
-            <span>Detected: ${timeAgo(inc.detected_at || inc.started_at)}</span>
-            <div style="display:flex; gap:8px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <span>Detected: ${timeAgo(inc.detected_at || inc.started_at)}</span>
+              ${inc.resolved_at ? `<span style="color:var(--green);">• Resolved: ${timeAgo(inc.resolved_at)}</span>` : ''}
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
               <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">In Topology</a>
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
               <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
             </div>
           </div>
@@ -3588,6 +3672,8 @@
           <div class="task-actions-row" onclick="event.stopPropagation()" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
             <div style="display:flex; gap:4px; align-items:center;">
               <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">Doc →</a>
+              <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(t.key)}')">Diff</button>
+              <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(t.key)}')">History</button>
               <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">Edit</button>
             </div>
             <div style="display:flex; gap:4px; align-items:center;">

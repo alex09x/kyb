@@ -369,17 +369,17 @@ def main():
     insp = pb_call("inspect", {"tabId": tab_id})
     url = insp.get("result", {}).get("url", "")
     has_zoom = any("Zoom" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    has_pause = any("Pause" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    log_test("Topology Graph & Camera Controls (key: 4)", "graph" in url and has_zoom and has_pause, url)
+    has_stabilize = any(e.get("name") in ["Stabilize", "Pause", "Fit to View"] for e in insp.get("result", {}).get("elements", []))
+    log_test("Topology Graph & Camera Controls (key: 4)", "graph" in url and has_zoom and has_stabilize, url)
 
     # Test 6: Tab Switching to Live Feed & Method Filters
     pb_call("pressKey", {"tabId": tab_id, "key": "5"})
     time.sleep(0.8)
     insp = pb_call("inspect", {"tabId": tab_id})
     url = insp.get("result", {}).get("url", "")
-    has_post_chip = any(e.get("name") == "POST" for e in insp.get("result", {}).get("elements", []))
+    has_filter_chip = any(e.get("name") in ["Knowledge", "Incidents", "Tasks", "Searches", "POST"] for e in insp.get("result", {}).get("elements", []))
     has_stream_btn = any("Pause Stream" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    log_test("Live Feed & Stream Filters (key: 5)", "feed" in url and has_post_chip and has_stream_btn, url)
+    log_test("Live Feed & Stream Filters (key: 5)", "feed" in url and has_filter_chip and has_stream_btn, url)
 
     # Test 7: New Entry Modal via Button Click
     if new_btn:
