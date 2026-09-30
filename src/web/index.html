@@ -1576,6 +1576,48 @@
     .task-actions-row, .task-actions-row > div { flex-wrap: wrap; row-gap: 6px; }
     .btn.warning { background: transparent; color: var(--text); border-color: var(--border-light); }
     .btn.warning:hover { border-color: var(--amber); color: var(--amber); }
+
+    /* ===== Incidents: heat grid over a command surface ===== */
+    .inc { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg); }
+    .inc-top { display:flex; align-items:baseline; gap:18px; padding:14px 16px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text-dim); }
+    .inc-top b { font-size:20px; font-weight:600; letter-spacing:-.01em; color:var(--text); }
+    .inc-top .n { font-size:14px; font-weight:600; }
+    .inc-chips { margin-left:auto; display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+    .inc-chips .sep { width:1px; height:14px; background:var(--border); margin:0 4px; }
+    .inc-grid { display:grid; grid-template-columns:170px repeat(6,1fr); border-bottom:1px solid var(--border); }
+    .inc-grid .gh { padding:7px 12px; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--card-subtle); }
+    .inc-grid .gs { padding:9px 12px; font-size:12px; color:var(--text-dim); border-bottom:1px solid var(--card-subtle); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+    .inc-grid .gs:hover { color:var(--text); }
+    .inc-grid .c { border-left:1px solid var(--card-subtle); border-bottom:1px solid var(--card-subtle); min-height:34px; display:flex; align-items:center; justify-content:center; font-size:12px; font-variant-numeric:tabular-nums; cursor:pointer; color:var(--text); }
+    .inc-grid .c:empty { cursor:default; }
+    .inc-grid .c.l1 { background:rgba(133,144,217,.10); } .inc-grid .c.l2 { background:rgba(133,144,217,.22); }
+    .inc-grid .c.l3 { background:rgba(217,164,65,.30); } .inc-grid .c.l4 { background:rgba(224,108,111,.42); font-weight:600; }
+    .inc-grid .c.sel, .inc-grid .gs.sel { outline:2px solid var(--text); outline-offset:-2px; }
+    .inc-grid .c.tot { color:var(--text-dim); }
+    .inc-cmd { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--card-subtle); font-family:var(--font-mono); font-size:13.5px; }
+    .inc-cmd .p { color:var(--accent); font-weight:600; } .inc-cmd i { font-style:normal; color:var(--text-muted); }
+    .inc-cmd .cur { width:8px; height:15px; background:var(--text); margin-left:-4px; animation:blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity:0; } }
+    @media (prefers-reduced-motion: reduce) { .inc-cmd .cur { animation:none; } }
+    .inc-cmd .cnt { margin-left:auto; font-size:11px; color:var(--text-muted); font-family:var(--font-sans); }
+    .inc-hint { display:flex; align-items:center; gap:14px; padding:7px 16px; font-size:11px; color:var(--text-muted); border-bottom:1px solid var(--card-subtle); }
+    .inc-hint kbd { font-family:var(--font-mono); background:var(--card-hover); border:1px solid var(--border); border-radius:3px; padding:0 5px; color:var(--text-dim); }
+    .inc-r { display:grid; grid-template-columns:22px 18px minmax(0,1fr) 130px 60px; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--card-subtle); font-size:12.5px; cursor:pointer; }
+    .inc-r:hover { background:var(--card); }
+    .inc-r.cur { background:var(--card); box-shadow:inset 3px 0 0 var(--accent); }
+    .inc-r .n { font-size:11px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+    .inc-r .dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); }
+    .inc-r .dot.high { background:var(--amber); } .inc-r .dot.critical { background:var(--red); } .inc-r .dot.resolved { background:var(--green); opacity:.6; }
+    .inc-r .t { display:flex; flex-direction:column; gap:2px; min-width:0; }
+    .inc-r .t b { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+    .inc-r .t span { font-size:11px; color:var(--text-muted); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .inc-r .sv { font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .inc-r .age { font-size:11.5px; color:var(--text-muted); text-align:right; font-variant-numeric:tabular-nums; }
+    .inc-peek { padding:12px 16px 14px 56px; border-bottom:1px solid var(--border); background:var(--card-subtle); font-size:12.5px; line-height:1.5; color:var(--text-dim); display:flex; flex-direction:column; gap:8px; }
+    .inc-peek .k { font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); }
+    .inc-peek code { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:6px 10px; font-size:11.5px; display:block; color:var(--text-dim); white-space:pre-wrap; word-break:break-word; }
+    .inc-peek .row { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
+    .inc-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
   </style>
 </head>
 <body>
@@ -1706,36 +1748,16 @@
 
     <!-- ==================== TAB 2: INCIDENTS ==================== -->
     <div id="tab-incidents" class="tab-content">
-      <div class="incidents-container">
-        <div id="incidentAlertBanner" class="alert-banner healthy">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <span id="incidentBannerIcon" style="display:flex; align-items:center;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
-            <div>
-              <div style="font-weight: 600; font-size: 15px;" id="incidentBannerTitle">All Systems Operational</div>
-              <div style="font-size: 12px; color: var(--text-dim);" id="incidentBannerSub">No active or unmitigated incidents recorded across the agent fleet.</div>
-            </div>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn sm" onclick="filterIncidents('all')">All</button>
-            <button class="btn sm" onclick="filterIncidents('open')">Open</button>
-            <button class="btn sm" onclick="filterIncidents('mitigated')">Mitigated</button>
-            <button class="btn sm" onclick="filterIncidents('resolved')">Resolved</button>
-          </div>
+      <div class="inc">
+        <div class="inc-top" id="incTop"></div>
+        <div class="inc-grid" id="incGrid"></div>
+        <div class="inc-cmd" id="incCmd" title="Click a grid cell to add a filter; Esc clears it"></div>
+        <div class="inc-hint">
+          <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> report</span><span><kbd>r</kbd> resolve</span>
+          <span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear cell</span>
+          <span style="margin-left:auto"><button class="btn sm" onclick="openNewModal('incident')">+ Report incident</button></span>
         </div>
-
-        <div class="filter-bar-row">
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span style="font-size:12px; color:var(--text-muted);">Severity:</span>
-            <button class="chip active" id="sevChipAll" onclick="filterIncidentsSeverity('all')">All</button>
-            <button class="chip" id="sevChipCritical" onclick="filterIncidentsSeverity('critical')">Critical</button>
-            <button class="chip" id="sevChipHigh" onclick="filterIncidentsSeverity('high')">High</button>
-            <button class="chip" id="sevChipMedium" onclick="filterIncidentsSeverity('medium')">Medium</button>
-            <button class="chip" id="sevChipLow" onclick="filterIncidentsSeverity('low')">Low</button>
-          </div>
-          <button class="btn sm primary" onclick="openNewModal('incident')">+ Report Incident</button>
-        </div>
-
-        <div class="incident-cards" id="incidentCardsGrid"></div>
+        <div id="incidentRows"></div>
       </div>
     </div>
 
@@ -2086,6 +2108,10 @@
       activeTab: 'search',
       incidentStatusFilter: 'all',
       incidentSeverityFilter: 'all',
+      incidentService: null,
+      incidentAge: null,
+      incidentCursor: 0,
+      incidentKeyNav: false,
       activityFilter: 'all',
       feedPaused: false,
       graphLayout: 'hierarchy',
@@ -3498,100 +3524,167 @@
     }
 
     // Incidents Rendering & Actions
-    function renderIncidents() {
-      let list = [...App.incidents];
-      if (App.incidentStatusFilter !== 'all') {
-        list = list.filter(i => i.status === App.incidentStatusFilter);
-      }
-      if (App.incidentSeverityFilter !== 'all') {
-        list = list.filter(i => (i.severity || 'medium').toLowerCase() === App.incidentSeverityFilter);
-      }
-
-      const openCount = App.incidents.filter(i => i.status !== 'resolved').length;
-      const banner = document.getElementById('incidentAlertBanner');
-      if (openCount > 0) {
-        banner.className = 'alert-banner';
-        document.getElementById('incidentBannerIcon').innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-        document.getElementById('incidentBannerTitle').textContent = `${openCount} Active Incident(s) in Progress`;
-        document.getElementById('incidentBannerSub').textContent = `One or more services are degraded or undergoing active mitigation.`;
-      } else {
-        banner.className = 'alert-banner healthy';
-        document.getElementById('incidentBannerIcon').innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
-        document.getElementById('incidentBannerTitle').textContent = 'All Systems Operational';
-        document.getElementById('incidentBannerSub').textContent = 'All recorded incidents have verified resolutions and passed health checks.';
-      }
-
-      const grid = document.getElementById('incidentCardsGrid');
-      if (!list.length) {
-        grid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align:center; color:var(--text-muted);">No incidents matching status and severity filters.</div>';
-        return;
-      }
-
-      grid.innerHTML = list.map(inc => `
-        <div class="incident-card ${inc.status}" data-key="${escapeHtml(inc.key)}" id="incident-${escapeHtml(inc.key)}">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <div>
-              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-                <span class="badge badge-${inc.status}">${inc.status}</span>
-                <span class="badge badge-${inc.severity || 'medium'}">${inc.severity || 'medium'}</span>
-                <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="direct-permalink" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')" title="Direct link to incident report">
-                  <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${escapeHtml(inc.key)}</span>
-                </a>
-              </div>
-              <h3 style="font-size:15px; margin-top:6px;">
-                <a href="#/knowledge/${encodeURIComponent(inc.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">
-                  ${escapeHtml(inc.title)}
-                </a>
-              </h3>
-            </div>
-            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
-              ${inc.status !== 'resolved' ? `
-                <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(inc.key)}', '${escapeHtml(inc.title)}')">Resolve</button>
-              ` : ''}
-              <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">Edit</button>
-            </div>
-          </div>
-
-          <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim); flex-wrap:wrap; margin-top:6px;">
-            <div><strong>Service:</strong> <span class="badge-tag">${escapeHtml(inc.service || 'infrastructure')}</span></div>
-            ${(inc.hosts && inc.hosts.length) ? `<div><strong>Hosts:</strong> ${escapeHtml(inc.hosts.join(', '))}</div>` : ''}
-          </div>
-
-          ${inc.detection ? `
-            <div class="block-box">
-              <div class="block-label">Executable Detection Check</div>
-              <code>${escapeHtml(inc.detection)}</code>
-            </div>
-          ` : ''}
-
-          ${inc.resolution ? `
-            <div class="resolution-callout">
-              <div class="block-label" style="color:var(--green)">Resolution Post-Mortem</div>
-              <div>${escapeHtml(inc.resolution)}</div>
-            </div>
-          ` : ''}
-
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px; margin-top:10px;">
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-              <span>Detected: ${timeAgo(inc.detected_at || inc.started_at)}</span>
-              ${inc.resolved_at ? `<span style="color:var(--green);">• Resolved: ${timeAgo(inc.resolved_at)}</span>` : ''}
-            </div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button>
-              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
-              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">Topology</a>
-              <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">Link</button>
-              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full report →</a>
-            </div>
-          </div>
-        </div>
-      `).join('');
-
-      if (App.pendingHighlight && App.pendingHighlight.tab === 'incidents') {
-        const k = App.pendingHighlight.key;
-        if (highlightCard('incidents', k)) App.pendingHighlight = null;
-      }
+    // Incidents: a heat grid (service x age) over a command surface. The grid is
+    // the summary, the command line is the filter made literal, the rows are the
+    // answer. Everything below the grid is keyboard-driven (j k Enter r d h Esc).
+    const INC_BUCKETS = [
+      { id: 'h1',   label: '< 1h',      max: 3600e3 },
+      { id: 'today',label: 'today',     max: 86400e3 },
+      { id: 'd3',   label: '2-3d',      max: 3 * 86400e3 },
+      { id: 'week', label: 'this week', max: 7 * 86400e3 },
+      { id: 'older',label: 'older',     max: Infinity },
+    ];
+    function incWhen(i) { return new Date(i.detected_at || i.started_at || i.updated_at || 0).getTime(); }
+    function incBucket(i) {
+      const age = Date.now() - incWhen(i);
+      return (INC_BUCKETS.find(b => age < b.max) || INC_BUCKETS[INC_BUCKETS.length - 1]).id;
     }
+    function incAgeLabel(i) {
+      const ms = Date.now() - incWhen(i);
+      if (!isFinite(ms) || ms < 0) return '';
+      const m = Math.floor(ms / 60e3), h = Math.floor(m / 60), d = Math.floor(h / 24);
+      return d > 0 ? d + 'd' : h > 0 ? h + 'h' : m + 'm';
+    }
+    function incHeat(n, max) {
+      if (!n) return '';
+      const r = n / Math.max(max, 1);
+      return r > .75 ? 'l4' : r > .45 ? 'l3' : r > .2 ? 'l2' : 'l1';
+    }
+
+    function incFiltered() {
+      let list = [...App.incidents];
+      if (App.incidentStatusFilter !== 'all') list = list.filter(i => i.status === App.incidentStatusFilter);
+      else list = list.filter(i => i.status !== 'resolved');
+      if (App.incidentSeverityFilter !== 'all') list = list.filter(i => (i.severity || 'medium').toLowerCase() === App.incidentSeverityFilter);
+      if (App.incidentService) list = list.filter(i => (i.service || 'infrastructure') === App.incidentService);
+      if (App.incidentAge) list = list.filter(i => incBucket(i) === App.incidentAge);
+      const rank = { critical: 0, high: 1, medium: 2, low: 3 };
+      list.sort((a, b) => (rank[a.severity] ?? 2) - (rank[b.severity] ?? 2) || incWhen(b) - incWhen(a));
+      return list;
+    }
+
+    function incSelectCell(service, age) {
+      const same = App.incidentService === service && App.incidentAge === age;
+      App.incidentService = same ? null : service;
+      App.incidentAge = same ? null : age;
+      App.incidentCursor = 0;
+      renderIncidents();
+    }
+    function incClearCell() { App.incidentService = null; App.incidentAge = null; App.incidentCursor = 0; renderIncidents(); }
+
+    function renderIncidents() {
+      const open = App.incidents.filter(i => i.status !== 'resolved');
+      const crit = open.filter(i => i.severity === 'critical').length;
+      const high = open.filter(i => i.severity === 'high').length;
+      const oldest = open.slice().sort((a, b) => incWhen(a) - incWhen(b))[0];
+
+      // ---- summary
+      document.getElementById('incTop').innerHTML = `
+        <b>${open.length}</b><span>open</span>
+        <span style="color:var(--text-muted)">&middot;</span>
+        <span><span class="n" style="color:var(--red)">${crit}</span> critical</span>
+        <span><span class="n" style="color:var(--amber)">${high}</span> high</span>
+        ${oldest ? `<span style="color:var(--text-muted)">oldest open: ${incAgeLabel(oldest)} &middot; <span class="mono">${escapeHtml(oldest.service || 'infrastructure')}</span></span>` : ''}
+        <span class="inc-chips">
+          ${['all','open','mitigated','resolved'].map(st => `<button class="chip ${App.incidentStatusFilter === st ? 'active' : ''}" onclick="filterIncidents('${st}')">${st === 'all' ? 'open + mitigated' : st}</button>`).join('')}
+          <span class="sep"></span>
+          ${['all','critical','high','medium','low'].map(sv => `<button class="chip ${App.incidentSeverityFilter === sv ? 'active' : ''}" onclick="filterIncidentsSeverity('${sv}')">${sv === 'all' ? 'any severity' : sv}</button>`).join('')}
+        </span>`;
+
+      // ---- heat grid: services by open count, the tail aggregated
+      const byService = new Map();
+      for (const i of open) {
+        const svc = i.service || 'infrastructure';
+        if (!byService.has(svc)) byService.set(svc, { total: 0, b: {} });
+        const row = byService.get(svc); row.total++;
+        row.b[incBucket(i)] = (row.b[incBucket(i)] || 0) + 1;
+      }
+      const services = [...byService.entries()].sort((a, b) => b[1].total - a[1].total);
+      const shown = services.slice(0, 7), rest = services.slice(7);
+      let cellMax = 1;
+      for (const [, r] of shown) for (const b of INC_BUCKETS) cellMax = Math.max(cellMax, r.b[b.id] || 0);
+      const cell = (svc, b, n) => `<div class="c ${incHeat(n, cellMax)} ${App.incidentService === svc && App.incidentAge === b ? 'sel' : ''}" onclick="incSelectCell('${escapeHtml(svc)}','${b}')">${n || ''}</div>`;
+      let g = `<div class="gh">service</div>${INC_BUCKETS.map(b => `<div class="gh">${b.label}</div>`).join('')}<div class="gh">total</div>`;
+      for (const [svc, r] of shown) {
+        g += `<div class="gs ${App.incidentService === svc && !App.incidentAge ? 'sel' : ''}" onclick="incSelectCell('${escapeHtml(svc)}',null)" title="${escapeHtml(svc)}">${escapeHtml(svc)}</div>`;
+        g += INC_BUCKETS.map(b => cell(svc, b.id, r.b[b.id] || 0)).join('');
+        g += `<div class="c tot">${r.total}</div>`;
+      }
+      if (rest.length) {
+        const agg = {}; let tot = 0;
+        for (const [, r] of rest) { tot += r.total; for (const k in r.b) agg[k] = (agg[k] || 0) + r.b[k]; }
+        g += `<div class="gs" style="color:var(--text-muted)">+ ${rest.length} more</div>`;
+        g += INC_BUCKETS.map(b => `<div class="c tot">${agg[b.id] || ''}</div>`).join('');
+        g += `<div class="c tot">${tot}</div>`;
+      }
+      document.getElementById('incGrid').innerHTML = open.length ? g : '';
+
+      // ---- command line: the filter, made literal
+      const list = incFiltered();
+      const parts = ['incidents'];
+      if (App.incidentStatusFilter !== 'all') parts.push('<i>--status</i> ' + App.incidentStatusFilter);
+      if (App.incidentSeverityFilter !== 'all') parts.push('<i>--severity</i> ' + App.incidentSeverityFilter);
+      if (App.incidentService) parts.push('<i>--service</i> ' + escapeHtml(App.incidentService));
+      if (App.incidentAge) parts.push('<i>--age</i> ' + INC_BUCKETS.find(b => b.id === App.incidentAge).label.replace(' ', '-'));
+      document.getElementById('incCmd').innerHTML =
+        `<span class="p">kyb</span><span>${parts.join(' ')}</span><span class="cur"></span>
+         <span class="cnt">${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' &middot; open only' : ''}</span>`;
+
+      // ---- rows + peek under the cursor
+      if (App.incidentCursor == null || App.incidentCursor >= list.length) App.incidentCursor = 0;
+      const rows = document.getElementById('incidentRows');
+      if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the cell filter.</div>`; return; }
+      rows.innerHTML = list.map((inc, idx) => {
+        const cur = idx === App.incidentCursor;
+        const sev = (inc.severity || 'medium').toLowerCase();
+        let peek = '';
+        if (cur) {
+          const hist = (App.detailCache.get(inc.key) || {}).history;
+          peek = `<div class="inc-peek">
+            ${inc.detection ? `<div class="k">detection &middot; is it still happening?</div><code>${escapeHtml(inc.detection)}</code>`
+                              : `<div class="k" style="color:var(--amber)">no detection recorded &middot; a report that cannot say whether it is still happening is a story</div>`}
+            <div class="k">${inc.status} &middot; ${escapeHtml(inc.service || 'infrastructure')}${(inc.hosts || []).length ? ' &middot; ' + escapeHtml(inc.hosts.join(', ')) : ''} &middot; detected ${timeAgo(inc.detected_at || inc.started_at)}${inc.open_followups ? ` &middot; ${inc.open_followups} open follow-up${inc.open_followups > 1 ? 's' : ''}` : ''}</div>
+            ${inc.resolution ? `<div><span style="color:var(--green)">Resolution:</span> ${escapeHtml(inc.resolution)}</div>` : ''}
+            <div class="row">
+              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">&#9166; Full report</a>
+              ${inc.status !== 'resolved' ? `<button class="btn sm" onclick="event.stopPropagation(); openResolveIncidentModal('${escapeHtml(inc.key)}', '${escapeHtml(inc.title)}')">r Resolve</button>` : ''}
+              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">d Diff</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">h History${hist ? ` (${hist.length})` : ''}</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openEditModal('${escapeHtml(inc.key)}')">e Edit</button>
+              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">Topology</a>
+            </div></div>`;
+        }
+        return `<div class="inc-r ${cur ? 'cur' : ''} ${inc.status}" data-idx="${idx}" onclick="App.incidentCursor=${idx}; renderIncidents();" ondblclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">
+            <span class="n">${idx + 1}</span>
+            <span class="dot ${inc.status === 'resolved' ? 'resolved' : sev}"></span>
+            <div class="t"><b>${escapeHtml(inc.title)}</b><span>${escapeHtml(inc.key)}</span></div>
+            <span class="sv">${escapeHtml(inc.service || 'infrastructure')}</span>
+            <span class="age">${incAgeLabel(inc)}</span>
+          </div>${peek}`;
+      }).join('');
+      const curEl = rows.querySelector('.inc-r.cur');
+      if (curEl && App.incidentKeyNav) { curEl.scrollIntoViewIfNeeded ? curEl.scrollIntoViewIfNeeded(false) : null; App.incidentKeyNav = false; }
+    }
+
+    // Keyboard, incidents tab only. Registered in the capture phase so it runs
+    // before the global handler and can claim r/d/h/Enter/Esc for the cursor row.
+    window.addEventListener('keydown', (e) => {
+      if (App.activeTab !== 'incidents') return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+      if (document.querySelector('.modal-backdrop.open')) return;
+      const list = incFiltered();
+      const cur = list[App.incidentCursor || 0];
+      const claim = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+      if (e.key === 'j' || e.key === 'ArrowDown') { claim(); App.incidentCursor = Math.min((App.incidentCursor || 0) + 1, list.length - 1); App.incidentKeyNav = true; renderIncidents(); }
+      else if (e.key === 'k' || e.key === 'ArrowUp') { claim(); App.incidentCursor = Math.max((App.incidentCursor || 0) - 1, 0); App.incidentKeyNav = true; renderIncidents(); }
+      else if (e.key === 'Escape' && (App.incidentService || App.incidentAge)) { claim(); incClearCell(); }
+      else if (!cur) return;
+      else if (e.key === 'Enter') { claim(); location.hash = '#/knowledge/' + encodeURIComponent(cur.key); }
+      else if (e.key === 'r' && cur.status !== 'resolved') { claim(); openResolveIncidentModal(cur.key, cur.title); }
+      else if (e.key === 'd') { claim(); openDiffForEntry(cur.key); }
+      else if (e.key === 'h') { claim(); openHistoryForEntry(cur.key); }
+      else if (e.key === 'e') { claim(); openEditModal(cur.key); }
+    }, true);
 
     function filterIncidents(status) {
       App.incidentStatusFilter = status;
