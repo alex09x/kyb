@@ -1665,6 +1665,35 @@
     .led-q .qq { font-family:var(--font-mono); color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .led-q .qq a { color:inherit; text-decoration:none; } .led-q .qq a:hover { color:var(--accent); }
     .led-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
+
+    /* ===== Versions: the chain on the left, what one version moved on the right ===== */
+    .ver-line { display:inline-flex; gap:6px; margin-top:8px; font-size:11.5px; color:var(--text-muted); cursor:pointer; }
+    .ver-line span { color:var(--accent); } .ver-line:hover span { text-decoration:underline; }
+    .ver { display:grid; grid-template-columns:300px minmax(0,1fr); border:1px solid var(--border); border-radius:8px; overflow:hidden; min-height:320px; }
+    .ver-list { border-right:1px solid var(--border); display:flex; flex-direction:column; background:var(--card-subtle); }
+    .ver-h { padding:10px 14px; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:8px; }
+    .ver-h .mono { text-transform:none; letter-spacing:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ver-v { display:grid; grid-template-columns:14px minmax(0,1fr) auto; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); font-size:12px; align-items:start; cursor:pointer; }
+    .ver-v:hover { background:var(--card); } .ver-v.cur { background:var(--card); box-shadow:inset 3px 0 0 var(--accent); }
+    .ver-v .ln { display:flex; flex-direction:column; align-items:center; align-self:stretch; }
+    .ver-v .ln .dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); margin-top:4px; } .ver-v .ln .dot.acc { background:var(--accent); }
+    .ver-v .ln i { width:1px; flex:1; background:var(--border); margin-top:4px; }
+    .ver-v .w { display:flex; flex-direction:column; gap:2px; min-width:0; } .ver-v .w b { font-weight:500; color:var(--text); }
+    .ver-v .w span { font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ver-v .pm { font-size:11px; white-space:nowrap; } .ver-v .pm ins { color:var(--green); text-decoration:none; } .ver-v .pm em { color:var(--red); font-style:normal; } .ver-v .pm span { color:var(--text-muted); }
+    .ver-body { display:flex; flex-direction:column; min-width:0; }
+    .ver-bh { padding:10px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; font-size:11.5px; color:var(--text-dim); flex-wrap:wrap; }
+    .ver-bh .sw { margin-left:auto; display:flex; gap:2px; }
+    .ver-bh .sw span { padding:2px 8px; border:1px solid var(--border); border-radius:4px; font-size:11px; color:var(--text-muted); cursor:pointer; }
+    .ver-bh .sw span.on { color:var(--text); border-color:var(--border-light); }
+    .ver-fld { display:grid; grid-template-columns:90px minmax(0,1fr); gap:6px 12px; padding:10px 16px; font-size:11.5px; border-bottom:1px solid var(--border); }
+    .ver-fld .k { color:var(--text-muted); } .ver-fld .chg em { font-style:normal; color:var(--red); text-decoration:line-through; } .ver-fld .chg ins { color:var(--green); text-decoration:none; }
+    .ver-dif { font-family:var(--font-mono); font-size:11.5px; line-height:1.55; padding:10px 0; overflow-x:auto; }
+    .ver-dif div { display:grid; grid-template-columns:28px minmax(0,1fr); padding:0 16px; } .ver-dif div span:last-child { white-space:pre-wrap; word-break:break-word; }
+    .ver-dif div span:first-child { text-align:right; padding-right:10px; user-select:none; opacity:.6; }
+    .ver-dif .a { color:var(--green); } .ver-dif .d { color:var(--red); }
+    .ver-text { padding:16px 20px; } .ver-empty { padding:24px 16px; color:var(--text-muted); font-size:12.5px; }
+    @media (max-width: 900px) { .ver { grid-template-columns:1fr; } .ver-list { border-right:0; border-bottom:1px solid var(--border); } }
   </style>
 </head>
 <body>
@@ -2715,13 +2744,7 @@
             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
               ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" style="text-decoration:none;" onclick="handleTagClick(event, '${escapeHtml(t)}')">#${escapeHtml(t)}</a>`).join('')}
             </div>
-            ${historyList.length > 1 ? `
-              <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.3); border-radius:4px; padding:3px 8px; margin-top:8px; font-size:11px; color:#a78bfa; cursor:pointer;" onclick="switchDetailTab('history')">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                <strong>${historyList.length} revisions in Git canon</strong>
-                <span style="opacity:0.8;">— click to view timeline →</span>
-              </div>
-            ` : ''}
+            ${historyList.length > 1 ? `<div class="ver-line" onclick="switchDetailTab('history')">${historyList.length} versions &middot; last change ${timeAgo(historyList[0].committed_at)} &middot; <span>see what moved &rarr;</span></div>` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink('#/knowledge/${encodeURIComponent(e.key)}')">Link</button>
@@ -2735,68 +2758,20 @@
 
         <div class="detail-tabs">
           <button class="detail-tab active" onclick="switchDetailTab('content')">Document</button>
-          <button class="detail-tab" onclick="switchDetailTab('history')">History (${historyList.length})</button>
-          <button class="detail-tab" onclick="switchDetailTab('diff')">Diff</button>
+          <button class="detail-tab" onclick="switchDetailTab('history')">Versions (${historyList.length})</button>
           <button class="detail-tab" onclick="switchDetailTab('raw')">Raw</button>
         </div>
 
         <div class="detail-body" id="detailBodyContent">
           ${renderEntityHeroBanner(e, historyList)}
           <div class="prose">${renderMarkdown(e.body)}</div>
-          ${(historyList && historyList.length > 0) ? `
-            <div class="recent-activity-panel">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); display:flex; align-items:center; gap:6px;">
-                  Recent Canon Activity (${historyList.length} revision${historyList.length === 1 ? '' : 's'} recorded)
-                </span>
-                <button class="btn sm" onclick="switchDetailTab('history')">Full Git History →</button>
-              </div>
-              <div>
-                ${historyList.slice(0, 3).map((h, idx) => `
-                  <div class="timeline-mini-item">
-                    <div class="timeline-mini-dot"></div>
-                    <div style="flex:1;">
-                      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-                        <span style="font-size:12.5px; font-weight:600; color:var(--text);">${escapeHtml(h.message || 'Updated')}</span>
-                        <span style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">${timeAgo(h.committed_at)}</span>
-                      </div>
-                      <div style="font-size:11px; color:var(--text-dim); font-family:var(--font-mono); margin-top:2px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <span>${escapeHtml(h.author || 'Alexander Panasenko <alex@prod.codes>')}</span>
-                        <span style="color:var(--accent);">${h.sha.slice(0, 7)}</span>
-                        ${idx < historyList.length - 1 ? `<a href="javascript:void(0)" onclick="loadDiff('${escapeHtml(e.key)}', '${escapeHtml(historyList[idx+1].sha)}', '${escapeHtml(h.sha)}'); switchDetailTab('diff');" style="color:var(--accent); text-decoration:none;">diff vs prev</a>` : ''}
-                      </div>
-                    </div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
         </div>
 
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            ${historyList.map((h, idx) => `
-              <a href="#/knowledge/${encodeURIComponent(e.key)}?rev=${encodeURIComponent(h.sha)}" class="history-card" style="text-decoration:none; color:inherit;" onclick="handleRevisionClick(event, '${escapeHtml(e.key)}', '${escapeHtml(h.sha)}')">
-                <div>
-                  <div style="font-weight:600; font-size:13px; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
-                  <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-top:3px;">
-                    ${escapeHtml(h.author || 'Alexander Panasenko <alex@prod.codes>')} • ${timeAgo(h.committed_at)}
-                    ${h.change ? `<span class="badge ${h.change === 'added' ? 'badge-knowledge' : 'badge-task'}" style="margin-left:6px; font-size:10px;">${h.change}</span>` : ''}
-                  </div>
-                </div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent); background:var(--card-subtle); padding:2px 6px; border-radius:4px;">${h.sha.slice(0,7)}</span>
-                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}')">View</button>
-                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(historyList[idx+1].sha)}', '${escapeHtml(h.sha)}'); switchDetailTab('diff');">Diff vs Prev</button>` : ''}
-                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}', '${escapeHtml(historyList[0].sha)}'); switchDetailTab('diff');">vs Head</button>` : ''}
-                </div>
-              </a>
-            `).join('') || '<div style="color:var(--text-muted); padding:20px; text-align:center;">No revision history found.</div>'}
+          <div class="ver">
+            <div class="ver-list" id="verList"></div>
+            <div class="ver-body" id="verBody"><div class="ver-empty">Pick a version on the left.</div></div>
           </div>
-        </div>
-
-        <div class="detail-body" id="detailBodyDiff" style="display:none;">
-          <div id="diffViewContainer" style="color:var(--text-muted);">Loading diff...</div>
         </div>
 
         <div class="detail-body" id="detailBodyRaw" style="display:none;">
@@ -2804,16 +2779,108 @@
         </div>
       `;
 
-      // Pre-load diff if multiple revisions exist
+      // The pane is rebuilt on every 4s refresh; the reader's place in it must
+      // survive that. Reset only when the entry itself changed.
       App.currentHistoryList = historyList;
-      if (historyList.length >= 2) {
-        loadDiff(e.key, historyList[1].sha, historyList[0].sha);
-      } else if (historyList.length === 1) {
-        loadDiff(e.key, 'initial', historyList[0].sha);
-      } else {
-        const diffCont = document.getElementById('diffViewContainer');
-        if (diffCont) diffCont.innerHTML = '<div style="color:var(--text-muted); padding:20px; text-align:center;">No revision history recorded for this entry.</div>';
+      const sameKey = App.verKey === e.key;
+      if (!sameKey) App.detailTab = 'content';
+      App.verKey = e.key;
+      if (!sameKey || !historyList.some(v => v.sha === App.verSelected)) {
+        App.verSelected = historyList.length ? historyList[0].sha : null;
+        App.verMode = 'changes';
       }
+      renderVersionList();
+      if (historyList.length) verSelect(App.verSelected, false);
+      else document.getElementById('verBody').innerHTML = '<div class="ver-empty">No versions recorded for this entry.</div>';
+      if (sameKey && App.detailTab && App.detailTab !== 'content') switchDetailTab(App.detailTab);
+    }
+
+    // ---- Versions: the chain on the left, what one version changed on the right
+    App.verStats = App.verStats || new Map();   // `${key}@${sha}` -> {added, removed, fields}
+    function verPrevSha(sha) {
+      const h = App.currentHistoryList || [];
+      const i = h.findIndex(v => v.sha === sha);
+      return i >= 0 && i < h.length - 1 ? h[i + 1].sha : 'initial';
+    }
+    function renderVersionList() {
+      const el = document.getElementById('verList');
+      if (!el) return;
+      const h = App.currentHistoryList || [];
+      el.innerHTML = `<div class="ver-h"><span>${h.length} version${h.length === 1 ? '' : 's'}</span><span class="mono">kyb history ${escapeHtml(App.verKey || '')}</span></div>` +
+        h.map((v, i) => {
+          const st = App.verStats.get(`${App.verKey}@${v.sha}`);
+          const pm = st ? `${st.added ? `<ins>+${st.added}</ins>` : ''} ${st.removed ? `<em>&minus;${st.removed}</em>` : ''}${!st.added && !st.removed && st.fields ? `<span>${st.fields} field${st.fields === 1 ? '' : 's'}</span>` : ''}` : '<span class="dim">&hellip;</span>';
+          const n = h.length - i;
+          return `<div class="ver-v ${App.verSelected === v.sha ? 'cur' : ''}" onclick="verSelect('${escapeHtml(v.sha)}', true)" title="${escapeHtml(v.sha)}">
+            <div class="ln"><span class="dot ${App.verSelected === v.sha ? 'acc' : ''}"></span><i></i></div>
+            <div class="w"><b>v${n} &middot; ${new Date(v.committed_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}${v.change === 'added' ? ' &middot; created' : v.change === 'deleted' ? ' &middot; archived' : ''}</b>
+              <span>${escapeHtml((v.author || '').replace(/\s*<[^>]*>/, '') || (v.message || '').replace(/^kyb:\s*/, ''))}</span></div>
+            <span class="pm mono">${pm}</span>
+          </div>`;
+        }).join('');
+      verLoadStats();
+    }
+    async function verLoadStats() {
+      const h = (App.currentHistoryList || []).slice(0, 10);
+      const key = App.verKey;
+      const want = h.filter(v => !App.verStats.has(`${key}@${v.sha}`));
+      if (!want.length) return;
+      await Promise.all(want.map(async v => {
+        const from = verPrevSha(v.sha);
+        let st = { added: 0, removed: 0, fields: 0 };
+        if (from !== 'initial') {
+          const d = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${from}&to=${v.sha}`);
+          if (d) st = { added: (d.body?.added || []).filter(l => l.trim()).length, removed: (d.body?.removed || []).filter(l => l.trim()).length, fields: (d.fields || []).filter(f => f.field !== 'updated_at').length };
+        } else {
+          const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`);
+          st = { added: (snap?.body || '').split('\n').filter(l => l.trim()).length, removed: 0, fields: 0 };
+        }
+        App.verStats.set(`${key}@${v.sha}`, st);
+      }));
+      if (App.verKey === key) renderVersionList();
+    }
+    function verSelect(sha, switchTab_) {
+      App.verSelected = sha;
+      App.verMode = App.verMode || 'changes';
+      renderVersionList();
+      if (App.verMode === 'text') return verShowText();
+      loadDiff(App.verKey, verPrevSha(sha), sha);
+      if (switchTab_) switchDetailTab('history');
+    }
+    function verSetMode(m) { App.verMode = m; verSelect(App.verSelected, false); }
+    async function verShowText() {
+      const body = document.getElementById('verBody'); if (!body) return;
+      const h = App.currentHistoryList || []; const i = h.findIndex(v => v.sha === App.verSelected);
+      body.innerHTML = verHeader(h[i], i, h.length) + '<div class="ver-empty">Loading&hellip;</div>';
+      const snap = await apiFetch(`/knowledge/${encodeURIComponent(App.verKey)}?at=${App.verSelected}`);
+      if (!snap) { body.innerHTML = verHeader(h[i], i, h.length) + '<div class="ver-empty">This version is not readable (archived or retracted).</div>'; return; }
+      body.innerHTML = verHeader(h[i], i, h.length) + `<div class="prose ver-text"><h2 style="margin-top:0">${escapeHtml(snap.title || '')}</h2>${renderMarkdown(snap.body || '')}</div>`;
+    }
+    function verHeader(v, i, total) {
+      if (!v) return '';
+      const n = total - i, prev = verPrevSha(v.sha);
+      return `<div class="ver-bh">
+        <span class="mono">${prev === 'initial' ? 'created as' : `v${n - 1} &rarr;`} v${n}</span>
+        <span>${v.sha.slice(0, 7)} &middot; ${timeAgo(v.committed_at)}${v.author ? ' &middot; ' + escapeHtml(v.author.replace(/\s*<[^>]*>/, '')) : ''}</span>
+        <span class="sw"><span class="${App.verMode === 'changes' ? 'on' : ''}" onclick="verSetMode('changes')">changes</span><span class="${App.verMode === 'text' ? 'on' : ''}" onclick="verSetMode('text')">text at v${n}</span></span>
+      </div>`;
+    }
+    function renderVersionChange() {
+      const body = document.getElementById('verBody'); const d = currentDiffData;
+      if (!body || !d) return;
+      const h = App.currentHistoryList || []; const i = h.findIndex(v => v.sha === App.verSelected);
+      let html = verHeader(h[i], i, h.length);
+      const fields = (d.fields || []).filter(f => f.field !== 'updated_at');
+      if (fields.length) html += `<div class="ver-fld">${fields.map(f => `<span class="k">${escapeHtml(f.field)}</span><span class="chg">${f.from ? `<em>${escapeHtml(String(f.from))}</em> &rarr; ` : ''}<ins>${escapeHtml(String(f.to ?? '&empty;'))}</ins></span>`).join('')}</div>`;
+      const rm = d.body?.removed || [], ad = d.body?.added || [];
+      if (!rm.length && !ad.length && !fields.length) {
+        const t = d.to_entry && d.to_entry.body;
+        html += t ? `<div class="ver-dif">${t.split('\n').map((l, k) => `<div class="a"><span>${k + 1}</span><span>+ ${escapeHtml(l)}</span></div>`).join('')}</div>`
+                  : '<div class="ver-empty">Nothing in the text changed in this version.</div>';
+      } else {
+        html += `<div class="ver-dif">${rm.filter(l => l.trim()).map(l => `<div class="d"><span>&minus;</span><span>${escapeHtml(l)}</span></div>`).join('')}${ad.filter(l => l.trim()).map(l => `<div class="a"><span>+</span><span>${escapeHtml(l)}</span></div>`).join('')}</div>`;
+      }
+      body.innerHTML = html;
     }
 
     function copyEntryBody() {
@@ -3007,15 +3074,8 @@
       App.diffFromSha = fromSha;
       App.diffToSha = toSha;
 
-      const container = document.getElementById('diffViewContainer');
+      const container = document.getElementById('diffViewContainer') || document.getElementById('verBody');
       if (!container) return;
-
-      container.innerHTML = `
-        <div style="display:flex; align-items:center; gap:8px; padding:24px; color:var(--text-muted); font-family:var(--font-mono); font-size:12px;">
-          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent);"></span>
-          Сравнение ревизий ${fromSha.slice(0, 7)} ➔ ${toSha.slice(0, 7)}...
-        </div>
-      `;
 
       if (!App.currentHistoryList || App.currentHistoryList.length === 0 || (App.currentHistoryList[0] && App.currentHistoryList[0].key !== key)) {
         const hData = await apiFetch(`/knowledge/${encodeURIComponent(key)}/history`);
@@ -3101,7 +3161,7 @@
       }
 
       currentDiffData = diffData;
-      renderCurrentDiff();
+      if (document.getElementById('verBody')) renderVersionChange(); else renderCurrentDiff();
     }
 
     function renderCurrentDiff() {
@@ -3438,13 +3498,16 @@
 
     function switchDetailTab(tab) {
       document.querySelectorAll('.detail-tab').forEach(b => b.classList.remove('active'));
-      const activeBtn = Array.from(document.querySelectorAll('.detail-tab')).find(b => b.textContent.toLowerCase().includes(tab));
+      const want = tab === 'history' || tab === 'diff' ? 'versions' : tab === 'content' ? 'document' : tab;
+      const activeBtn = Array.from(document.querySelectorAll('.detail-tab')).find(b => b.textContent.toLowerCase().includes(want));
       if (activeBtn) activeBtn.classList.add('active');
 
-      document.getElementById('detailBodyContent').style.display = tab === 'content' ? 'block' : 'none';
-      document.getElementById('detailBodyHistory').style.display = tab === 'history' ? 'block' : 'none';
-      document.getElementById('detailBodyDiff').style.display = tab === 'diff' ? 'block' : 'none';
-      document.getElementById('detailBodyRaw').style.display = tab === 'raw' ? 'block' : 'none';
+      if (tab === 'diff') tab = 'history';
+      App.detailTab = tab;
+      const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? 'block' : 'none'; };
+      show('detailBodyContent', tab === 'content');
+      show('detailBodyHistory', tab === 'history');
+      show('detailBodyRaw', tab === 'raw');
     }
 
     // Deep Link Navigation & Anchor Handlers
