@@ -1619,6 +1619,41 @@
     .inc-peek code { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:6px 10px; font-size:11.5px; display:block; color:var(--text-dim); white-space:pre-wrap; word-break:break-word; }
     .inc-peek .row { display:flex; gap:6px; flex-wrap:wrap; margin-top:2px; }
     .inc-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
+
+    /* ===== Change ledger: what moved, when, by whom - and what the text lost or gained ===== */
+    .led { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg); }
+    .led-top { display:flex; align-items:baseline; gap:18px; padding:14px 16px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text-dim); flex-wrap:wrap; }
+    .led-top b { font-size:20px; font-weight:600; letter-spacing:-.01em; color:var(--text); }
+    .led-top .chips { margin-left:auto; display:flex; gap:4px; align-items:center; }
+    .led-day { padding:12px 16px 4px; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); }
+    .led-ev { display:grid; grid-template-columns:52px 14px minmax(0,1fr) auto; gap:12px; align-items:start; padding:8px 16px; font-size:12.5px; }
+    .led-ev:hover { background:var(--card-subtle); }
+    .led-ev .tm { color:var(--text-muted); font-family:var(--font-mono); font-size:11.5px; padding-top:2px; font-variant-numeric:tabular-nums; }
+    .led-ev .ln { display:flex; flex-direction:column; align-items:center; align-self:stretch; }
+    .led-ev .ln .dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); margin-top:4px; }
+    .led-ev .ln .dot.open { background:var(--red); } .led-ev .ln .dot.res { background:var(--green); } .led-ev .ln .dot.task { background:var(--accent); }
+    .led-ev .ln i { width:1px; flex:1; background:var(--border); margin-top:4px; }
+    .led-ev .what { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .led-ev .what .h { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .led-ev .what b { font-weight:500; color:var(--text); }
+    .led-ev .what b a { color:inherit; text-decoration:none; } .led-ev .what b a:hover { text-decoration:underline; }
+    .led-ev .what .sub { font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .led-ev .who { font-size:11px; color:var(--text-muted); white-space:nowrap; padding-top:2px; }
+    .led-verb { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); color:var(--text-dim); }
+    .led-verb.open { color:var(--red); border-color:rgba(224,108,111,.4); }
+    .led-verb.res { color:var(--green); border-color:rgba(95,184,143,.4); }
+    .led-verb.retract { color:var(--amber); border-color:rgba(217,164,65,.4); }
+    .led-d { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); background:var(--card-subtle); border:1px solid var(--border); border-radius:4px; padding:5px 8px; margin-top:3px; display:flex; flex-direction:column; gap:2px; max-width:900px; }
+    .led-d div { white-space:pre-wrap; word-break:break-word; }
+    .led-d .del { color:var(--red); } .led-d .add { color:var(--green); } .led-d .fld { color:var(--text-dim); } .led-d .fld em { font-style:normal; color:var(--text-muted); text-decoration:line-through; }
+    .led-d .more { color:var(--text-muted); font-family:var(--font-sans); font-size:10.5px; }
+    .led-fold { padding:6px 16px 6px 94px; font-size:11px; color:var(--text-muted); cursor:pointer; }
+    .led-fold:hover { color:var(--text-dim); }
+    .led-fold .acc { color:var(--accent); }
+    .led-q { display:grid; grid-template-columns:52px 14px minmax(0,1fr) auto; gap:12px; padding:3px 16px; font-size:11.5px; color:var(--text-muted); }
+    .led-q .qq { font-family:var(--font-mono); color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .led-q .qq a { color:inherit; text-decoration:none; } .led-q .qq a:hover { color:var(--accent); }
+    .led-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
   </style>
 </head>
 <body>
@@ -1893,33 +1928,13 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 5: FLEET ACTIVITY & CHANGELOG ==================== -->
+    <!-- ==================== TAB 5: CHANGE LEDGER ==================== -->
     <div id="tab-feed" class="tab-content">
-      <div class="feed-container">
-        <div class="feed-toolbar">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-weight:600; font-size:13.5px; color:var(--text);">Fleet Activity & Changelog</span>
-            <span class="tab-badge teal" id="feedCountBadge">0 operations</span>
-          </div>
-          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-            <span style="font-size:12px; color:var(--text-muted);">Filter:</span>
-            <button class="chip active" id="actFilterAll" onclick="setActivityFilter('all')">All</button>
-            <button class="chip" id="actFilterKnowledge" onclick="setActivityFilter('knowledge')">Knowledge</button>
-            <button class="chip" id="actFilterIncidents" onclick="setActivityFilter('incident')">Incidents</button>
-            <button class="chip" id="actFilterTasks" onclick="setActivityFilter('task')">Tasks</button>
-            <button class="chip" id="actFilterSearches" onclick="setActivityFilter('search')">Searches</button>
-            <button class="btn sm" id="feedPauseBtn" onclick="toggleFeedPause()">Pause Stream</button>
-            <button class="btn sm" onclick="clearFeedTable()">Clear View</button>
-          </div>
-        </div>
-
-        <div id="feedTableBody" class="activity-stream">
-          <div style="text-align:center; color: var(--text-muted); padding:40px;">Listening for agent operations across the fleet...</div>
-        </div>
+      <div class="led">
+        <div class="led-top" id="ledTop"></div>
+        <div id="ledBody"></div>
       </div>
     </div>
-
-  </main>
 
   <!-- ==================== MODALS ==================== -->
 
@@ -2232,7 +2247,7 @@
         apiFetch('/tags'),
         apiFetch('/healthz'),
         apiFetch('/api/activity'),
-        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=40')
+        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=400')
       ]);
 
       if (!App.isBackendSearchResults && searchData && searchData.hits) App.entries = searchData.hits;
@@ -3952,143 +3967,132 @@
     }
 
     // Fleet Activity & Git Canon Changelog Renderer
-    function renderFeed() {
-      const container = document.getElementById('feedTableBody');
-      if (!container) return;
+    // The change ledger. The base is git and every action is a commit, so the
+    // honest view is not "current state" but "what moved": who opened, closed or
+    // edited what, and which lines the text lost or gained. Agent searches are
+    // real activity but not change; they fold into one line between changes.
+    const LED_VERB = {
+      created: 'created', updated: 'edited', resolved: 'resolved', mitigated: 'mitigated',
+      archived: 'archived', retracted: 'retracted', done: 'done', dropped: 'dropped', transitioned: 'moved',
+    };
+    function ledVerb(ev) {
+      if (ev.kind === 'incident' && ev.action === 'created') return ['opened', 'open'];
+      if (ev.action === 'resolved' || ev.action === 'done') return [LED_VERB[ev.action], 'res'];
+      if (ev.action === 'retracted' || ev.action === 'archived' || ev.action === 'dropped') return [LED_VERB[ev.action], 'retract'];
+      return [LED_VERB[ev.action] || ev.action, ''];
+    }
+    function ledWho(a) { return (a || '').replace(/\s*<[^>]*>/, '').trim() || 'unknown'; }
+    function ledDay(ts) {
+      const d = new Date(ts), t = new Date(); const y = new Date(); y.setDate(t.getDate() - 1);
+      const same = (a, b) => a.toDateString() === b.toDateString();
+      const lbl = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      return same(d, t) ? 'today · ' + lbl : same(d, y) ? 'yesterday · ' + lbl : lbl;
+    }
+    function ledTime(ts) { return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }); }
 
-      const actList = (App.activity || []).map(a => ({
-        type: 'canon',
-        sha: a.sha,
-        ts: a.ts,
-        author: a.author || 'Alexander Panasenko <alex@prod.codes>',
-        message: a.message,
-        key: a.key,
-        kind: a.kind || 'knowledge',
-        title: a.title,
-        action: a.action || 'updated',
-        files: a.files || []
+    // One diff per commit, keyed by sha: SHA^..SHA is exactly what that commit
+    // did to that entry, even when the commit touched other files too.
+    App.ledDiffs = App.ledDiffs || new Map();
+    async function ledFetchDiffs(events) {
+      const want = events.filter(e => e.key && e.action !== 'created' && !App.ledDiffs.has(e.sha)).slice(0, 15);
+      if (!want.length) return false;
+      await Promise.all(want.map(async e => {
+        try {
+          const d = await apiFetch(`/knowledge/${encodeURIComponent(e.key)}/diff?from=${e.sha}^&to=${e.sha}`);
+          App.ledDiffs.set(e.sha, d || null);
+        } catch (_) { App.ledDiffs.set(e.sha, null); }
       }));
-
-      // Real user searches from audit log (skipping internal polling)
-      const searchList = (App.audit || [])
-        .filter(item => item.path === '/search' && item.query && item.query.includes('q='))
-        .map(item => {
-          const qMatch = decodeURIComponent(item.query).match(/q=([^&]*)/);
-          const q = qMatch ? qMatch[1] : '';
-          return {
-            type: 'search',
-            query: q,
-            ts: item.ts,
-            ms: item.ms || 0,
-            ip: item.ip,
-            status: item.status,
-            kind: 'search'
-          };
-        });
-
-      let merged = [...actList, ...searchList];
-      merged.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-
-      if (App.activityFilter !== 'all') {
-        merged = merged.filter(item => {
-          if (App.activityFilter === 'search') return item.type === 'search';
-          return item.kind === App.activityFilter;
-        });
+      return true;
+    }
+    function ledDiffHtml(d) {
+      if (!d || !d.changed) return '';
+      const rows = [];
+      for (const f of (d.fields || [])) {
+        if (['updated_at'].includes(f.field)) continue;
+        rows.push(`<div class="fld">${escapeHtml(f.field)}: <em>${escapeHtml(String(f.from ?? '∅'))}</em> → ${escapeHtml(String(f.to ?? '∅'))}</div>`);
       }
+      const rm = (d.body?.removed || []).filter(l => l.trim()), ad = (d.body?.added || []).filter(l => l.trim());
+      rm.slice(0, 2).forEach(l => rows.push(`<div class="del">− ${escapeHtml(l)}</div>`));
+      ad.slice(0, 3).forEach(l => rows.push(`<div class="add">+ ${escapeHtml(l)}</div>`));
+      const rest = Math.max(0, rm.length - 2) + Math.max(0, ad.length - 3);
+      if (rest) rows.push(`<div class="more">… ${rest} more changed line${rest > 1 ? 's' : ''}</div>`);
+      return rows.length ? `<div class="led-d">${rows.join('')}</div>` : '';
+    }
 
-      const countBadge = document.getElementById('feedCountBadge');
-      if (countBadge) countBadge.textContent = `${merged.length} operations`;
+    function renderFeed() {
+      const body = document.getElementById('ledBody');
+      if (!body) return;
 
-      if (!merged.length) {
-        container.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">No operations matching selected filter.</div>';
-        return;
-      }
+      let events = (App.activity || []).map(a => ({ ...a, t: new Date(a.ts).getTime() }))
+        .filter(a => App.activityFilter === 'all' || a.kind === App.activityFilter)
+        .sort((a, b) => b.t - a.t);
+      const searches = (App.audit || [])
+        .filter(x => x.path === '/search' && x.query && /(^|&)q=/.test(x.query))
+        .map(x => {
+          // a stray '%' in an agent's query must not take the whole refresh down
+          let raw = x.query; try { raw = decodeURIComponent(x.query.replace(/\+/g, ' ')); } catch (_) {}
+          const m = raw.match(/(?:^|&)q=([^&]*)/);
+          return { t: new Date(x.ts).getTime(), q: (m && m[1] || '').trim(), ip: x.ip, ts: x.ts };
+        })
+        .filter(x => x.q).sort((a, b) => b.t - a.t);
 
-      container.innerHTML = merged.slice(0, 80).map(item => {
-        if (item.type === 'search') {
-          return `
-            <a href="#/search?q=${encodeURIComponent(item.query)}" class="activity-card search" onclick="handleSearchFeedClick(event, '${escapeHtml(item.query)}')">
-              <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                <div class="activity-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-                <div style="min-width:0;">
-                  <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-weight:600; font-size:13.5px; color:var(--text);">Agent Search Query</span>
-                    <span class="badge badge-tag" style="font-size:10px;">QUERY</span>
-                    <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:600;">"${escapeHtml(item.query)}"</span>
-                  </div>
-                  <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">
-                    Hybrid search • <code style="color:var(--text-dim);">GET /search?q=${escapeHtml(item.query)}</code>
-                  </div>
-                </div>
-              </div>
-              <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
-                <span class="latency-badge latency-fast">${Math.max(1, item.ms)}ms</span>
-                <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${item.ip}</span>
-                <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
-                <button class="btn sm" onclick="event.stopPropagation(); setGlobalSearchQuery('${escapeHtml(item.query)}')">Search →</button>
-              </div>
-            </a>
-          `;
-        }
+      // summary line: today's changes by verb
+      const today = new Date().toDateString();
+      const td = events.filter(e => new Date(e.t).toDateString() === today);
+      const n = v => td.filter(e => ledVerb(e)[0] === v).length;
+      document.getElementById('ledTop').innerHTML = `
+        <b>${td.length}</b><span>changes today</span>
+        <span style="color:var(--text-muted)">&middot;</span>
+        <span>${n('opened')} opened &middot; ${n('resolved') + n('done')} resolved &middot; ${n('edited')} edited &middot; ${n('created')} created</span>
+        <span style="color:var(--text-muted)">&middot; ${searches.filter(x => new Date(x.t).toDateString() === today).length} searches</span>
+        <span class="chips">
+          ${['all','knowledge','incident','task'].map(k => `<button class="chip ${App.activityFilter === k ? 'active' : ''}" onclick="setActivityFilter('${k}')">${k === 'all' ? 'everything' : k === 'knowledge' ? 'knowledge' : k + 's'}</button>`).join('')}
+        </span>`;
 
-        // Canon Database Mutation Event
-        const isInc = item.kind === 'incident';
-        const isTask = item.kind === 'task';
-        const isResolved = item.action === 'resolved';
-        const isCreated = item.action === 'created';
-        const isArchived = item.action === 'archived' || item.action === 'retracted';
+      if (!events.length) { body.innerHTML = '<div class="led-empty">No changes recorded yet.</div>'; return; }
 
-        let icon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-        let cardType = 'mutation';
-        if (isInc) {
-          icon = isResolved
-            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`
-            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
-          cardType = isResolved ? 'mutation' : 'error';
-        } else if (isTask) {
-          icon = isResolved
-            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`
-            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`;
-          cardType = 'mutation';
-        } else if (isArchived) {
-          icon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
-          cardType = 'retraction';
-        }
+      // searches fold between the two changes they happened between
+      let html = '', day = null, si = 0;
+      const foldSearches = (upper, lower, idx) => {
+        const batch = [];
+        while (si < searches.length && searches[si].t > lower) { if (searches[si].t <= upper) batch.push(searches[si]); si++; }
+        if (!batch.length) return '';
+        const open = App.ledOpenFolds && App.ledOpenFolds.has(idx);
+        const agents = new Set(batch.map(b => b.ip)).size;
+        if (!open) return `<div class="led-fold" onclick="ledToggleFold(${idx})">⋯ ${batch.length} search${batch.length > 1 ? 'es' : ''} by ${agents} agent${agents > 1 ? 's' : ''} · <span class="acc">show</span></div>`;
+        return `<div class="led-fold" onclick="ledToggleFold(${idx})">⋯ ${batch.length} searches · <span class="acc">hide</span></div>` +
+          batch.map(b => `<div class="led-q"><span class="tm" style="font-family:var(--font-mono)">${ledTime(b.ts)}</span><span></span><span class="qq"><a href="#/search?q=${encodeURIComponent(b.q)}" onclick="handleSearchFeedClick(event, '${escapeHtml(b.q)}')">${escapeHtml(b.q)}</a></span><span>${escapeHtml(b.ip || '')}</span></div>`).join('');
+      };
 
-        const actionColor = isCreated ? 'var(--green)' : isResolved ? '#10b981' : isArchived ? 'var(--red)' : 'var(--accent)';
-        const docTitle = item.title || item.key || 'Fleet Canon Mutation';
-        const targetHref = item.key ? `#/knowledge/${encodeURIComponent(item.key)}` : '#/feed';
+      html += foldSearches(Infinity, events[0].t, 0);
+      events.slice(0, 120).forEach((e, i) => {
+        const dl = ledDay(e.ts);
+        if (dl !== day) { day = dl; html += `<div class="led-day">${dl}</div>`; }
+        const [verb, cls] = ledVerb(e);
+        const dotCls = cls === 'open' ? 'open' : cls === 'res' ? 'res' : e.kind === 'task' ? 'task' : '';
+        const sub = [e.key, e.kind !== 'knowledge' ? e.kind : null].filter(Boolean).join(' · ');
+        html += `<div class="led-ev">
+          <span class="tm">${ledTime(e.ts)}</span>
+          <div class="ln"><span class="dot ${dotCls}"></span><i></i></div>
+          <div class="what">
+            <div class="h"><span class="led-verb ${cls}">${verb}</span><b><a href="#/knowledge/${encodeURIComponent(e.key || '')}" onclick="handleCardClick(event, '${escapeHtml(e.key || '')}', 'knowledge')">${escapeHtml(e.title || e.key || e.message || '')}</a></b></div>
+            <span class="sub">${escapeHtml(sub)}</span>
+            ${ledDiffHtml(App.ledDiffs.get(e.sha))}
+          </div>
+          <span class="who" title="${escapeHtml(e.sha || '')}">${escapeHtml(ledWho(e.author))}</span>
+        </div>`;
+        const next = events[i + 1];
+        html += foldSearches(e.t, next ? next.t : -Infinity, i + 1);
+      });
+      body.innerHTML = html;
 
-        return `
-          <a href="${targetHref}" class="activity-card ${cardType}" onclick="handleCardClick(event, '${escapeHtml(item.key || '')}', 'knowledge')">
-            <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-              <div class="activity-icon">${icon}</div>
-              <div style="min-width:0;">
-                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <span style="font-weight:600; font-size:13.5px; color:var(--text);">${escapeHtml(docTitle)}</span>
-                  <span class="badge" style="background:rgba(255,255,255,0.06); color:${actionColor}; border:1px solid ${actionColor}; font-size:10px; font-weight:600; text-transform:uppercase;">${item.action}</span>
-                  <span class="badge badge-${item.kind}" style="font-size:10px;">${item.kind.toUpperCase()}</span>
-                  ${item.key ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${item.key}</span>` : ''}
-                </div>
-                <div style="font-size:11.5px; color:var(--text-muted); margin-top:3px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <span style="color:var(--text); font-style:italic;">"${escapeHtml(item.message || 'Updated in canon')}"</span>
-                  <span>•</span>
-                  <span>${escapeHtml(item.author)}</span>
-                  ${item.files && item.files.length ? `<span>• ${escapeHtml(item.files.join(', '))}</span>` : ''}
-                </div>
-              </div>
-            </div>
-            <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-              <span class="rev-badge" title="Git Commit SHA">${item.sha.slice(0, 7)}</span>
-              <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
-              ${item.key ? `
-                <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchTab('search');">View</button>
-                <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit('${escapeHtml(item.key)}', '${escapeHtml(item.sha)}');">Diff</button>
-              ` : ''}
-            </div>
-          </a>
-        `;
-      }).join('');
+      // pull the diffs we do not have yet, then draw once more
+      ledFetchDiffs(events.slice(0, 40)).then(got => { if (got) renderFeed(); });
+    }
+    function ledToggleFold(idx) {
+      App.ledOpenFolds = App.ledOpenFolds || new Set();
+      App.ledOpenFolds.has(idx) ? App.ledOpenFolds.delete(idx) : App.ledOpenFolds.add(idx);
+      renderFeed();
     }
 
     function setActivityFilter(filter) {
@@ -4117,6 +4121,7 @@
     function toggleFeedPause() {
       App.feedPaused = !App.feedPaused;
       const btn = document.getElementById('feedPauseBtn');
+      if (!btn) { App.feedPaused = false; return; }
       if (App.feedPaused) {
         btn.textContent = '▶ Resume Stream';
         btn.classList.add('primary');
@@ -4132,7 +4137,7 @@
     function clearFeedTable() {
       App.activity = [];
       App.audit = [];
-      document.getElementById('feedTableBody').innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">Activity feed cleared. Listening for new commits...</div>';
+      renderFeed();
       showToast('Activity stream view cleared', 'info');
     }
 
