@@ -1606,7 +1606,8 @@
       newModalKind: 'knowledge',
       activeResolveKey: null,
       pendingHighlight: null,
-      pendingGraphNode: null
+      pendingGraphNode: null,
+      isBackendSearchResults: false
     };
 
     // Toast Notification System
@@ -1711,7 +1712,7 @@
         App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=40')
       ]);
 
-      if (searchData && searchData.hits) App.entries = searchData.hits;
+      if (!App.isBackendSearchResults && searchData && searchData.hits) App.entries = searchData.hits;
       if (incData && incData.incidents) App.incidents = incData.incidents;
       if (taskData && taskData.tasks) App.tasks = taskData.tasks;
       if (tagsData && tagsData.tags) App.tags = tagsData.tags;
@@ -1777,7 +1778,7 @@
       else if (App.currentFilter === 'incident') list = list.filter(e => e.kind === 'incident');
       else if (App.currentFilter === 'task') list = list.filter(e => e.kind === 'task');
 
-      if (App.searchQuery.trim()) {
+      if (!App.isBackendSearchResults && App.searchQuery.trim()) {
         const q = App.searchQuery.toLowerCase();
         list = list.filter(e =>
           (e.title && e.title.toLowerCase().includes(q)) ||
@@ -4396,12 +4397,17 @@
             }
             const data = await apiFetch(`/search?q=${encodeURIComponent(q)}&limit=100`);
             if (data && data.hits) {
+              App.isBackendSearchResults = true;
               App.entries = data.hits;
-              App.searchQuery = '';
+              App.searchQuery = q;
               renderKnowledgeList();
+              if (data.hits.length > 0) {
+                selectEntry(data.hits[0].key, false);
+              }
               showToast(`Found ${data.hits.length} match(es) for "${q}"`, 'info');
             }
           } else {
+            App.isBackendSearchResults = false;
             history.pushState(null, '', '#/search');
             refreshAll();
           }
@@ -4490,6 +4496,7 @@
           if (searchEl && searchEl.value) {
             searchEl.value = '';
             App.searchQuery = '';
+            App.isBackendSearchResults = false;
             renderKnowledgeList();
           }
           if (key) {
@@ -4551,6 +4558,7 @@
             App.searchQuery = term;
             apiFetch(`/search?q=${encodeURIComponent(term)}&limit=100`).then(data => {
               if (data && data.hits) {
+                App.isBackendSearchResults = true;
                 App.entries = data.hits;
                 renderKnowledgeList();
                 if (data.hits.length > 0 && !App.selectedKey) {
@@ -4560,6 +4568,9 @@
                 renderKnowledgeList();
               }
             });
+          } else {
+            App.isBackendSearchResults = false;
+            renderKnowledgeList();
           }
           document.title = term ? `KYB — Search: ${term}` : 'KYB — Fleet Knowledge';
         } else if (root === 'feed' || root === 'activity') {
