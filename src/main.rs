@@ -899,7 +899,7 @@ fn list_kind(
             .then(b.updated_at.cmp(&a.updated_at))
             .then(a.key.cmp(&b.key))
     });
-    rows.truncate(q.limit.unwrap_or(50).min(200));
+    rows.truncate(q.limit.unwrap_or(50).min(1000));
     Ok(rows)
 }
 
