@@ -394,6 +394,35 @@
       display: flex;
       flex-direction: column;
       gap: 5px;
+      text-decoration: none;
+      color: inherit;
+    }
+    a.item-card, a.task-card, a.activity-card {
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+    }
+    a.item-card:hover, a.activity-card:hover {
+      text-decoration: none;
+      color: inherit;
+    }
+    .direct-permalink {
+      text-decoration: none;
+      opacity: 0.8;
+      transition: opacity 0.15s ease;
+    }
+    .direct-permalink:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    @keyframes targetGlow {
+      0% { box-shadow: 0 0 0 3px rgba(0, 179, 196, 0.9), 0 0 24px rgba(0, 179, 196, 0.6); }
+      50% { box-shadow: 0 0 0 4px rgba(0, 229, 255, 1), 0 0 35px rgba(0, 229, 255, 0.9); }
+      100% { box-shadow: 0 0 0 1px var(--border); }
+    }
+    .target-highlight {
+      animation: targetGlow 2.5s ease-out !important;
+      border-color: var(--accent) !important;
     }
     .item-card:hover { background: var(--card-hover); }
     .item-card.selected {
@@ -1355,10 +1384,11 @@
             </div>
           </div>
           <div class="graph-drawer-footer" id="drawerFooter">
-            <button class="btn sm primary" id="drawerOpenFullBtn">📖 Open Full Page</button>
+            <a href="#" class="btn sm primary" id="drawerOpenFullBtn">📖 Open Full Page</a>
             <button class="btn sm" id="drawerEditBtn">✏️ Quick Edit</button>
             <button class="btn sm" id="drawerCenterBtn">🎯 Center Camera</button>
             <button class="btn sm" id="drawerCopyBtn">📋 Copy Key</button>
+            <button class="btn sm" id="drawerCopyLinkBtn">🔗 Copy Link</button>
           </div>
         </div>
 
@@ -1574,7 +1604,9 @@
       graphPhysics: true,
       lastSyncTime: Date.now(),
       newModalKind: 'knowledge',
-      activeResolveKey: null
+      activeResolveKey: null,
+      pendingHighlight: null,
+      pendingGraphNode: null
     };
 
     // Toast Notification System
@@ -1609,7 +1641,17 @@
         .replace(/- \[x\] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" checked disabled> <span>$1</span></div>')
         .replace(/- \[ \] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" disabled> <span>$1</span></div>')
         .replace(/^\- (.*$)/gim, '<li>$1</li>')
-        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent); text-decoration:none;">$1</a>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => {
+          let href = url.trim();
+          let target = ' target="_blank" rel="noopener noreferrer"';
+          if (href.startsWith('#/')) {
+            target = '';
+          } else if (!href.startsWith('http://') && !href.startsWith('https://') && !href.startsWith('mailto:') && !href.startsWith('/')) {
+            href = '#/knowledge/' + encodeURIComponent(href);
+            target = '';
+          }
+          return `<a href="${href}"${target} style="color:var(--accent); text-decoration:underline;">${label}</a>`;
+        })
         .replace(/\n\n+/g, '</p><p>');
 
       return '<p>' + html + '</p>';
@@ -1804,7 +1846,11 @@
         const revCount = (cached && cached.history && cached.history.length) || 0;
 
         return `
-          <div class="item-card ${isSel ? 'selected' : ''}" onmouseenter="prefetchEntry('${item.key}')" onclick="selectEntry('${item.key}')" data-key="${item.key}">
+          <a href="#/knowledge/${encodeURIComponent(item.key)}" 
+             class="item-card ${isSel ? 'selected' : ''}" 
+             data-key="${escapeHtml(item.key)}" 
+             onmouseenter="prefetchEntry('${escapeHtml(item.key)}')" 
+             onclick="handleCardClick(event, '${escapeHtml(item.key)}', 'knowledge')">
             <div class="card-top">
               <span class="item-title">${highlightText(item.title || item.key, App.searchQuery)}</span>
               ${kindBadge}
@@ -1815,18 +1861,27 @@
               ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
               ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">🕒 ${revCount} revs</span>` : ''}
             </div>
-          </div>
+          </a>
         `;
       }).join('');
 
       // Auto-select first item if none selected or current not in list
       if (!App.selectedKey && list.length > 0) {
-        selectEntry(list[0].key);
+        selectEntry(list[0].key, true);
       }
     }
 
-    async function selectEntry(key) {
+    async function selectEntry(key, updateHash = true) {
+      if (!key) return;
       App.selectedKey = key;
+      if (updateHash) {
+        const targetHash = `#/knowledge/${encodeURIComponent(key)}`;
+        if (window.location.hash !== targetHash) {
+          history.pushState(null, '', targetHash);
+        }
+      }
+      document.title = `KYB — ${key}`;
+
       document.querySelectorAll('.item-card').forEach(c => {
         c.classList.toggle('selected', c.getAttribute('data-key') === key);
       });
@@ -1878,7 +1933,7 @@
             </div>
             <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title || e.key)}</h1>
             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-              ${(e.tags || []).map(t => `<span class="badge-tag" onclick="filterByTag('${t}')">#${t}</span>`).join('')}
+              ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" style="text-decoration:none;" onclick="handleTagClick(event, '${escapeHtml(t)}')">#${escapeHtml(t)}</a>`).join('')}
             </div>
             ${historyList.length > 1 ? `
               <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.3); border-radius:4px; padding:3px 8px; margin-top:8px; font-size:11px; color:#a78bfa; cursor:pointer;" onclick="switchDetailTab('history')">
@@ -1889,10 +1944,12 @@
             ` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${e.key}')">✏️ Edit</button>
-            <button class="btn sm" onclick="copyToClipboard('kyb get ${e.key}', 'CLI command copied!')">📋 CLI</button>
+            <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink('#/knowledge/${encodeURIComponent(e.key)}')">🔗 Link</button>
+            <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(e.key)}')">🌐 Graph</a>
+            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${escapeHtml(e.key)}')">✏️ Edit</button>
+            <button class="btn sm" onclick="copyToClipboard('kyb get ${escapeHtml(e.key)}', 'CLI command copied!')">📋 CLI</button>
             <button class="btn sm" onclick="copyEntryBody('${escapeHtml(e.key)}')">📋 Markdown</button>
-            <button class="btn sm" onclick="copyToClipboard('${e.key}', 'Key copied!')">🏷️ Key</button>
+            <button class="btn sm" onclick="copyToClipboard('${escapeHtml(e.key)}', 'Key copied!')">🏷️ Key</button>
           </div>
         </div>
 
@@ -1910,7 +1967,7 @@
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${historyList.map((h, idx) => `
-              <div class="history-card" onclick="inspectRevision('${e.key}', '${h.sha}')">
+              <a href="#/knowledge/${encodeURIComponent(e.key)}?rev=${encodeURIComponent(h.sha)}" class="history-card" style="text-decoration:none; color:inherit;" onclick="handleRevisionClick(event, '${escapeHtml(e.key)}', '${escapeHtml(h.sha)}')">
                 <div>
                   <div style="font-weight:600; font-size:13px; color:var(--text);">${escapeHtml(h.message || 'Updated')}</div>
                   <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-top:3px;">
@@ -1920,11 +1977,11 @@
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
                   <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent); background:var(--card-subtle); padding:2px 6px; border-radius:4px;">${h.sha.slice(0,7)}</span>
-                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${e.key}', '${h.sha}')">👁️ View</button>
-                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${historyList[idx+1].sha}', '${h.sha}'); switchDetailTab('diff');">🔀 Diff vs Prev</button>` : ''}
-                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${e.key}', '${h.sha}', '${historyList[0].sha}'); switchDetailTab('diff');">⚡ vs Head</button>` : ''}
+                  <button class="btn sm" onclick="event.stopPropagation(); inspectRevision('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}')">👁️ View</button>
+                  ${idx < historyList.length - 1 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(historyList[idx+1].sha)}', '${escapeHtml(h.sha)}'); switchDetailTab('diff');">🔀 Diff vs Prev</button>` : ''}
+                  ${idx > 0 ? `<button class="btn sm" onclick="event.stopPropagation(); loadDiff('${escapeHtml(e.key)}', '${escapeHtml(h.sha)}', '${escapeHtml(historyList[0].sha)}'); switchDetailTab('diff');">⚡ vs Head</button>` : ''}
                 </div>
-              </div>
+              </a>
             `).join('') || '<div style="color:var(--text-muted); padding:20px; text-align:center;">No revision history found.</div>'}
           </div>
         </div>
@@ -1953,12 +2010,37 @@
       }
     }
 
-    function copyToClipboard(text, msg) {
-      navigator.clipboard.writeText(text).then(() => {
+    function copyDirectLink(hashPath) {
+      const fullUrl = window.location.origin + window.location.pathname + hashPath;
+      copyToClipboard(fullUrl, `Direct link copied: ${hashPath}`);
+    }
+
+    function fallbackCopy(text, msg) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
         showToast(msg, 'success');
-      }).catch(() => {
+      } catch (err) {
         showToast('Clipboard access denied', 'error');
-      });
+      }
+    }
+
+    function copyToClipboard(text, msg) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast(msg, 'success');
+        }).catch(() => {
+          fallbackCopy(text, msg);
+        });
+      } else {
+        fallbackCopy(text, msg);
+      }
     }
 
     async function loadDiff(key, fromSha, toSha) {
@@ -2039,6 +2121,83 @@
       document.getElementById('detailBodyRaw').style.display = tab === 'raw' ? 'block' : 'none';
     }
 
+    // Deep Link Navigation & Anchor Handlers
+    function handleCardClick(event, key, type = 'knowledge') {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) {
+        return; // Native browser opens new tab
+      }
+      event.preventDefault();
+      if (type === 'knowledge') {
+        selectEntry(key, true);
+        if (App.activeTab !== 'search') switchTab('search', false);
+      } else if (type === 'incidents') {
+        window.location.hash = `#/incidents/${encodeURIComponent(key)}`;
+      } else if (type === 'tasks') {
+        window.location.hash = `#/tasks/${encodeURIComponent(key)}`;
+      }
+    }
+
+    function handleGraphChipClick(event, id) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
+      focusNodeById(id);
+    }
+
+    function handleDrawerOpenFullClick(event, key) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
+      closeGraphDrawer();
+      switchTab('search', false);
+      selectEntry(key, true);
+    }
+
+    function navigateToGraphNode(event, key) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
+      window.location.hash = `#/graph/${encodeURIComponent(key)}`;
+    }
+
+    function handleTagClick(event, tag) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
+      filterByTag(tag);
+    }
+
+    function handleSearchFeedClick(event, q) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
+      setGlobalSearchQuery(q);
+    }
+
+    function handleRevisionClick(event, key, sha) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
+      const targetHash = `#/knowledge/${encodeURIComponent(key)}?rev=${encodeURIComponent(sha)}`;
+      if (window.location.hash !== targetHash) {
+        history.pushState(null, '', targetHash);
+      }
+      inspectRevision(key, sha);
+    }
+
+    function highlightCard(tab, key) {
+      if (!key) return false;
+      let el = null;
+      try {
+        const selector = tab === 'incidents' ? `.incident-card[data-key="${CSS.escape(key)}"]` : `.task-card[data-key="${CSS.escape(key)}"]`;
+        el = document.querySelector(selector);
+      } catch (err) {
+        el = document.getElementById(`${tab === 'incidents' ? 'incident' : 'task'}-${key}`);
+      }
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.remove('target-highlight');
+        void el.offsetWidth;
+        el.classList.add('target-highlight');
+        return true;
+      }
+      return false;
+    }
+
     // Incidents Rendering & Actions
     function renderIncidents() {
       let list = [...App.incidents];
@@ -2070,27 +2229,34 @@
       }
 
       grid.innerHTML = list.map(inc => `
-        <div class="incident-card ${inc.status}">
+        <div class="incident-card ${inc.status}" data-key="${escapeHtml(inc.key)}" id="incident-${escapeHtml(inc.key)}">
           <div style="display:flex; justify-content:space-between; align-items:flex-start;">
             <div>
               <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                 <span class="badge badge-${inc.status}">${inc.status}</span>
                 <span class="badge badge-${inc.severity || 'medium'}">${inc.severity || 'medium'}</span>
-                <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${inc.key}</span>
+                <a href="#/incidents/${encodeURIComponent(inc.key)}" class="direct-permalink" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'incidents')" title="Direct link to incident">
+                  <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${escapeHtml(inc.key)}</span>
+                </a>
               </div>
-              <h3 style="font-size:15px; font-weight:700; color:#fff;">${escapeHtml(inc.title)}</h3>
+              <h3 style="font-size:15px; font-weight:700; color:#fff;">
+                <a href="#/incidents/${encodeURIComponent(inc.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'incidents')">
+                  ${escapeHtml(inc.title)}
+                </a>
+              </h3>
             </div>
             <div style="display:flex; gap:6px;">
-              <button class="btn sm" onclick="openEditModal('${inc.key}')">✏️ Edit</button>
+              <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">🔗 Link</button>
+              <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">✏️ Edit</button>
               ${inc.status !== 'resolved' ? `
-                <button class="btn sm success" onclick="openResolveIncidentModal('${inc.key}', '${escapeHtml(inc.title)}')">Resolve</button>
+                <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(inc.key)}', '${escapeHtml(inc.title)}')">Resolve</button>
               ` : ''}
             </div>
           </div>
 
-          <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim); flex-wrap:wrap;">
-            <div><strong>Service:</strong> <span class="badge-tag">${inc.service || 'infrastructure'}</span></div>
-            ${(inc.hosts && inc.hosts.length) ? `<div><strong>Hosts:</strong> ${inc.hosts.join(', ')}</div>` : ''}
+          <div style="display:flex; gap:12px; font-size:12px; color:var(--text-dim); flex-wrap:wrap; margin-top:6px;">
+            <div><strong>Service:</strong> <span class="badge-tag">${escapeHtml(inc.service || 'infrastructure')}</span></div>
+            ${(inc.hosts && inc.hosts.length) ? `<div><strong>Hosts:</strong> ${escapeHtml(inc.hosts.join(', '))}</div>` : ''}
           </div>
 
           ${inc.detection ? `
@@ -2107,12 +2273,20 @@
             </div>
           ` : ''}
 
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px; margin-top:10px;">
             <span>Detected: ${timeAgo(inc.detected_at || inc.started_at)}</span>
-            <button class="btn sm" onclick="selectEntry('${inc.key}'); switchTab('search');">Full Report →</button>
+            <div style="display:flex; gap:8px;">
+              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">🌐 In Topology</a>
+              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
+            </div>
           </div>
         </div>
       `).join('');
+
+      if (App.pendingHighlight && App.pendingHighlight.tab === 'incidents') {
+        const k = App.pendingHighlight.key;
+        if (highlightCard('incidents', k)) App.pendingHighlight = null;
+      }
     }
 
     function filterIncidents(status) {
@@ -2179,26 +2353,39 @@
       document.getElementById('colDoneCount').textContent = groups.done.length;
 
       const renderCard = (t) => `
-        <div class="task-card" draggable="true" ondragstart="handleDragStart(event, '${t.key}')" onclick="selectEntry('${t.key}'); switchTab('search');">
+        <div class="task-card" data-key="${escapeHtml(t.key)}" id="task-${escapeHtml(t.key)}" draggable="true" ondragstart="handleDragStart(event, '${escapeHtml(t.key)}')">
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="badge badge-${t.priority || 'medium'}">${t.priority || 'normal'}</span>
-            <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${escapeHtml(t.assignee || 'unassigned')}</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="badge badge-${t.priority || 'medium'}">${t.priority || 'normal'}</span>
+              <a href="#/tasks/${encodeURIComponent(t.key)}" style="font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted); text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'tasks')">${escapeHtml(t.key)}</a>
+            </div>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <button class="btn sm icon-only" title="Copy direct link" onclick="event.stopPropagation(); copyDirectLink('#/tasks/${encodeURIComponent(t.key)}')">🔗</button>
+              <span style="font-family:var(--font-mono); font-size:10.5px; color:var(--accent);">${escapeHtml(t.assignee || 'unassigned')}</span>
+            </div>
           </div>
-          <div style="font-weight:600; font-size:13px; color:#fff;">${escapeHtml(t.title)}</div>
+          <div style="font-weight:600; font-size:13px; color:#fff; margin:4px 0;">
+            <a href="#/knowledge/${encodeURIComponent(t.key)}" style="color:inherit; text-decoration:none;" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">
+              ${escapeHtml(t.title)}
+            </a>
+          </div>
           ${t.blocked_reason ? `
-            <div style="background:var(--amber-dim); border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:6px; font-size:11px; color:var(--amber);">
+            <div style="background:var(--amber-dim); border:1px solid rgba(245,158,11,0.3); border-radius:4px; padding:6px; font-size:11px; color:var(--amber); margin-bottom:4px;">
               <strong>Blocked:</strong> ${escapeHtml(t.blocked_reason)}
             </div>
           ` : ''}
           <div class="task-actions-row" onclick="event.stopPropagation()">
-            <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">${t.key}</span>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">Doc →</a>
+              <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">✏️</button>
+            </div>
             <div style="display:flex; gap:4px;">
-              ${t.status === 'open' ? `<button class="btn sm" onclick="transitionTask('${t.key}', 'in_progress')">▶ Start</button>` : ''}
+              ${t.status === 'open' ? `<button class="btn sm" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">▶ Start</button>` : ''}
               ${t.status === 'in_progress' ? `
-                <button class="btn sm" onclick="promptBlockTask('${t.key}')">⚠️ Block</button>
-                <button class="btn sm success" onclick="openResolveTaskModal('${t.key}', '${escapeHtml(t.title)}')">✔ Done</button>
+                <button class="btn sm" onclick="promptBlockTask('${escapeHtml(t.key)}')">⚠️ Block</button>
+                <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">✔ Done</button>
               ` : ''}
-              ${t.status === 'blocked' ? `<button class="btn sm" onclick="transitionTask('${t.key}', 'in_progress')">↩ Unblock</button>` : ''}
+              ${t.status === 'blocked' ? `<button class="btn sm" onclick="transitionTask('${escapeHtml(t.key)}', 'in_progress')">↩ Unblock</button>` : ''}
             </div>
           </div>
         </div>
@@ -2208,6 +2395,11 @@
       colProg.innerHTML = groups.in_progress.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No tasks in progress</div>';
       colBlock.innerHTML = groups.blocked.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No blocked tasks</div>';
       colDone.innerHTML = groups.done.map(renderCard).join('') || '<div style="color:var(--text-muted); text-align:center; padding:18px; font-size:12px;">No closed tasks</div>';
+
+      if (App.pendingHighlight && App.pendingHighlight.tab === 'tasks') {
+        const k = App.pendingHighlight.key;
+        if (highlightCard('tasks', k)) App.pendingHighlight = null;
+      }
     }
 
     // Drag and Drop for Kanban
@@ -2348,7 +2540,7 @@
       container.innerHTML = merged.slice(0, 80).map(item => {
         if (item.type === 'search') {
           return `
-            <div class="activity-card search" onclick="setGlobalSearchQuery('${escapeHtml(item.query)}')">
+            <a href="#/search?q=${encodeURIComponent(item.query)}" class="activity-card search" onclick="handleSearchFeedClick(event, '${escapeHtml(item.query)}')">
               <div style="display:flex; align-items:center; gap:12px; min-width:0;">
                 <div class="activity-icon">🔍</div>
                 <div style="min-width:0;">
@@ -2368,7 +2560,7 @@
                 <span style="font-size:11px; color:var(--text-dim); min-width:55px; text-align:right;">${timeAgo(item.ts)}</span>
                 <button class="btn sm" onclick="event.stopPropagation(); setGlobalSearchQuery('${escapeHtml(item.query)}')">Search →</button>
               </div>
-            </div>
+            </a>
           `;
         }
 
@@ -2396,10 +2588,10 @@
 
         const actionColor = isCreated ? 'var(--green)' : isResolved ? '#10b981' : isArchived ? 'var(--red)' : 'var(--accent)';
         const docTitle = item.title || item.key || 'Fleet Canon Mutation';
-        const clickAttr = item.key ? `onclick="selectEntry('${escapeHtml(item.key)}'); switchTab('search');"` : '';
+        const targetHref = item.key ? `#/knowledge/${encodeURIComponent(item.key)}` : '#/feed';
 
         return `
-          <div class="activity-card ${cardType}" ${clickAttr}>
+          <a href="${targetHref}" class="activity-card ${cardType}" onclick="handleCardClick(event, '${escapeHtml(item.key || '')}', 'knowledge')">
             <div style="display:flex; align-items:center; gap:12px; min-width:0;">
               <div class="activity-icon">${icon}</div>
               <div style="min-width:0;">
@@ -2425,7 +2617,7 @@
                 <button class="btn sm" onclick="event.stopPropagation(); selectEntry('${escapeHtml(item.key)}'); switchDetailTab('diff'); switchTab('search');">🔀 Diff</button>
               ` : ''}
             </div>
-          </div>
+          </a>
         `;
       }).join('');
     }
@@ -2444,7 +2636,11 @@
       if (searchEl) {
         searchEl.value = q;
         App.searchQuery = q;
-        switchTab('search');
+        switchTab('search', false);
+        const targetHash = q ? `#/search?q=${encodeURIComponent(q)}` : '#/search';
+        if (window.location.hash !== targetHash) {
+          history.pushState(null, '', targetHash);
+        }
         renderKnowledgeList();
       }
     }
@@ -2678,6 +2874,12 @@
 
       calculateLayoutTargets(App.graphLayout || 'orbit');
       initCanvasGraph();
+
+      if (App.pendingGraphNode) {
+        const target = App.pendingGraphNode;
+        App.pendingGraphNode = null;
+        setTimeout(() => focusNodeById(target), 80);
+      }
     }
 
     // Graph Visual Engine State
@@ -3518,6 +3720,12 @@
       const drawer = document.getElementById('graphDrawer');
       if (!drawer) return;
 
+      const targetHash = `#/graph/${encodeURIComponent(node.id)}`;
+      if (window.location.hash !== targetHash) {
+        history.replaceState(null, '', targetHash);
+      }
+      document.title = `KYB — Graph: ${node.label || node.id}`;
+
       const isHub = node.isHub;
       const badge = document.getElementById('drawerBadge');
       badge.textContent = isHub ? (node.type === 'host' ? 'HOST BLADE' : 'SERVICE HUB') : node.type.toUpperCase();
@@ -3541,9 +3749,9 @@
 
       if (connNodes.length > 0) {
         linksEl.innerHTML = connNodes.map(c => `
-          <button class="badge badge-tag" style="cursor:pointer;" onclick="focusNodeById('${escapeHtml(c.id)}')">
+          <a href="#/graph/${encodeURIComponent(c.id)}" class="badge badge-tag" style="cursor:pointer; text-decoration:none;" onclick="handleGraphChipClick(event, '${escapeHtml(c.id)}')">
             ${c.shape === 'blade' ? '🖥️' : c.shape === 'hexagon' ? '⚙️' : '📄'} ${escapeHtml(c.label)}
-          </button>
+          </a>
         `).join('');
       } else {
         linksEl.innerHTML = '<span style="font-size:11px; color:var(--text-muted);">No active links detected.</span>';
@@ -3570,10 +3778,12 @@
       const editBtn = document.getElementById('drawerEditBtn');
       const centerBtn = document.getElementById('drawerCenterBtn');
       const copyBtn = document.getElementById('drawerCopyBtn');
+      const copyLinkBtn = document.getElementById('drawerCopyLinkBtn');
 
       if (!isHub) {
         openFullBtn.style.display = 'inline-block';
-        openFullBtn.onclick = () => { selectEntry(node.id); switchTab('search'); closeGraphDrawer(); };
+        openFullBtn.href = `#/knowledge/${encodeURIComponent(node.id)}`;
+        openFullBtn.onclick = (e) => handleDrawerOpenFullClick(e, node.id);
         editBtn.style.display = 'inline-block';
         editBtn.onclick = () => { openEditModal(node.id); };
       } else {
@@ -3583,6 +3793,9 @@
 
       centerBtn.onclick = () => focusNode(node);
       copyBtn.onclick = () => copyToClipboard(node.id, 'Key copied to clipboard');
+      if (copyLinkBtn) {
+        copyLinkBtn.onclick = () => copyDirectLink(`#/graph/${encodeURIComponent(node.id)}`);
+      }
 
       drawer.classList.add('open');
     }
@@ -3591,6 +3804,10 @@
       const drawer = document.getElementById('graphDrawer');
       if (drawer) drawer.classList.remove('open');
       App.drawerNode = null;
+      if (window.location.hash.startsWith('#/graph/')) {
+        history.replaceState(null, '', '#/graph');
+        document.title = 'KYB — Cyber Topology';
+      }
     }
 
     function focusNode(node) {
@@ -3612,7 +3829,8 @@
     }
 
     function focusNodeById(id) {
-      const n = (App.graphNodes || []).find(item => item.id === id);
+      const clean = (id || '').toLowerCase();
+      const n = (App.graphNodes || []).find(item => item.id === id || item.id.toLowerCase() === clean || item.label.toLowerCase() === clean);
       if (n) {
         focusNode(n);
         openGraphDrawer(n);
@@ -4098,7 +4316,7 @@
     }
 
     // Navigation & Hash Router
-    function switchTab(tabName) {
+    function switchTab(tabName, updateHash = true) {
       App.activeTab = tabName;
       document.querySelectorAll('.nav-tab').forEach(t => {
         t.classList.toggle('active', t.getAttribute('data-tab') === tabName);
@@ -4106,7 +4324,18 @@
       document.querySelectorAll('.tab-content').forEach(c => {
         c.classList.toggle('active', c.id === `tab-${tabName}`);
       });
-      window.location.hash = `#/${tabName}`;
+
+      if (updateHash) {
+        let targetHash = `#/${tabName}`;
+        if (tabName === 'search' && App.selectedKey) {
+          targetHash = `#/knowledge/${encodeURIComponent(App.selectedKey)}`;
+        } else if (tabName === 'graph' && App.drawerNode) {
+          targetHash = `#/graph/${encodeURIComponent(App.drawerNode.id)}`;
+        }
+        if (window.location.hash !== targetHash) {
+          history.pushState(null, '', targetHash);
+        }
+      }
 
       if (tabName === 'graph') {
         setTimeout(initCanvasGraph, 50);
@@ -4114,9 +4343,14 @@
     }
 
     function filterByTag(tag) {
-      document.getElementById('globalSearch').value = tag;
+      const searchEl = document.getElementById('globalSearch');
+      if (searchEl) searchEl.value = tag;
       App.searchQuery = tag;
-      switchTab('search');
+      switchTab('search', false);
+      const targetHash = `#/search?tag=${encodeURIComponent(tag)}`;
+      if (window.location.hash !== targetHash) {
+        history.pushState(null, '', targetHash);
+      }
       renderKnowledgeList();
     }
 
@@ -4131,7 +4365,7 @@
       document.querySelectorAll('.nav-tab').forEach(tab => {
         tab.addEventListener('click', (e) => {
           e.preventDefault();
-          switchTab(tab.getAttribute('data-tab'));
+          switchTab(tab.getAttribute('data-tab'), true);
         });
       });
 
@@ -4149,13 +4383,17 @@
       const searchEl = document.getElementById('globalSearch');
       searchEl.addEventListener('input', (e) => {
         App.searchQuery = e.target.value;
-        if (App.activeTab !== 'search') switchTab('search');
+        if (App.activeTab !== 'search') switchTab('search', false);
         renderKnowledgeList();
       });
       searchEl.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
           const q = searchEl.value.trim();
           if (q) {
+            const targetHash = `#/search?q=${encodeURIComponent(q)}`;
+            if (window.location.hash !== targetHash) {
+              history.pushState(null, '', targetHash);
+            }
             const data = await apiFetch(`/search?q=${encodeURIComponent(q)}&limit=100`);
             if (data && data.hits) {
               App.entries = data.hits;
@@ -4164,6 +4402,7 @@
               showToast(`Found ${data.hits.length} match(es) for "${q}"`, 'info');
             }
           } else {
+            history.pushState(null, '', '#/search');
             refreshAll();
           }
         }
@@ -4185,15 +4424,15 @@
           e.preventDefault();
           searchEl.focus();
         } else if (e.key === '1') {
-          switchTab('search');
+          switchTab('search', true);
         } else if (e.key === '2') {
-          switchTab('incidents');
+          switchTab('incidents', true);
         } else if (e.key === '3') {
-          switchTab('tasks');
+          switchTab('tasks', true);
         } else if (e.key === '4') {
-          switchTab('graph');
+          switchTab('graph', true);
         } else if (e.key === '5') {
-          switchTab('feed');
+          switchTab('feed', true);
         } else if (e.key === 'n' || e.key === 'N') {
           e.preventDefault();
           openNewModal();
@@ -4222,22 +4461,101 @@
         if (!list.length) return;
         const curIdx = list.findIndex(e => e.key === App.selectedKey);
         const nextIdx = Math.max(0, Math.min(list.length - 1, curIdx + dir));
-        selectEntry(list[nextIdx].key);
+        selectEntry(list[nextIdx].key, true);
         const card = document.querySelector(`.item-card[data-key="${list[nextIdx].key}"]`);
         if (card) card.scrollIntoView({ block: 'nearest' });
       }
 
-      // Initial route & hashchange listener
+      // Initial route, popstate & hashchange listener
       function applyRoute() {
-        const hash = window.location.hash.replace('#/', '');
-        if (['search', 'incidents', 'tasks', 'graph', 'feed'].includes(hash)) {
-          if (hash !== App.activeTab) switchTab(hash);
+        const fullHash = window.location.hash || '';
+        if (!fullHash || fullHash === '#' || fullHash === '#/') {
+          if (App.activeTab !== 'search') switchTab('search', false);
+          if (!App.selectedKey && App.entries.length > 0) {
+            selectEntry(App.entries[0].key, true);
+          }
+          return;
+        }
+
+        const rawPath = fullHash.replace(/^#\/?/, '');
+        const [routePath, queryString] = rawPath.split('?');
+        const params = new URLSearchParams(queryString || '');
+        const segments = routePath.split('/').map(s => decodeURIComponent(s).trim()).filter(Boolean);
+        const root = segments[0] || 'search';
+        const paramKey = segments[1] || '';
+
+        if (root === 'knowledge' || root === 'doc') {
+          const key = paramKey || params.get('key');
+          if (App.activeTab !== 'search') switchTab('search', false);
+          if (key) {
+            const rev = params.get('rev') || params.get('at');
+            selectEntry(key, false).then(() => {
+              if (rev) {
+                inspectRevision(key, rev);
+              }
+            });
+            setTimeout(() => {
+              try {
+                const card = document.querySelector(`.item-card[data-key="${CSS.escape(key)}"]`);
+                if (card) {
+                  card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                  card.classList.add('selected');
+                }
+              } catch (_) {}
+            }, 60);
+          }
+        } else if (root === 'incidents') {
+          const key = paramKey || params.get('key');
+          if (App.activeTab !== 'incidents') switchTab('incidents', false);
+          if (key) {
+            App.pendingHighlight = { tab: 'incidents', key };
+            highlightCard('incidents', key);
+            document.title = `KYB — Incident: ${key}`;
+          } else {
+            document.title = 'KYB — Fleet Incidents';
+          }
+        } else if (root === 'tasks') {
+          const key = paramKey || params.get('key');
+          if (App.activeTab !== 'tasks') switchTab('tasks', false);
+          if (key) {
+            App.pendingHighlight = { tab: 'tasks', key };
+            highlightCard('tasks', key);
+            document.title = `KYB — Task: ${key}`;
+          } else {
+            document.title = 'KYB — Fleet Tasks';
+          }
+        } else if (root === 'graph' || root === 'topology') {
+          const nodeKey = paramKey || params.get('node') || params.get('key');
+          if (App.activeTab !== 'graph') switchTab('graph', false);
+          if (nodeKey) {
+            App.pendingGraphNode = nodeKey;
+            if (App.graphNodes && App.graphNodes.length > 0) {
+              focusNodeById(nodeKey);
+            }
+            document.title = `KYB — Graph: ${nodeKey}`;
+          } else {
+            document.title = 'KYB — Cyber Topology';
+          }
+        } else if (root === 'search') {
+          const q = params.get('q') || params.get('query') || params.get('tag') || '';
+          if (App.activeTab !== 'search') switchTab('search', false);
+          if (q) {
+            if (searchEl) searchEl.value = q;
+            App.searchQuery = q;
+            renderKnowledgeList();
+          }
+          document.title = q ? `KYB — Search: ${q}` : 'KYB — Fleet Knowledge';
+        } else if (root === 'feed' || root === 'activity') {
+          if (App.activeTab !== 'feed') switchTab('feed', false);
+          document.title = 'KYB — Fleet Operations Feed';
         } else {
-          switchTab('search');
+          if (App.activeTab !== 'search') switchTab('search', false);
         }
       }
+
       applyRoute();
       window.addEventListener('hashchange', applyRoute);
+      window.addEventListener('popstate', applyRoute);
 
       // Initial load & 4s polling
       refreshAll();
