@@ -1196,7 +1196,7 @@
       padding: 6px;
       border-radius: 8px;
       backdrop-filter: blur(8px);
-      z-index: 10;
+      z-index: 50;
     }
 
     .node-hud {
@@ -1209,7 +1209,7 @@
       font-size: 12px;
       color: var(--text);
       display: none;
-      z-index: 30;
+      z-index: 60;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
       backdrop-filter: blur(14px);
       max-width: 340px;
@@ -1243,7 +1243,7 @@
       border-radius: 10px;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
       backdrop-filter: blur(16px);
-      z-index: 35;
+      z-index: 45;
       display: flex;
       flex-direction: column;
       transform: translateX(120%);
@@ -1316,7 +1316,7 @@
       border-radius: 3px;
     }
     .method-POST { background: var(--accent-dim); color: var(--accent); }
-    .method-GET { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+    .method-GET { background: var(--text-dim); color: var(--text); }
     .method-DELETE { background: var(--red-dim); color: var(--red); }
     .latency-badge {
       font-family: var(--font-mono);
@@ -1763,9 +1763,9 @@
           <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
             <div style="font-size:10.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Layout View</div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px;">
-              <button class="chip active" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">Cluster</button>
+              <button class="chip" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">Cluster</button>
               <button class="chip" id="layoutRadarBtn" onclick="setGraphLayout('radar')">Concentric</button>
-              <button class="chip" id="layoutHierarchyBtn" onclick="setGraphLayout('hierarchy')">Hierarchy</button>
+              <button class="chip active" id="layoutHierarchyBtn" onclick="setGraphLayout('hierarchy')">Hierarchy</button>
               <button class="chip" id="layoutGridBtn" onclick="setGraphLayout('grid')">Service Grid</button>
             </div>
           </div>
@@ -1781,7 +1781,7 @@
           </div>
 
           <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px; font-size:11px; display:flex; flex-direction:column; gap:4px;">
-            <div class="graph-legend-item"><span class="legend-color" style="background:#38bdf8;"></span> Services</div>
+            <div class="graph-legend-item"><span class="legend-color" style="background:#5e6ad2;"></span> Services</div>
             <div class="graph-legend-item"><span class="legend-color" style="background:#a78bfa;"></span> Fleet Hosts</div>
             <div class="graph-legend-item"><span class="legend-color" style="background:#94a3b8;"></span> Knowledge Base</div>
             <div class="graph-legend-item"><span class="legend-color" style="background:#f43f5e;"></span> Incidents</div>
@@ -1823,7 +1823,7 @@
           <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">Stabilize</button>
           <button class="btn sm" onclick="fitGraphCamera()">Fit to View</button>
           <button class="btn sm" onclick="zoomGraph(1.2)">+ Zoom</button>
-          <button class="btn sm" onclick="zoomGraph(0.8)">− Zoom</button>
+          <button class="btn sm" onclick="zoomGraph(0.8)">- Zoom</button>
           <button class="btn sm" onclick="unpinAllGraphNodes()">Unpin All</button>
           <button class="btn sm" onclick="resetGraphCamera()">Reset</button>
         </div>
@@ -2048,7 +2048,7 @@
       incidentSeverityFilter: 'all',
       activityFilter: 'all',
       feedPaused: false,
-      graphLayout: 'orbit',
+      graphLayout: 'hierarchy',
       drawerNode: null,
       graphNodes: [],
       graphLinks: [],
@@ -2314,10 +2314,13 @@
               ${kindBadge}
             </div>
             <div class="item-key">${highlightText(item.key, App.searchQuery)}</div>
-            <div class="item-meta">
-              <span>${timeAgo(item.updated_at || item.committed_at)}</span>
-              ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
-              ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">${revCount} revs</span>` : ''}
+            <div class="item-meta" style="margin-top: 8px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <span>${timeAgo(item.updated_at || item.committed_at)}</span>
+                ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
+                ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">${revCount} revs</span>` : ''}
+              </div>
+              <span class="card-affordance" style="font-size:11px; font-weight:600; color:var(--accent);">View Details &rarr;</span>
             </div>
           </a>
         `;
@@ -3503,7 +3506,7 @@
               </h3>
             </div>
             <div style="display:flex; gap:6px; align-items:center;">
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button><a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
               <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
               <button class="btn sm" onclick="copyDirectLink('#/incidents/${encodeURIComponent(inc.key)}')">Link</button>
               <button class="btn sm" onclick="openEditModal('${escapeHtml(inc.key)}')">Edit</button>
@@ -3539,7 +3542,7 @@
             </div>
             <div style="display:flex; gap:6px; align-items:center;">
               <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">In Topology</a>
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">History</button><a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
               <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">Diff</button>
               <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">Full Report →</a>
             </div>
@@ -3671,7 +3674,7 @@
 
           <div class="task-actions-row" onclick="event.stopPropagation()" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:6px;">
             <div style="display:flex; gap:4px; align-items:center;">
-              <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">Doc →</a>
+              <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">Doc →</a>
               <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(t.key)}')">Diff</button>
               <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(t.key)}')">History</button>
               <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">Edit</button>
