@@ -182,7 +182,7 @@
 
     <p>BM25 over the text (title weighted ×2, tags and keys ×1.5) fused by reciprocal rank with
     vector search over a multilingual e5-small int8 ONNX model running on CPU. A query lands in
-    about 6 ms on a base of a few hundred entries.</p>
+    about 7–9 ms round trip over LAN on a base of several hundred entries.</p>
 
     <p>The vectors are not there to rerank a lexical top-k. They <em>retrieve</em>, independently.
     That distinction is the whole point: a question phrased in words the entry never uses, or asked

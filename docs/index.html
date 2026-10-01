@@ -39,7 +39,7 @@
 {"@type":"FAQPage","mainEntity":[
 {"@type":"Question","name":"What is KYB?","acceptedAnswer":{"@type":"Answer","text":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. It stores which servers exist, how services are wired, what broke and how it ended, and what work is still in flight — so the operational truth survives between agent sessions and across machines."}},
 {"@type":"Question","name":"Does KYB need a database?","acceptedAnswer":{"@type":"Answer","text":"No. Git is the canon: one markdown file per entry, one commit per change, and a commit sha is a version id. The Tantivy search index is a disposable cache rebuilt from git on every start."}},
-{"@type":"Question","name":"How does KYB search work?","acceptedAnswer":{"@type":"Answer","text":"Hybrid search: BM25 lexical scoring fused by reciprocal rank with vector search over every entry, using a multilingual e5-small int8 ONNX model on CPU. Typical queries complete in single-digit milliseconds on local CPU. Without the model on disk the service degrades to lexical-only."}},
+{"@type":"Question","name":"How does KYB search work?","acceptedAnswer":{"@type":"Answer","text":"Hybrid search: BM25 lexical scoring fused by reciprocal rank with vector search over every entry, using a multilingual e5-small int8 ONNX model on CPU. In a 2026-09-22 benchmark against a 643-entry base, round-trip LAN queries completed in ~7–9 ms. Without the model on disk the service degrades to lexical-only."}},
 {"@type":"Question","name":"Which AI agents does KYB support?","acceptedAnswer":{"@type":"Answer","text":"The installer wires the KYB skill into every agent it finds on a machine: Claude Code, Codex and Antigravity. It writes a pointer into each agent's always-loaded global instructions, so the skill is discovered without being asked for. In addition, KYB serves native Model Context Protocol (MCP) over HTTP at POST /mcp."}},
 {"@type":"Question","name":"How do I install KYB?","acceptedAnswer":{"@type":"Answer","text":"On Apple Silicon macOS: brew install alex09x/apps/kyb, then brew services start kyb. With Docker: docker compose up -d, using the ghcr.io/alex09x/kyb image. Via Cargo: cargo install knowyourbusiness --locked. From source: cargo run --release."}}]}]}
 </script>
@@ -139,7 +139,7 @@
     <div style="display: flex; flex-wrap: wrap; gap: 9px; margin: 26px 0 32px;">
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">license</span><span style="padding: 4px 9px; background: var(--accent-dim); color: var(--text);">MIT</span></span>
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">tests</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 150); color: var(--text);">321 test cases</span></span>
-      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">search</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">hybrid · sub-10ms CPU</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">search</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">hybrid · ~7–9ms LAN</span></span>
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">rust</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">edition 2021</span></span>
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">release</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 300); color: var(--text);">v0.2.3 · brew · docker · cargo</span></span>
     </div>
@@ -433,12 +433,12 @@
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
-          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Zero client updates</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">The tool list is generated by the server. When new capabilities or query flags ship on the server, every connected client discovers them immediately without rebuilding or redeploying local tools.</p>
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Zero client adapters</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">The tool list is generated by the server. Clients discover capabilities when listing tools, without updating a local KYB adapter, and may need to refresh or reconnect after an upgrade.</p>
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
-          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Unified audit log</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Tool calls forwarded through <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/mcp</span> execute against the same internal store routes. Every read and mutation is recorded in <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">audit.jsonl</span> with method, path, caller IP, status, and duration.</p>
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Shared audit log</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Tool calls forwarded through <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/mcp</span> execute against the same API routes and share the audit log. Eligible operations (entry gets, search queries, and mutations) are recorded with caller IP and duration, while routine health (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/healthz</span>), taxonomy (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/tags</span>), and unfiltered background list reads are excluded to avoid polling noise.</p>
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Agent skills or MCP</h3>
@@ -463,26 +463,20 @@
       </div>
       <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px;">
         <div style="padding: 16px 20px; color: var(--muted);">lexical only (BM25)</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">1 / 14</div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">2 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">3 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~2–7 ms</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~7 ms</div>
       </div>
       <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px; background: oklch(0.76 0.132 196 / 0.06);">
         <div style="padding: 16px 20px; color: var(--text); font-weight: 600;">+ e5-small int8 <span style="color: var(--faint); font-weight: 400; font-family: 'IBM Plex Mono'; font-size: 12.5px;">118 MB · default in container</span></div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">9 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">12 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">~5–9 ms</div>
-      </div>
-      <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px;">
-        <div style="padding: 16px 20px; color: var(--muted);">+ e5-base int8 <span style="color: var(--faint); font-family: 'IBM Plex Mono'; font-size: 12.5px;">266 MB</span></div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--text);">10 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--text);">12 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~10–15 ms</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">3 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">4 / 14</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">~9 ms</div>
       </div>
     </div>
 
     <div style="margin-top: 14px; padding: 14px 18px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--border); font-size: 13.5px; color: var(--muted); line-height: 1.6;">
-      <strong style="color: var(--text);">Workload &amp; reproducibility note:</strong> Latency and retrieval metrics were measured using the 14 reference queries in <code style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">scripts/eval-search.sh</code> on Apple Silicon and modern x86_64 CPU hardware via ONNX Runtime (CPU inference, in-memory index). Absolute hit rates and round-trip times vary with corpus size, hardware, and query wording. Replace the sample cases with queries against your own knowledge base before drawing production conclusions.
+      <strong style="color: var(--text);">Documented measurement (2026-09-22):</strong> Measured over LAN against a 643-entry base with e5-small int8 using the 14 reference paraphrase questions in <code style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">scripts/eval-search.sh</code>. The example queries were originally drafted against a different test base (three target keys are absent from this 643-entry corpus, capping the reachable score well below 14/14). On identical queries against the same corpus, hybrid vector fusion roughly doubles retrieval hit rate over lexical BM25 alone. Replace example queries and target keys with your own base before drawing production conclusions.
     </div>
   </section>
 
@@ -490,7 +484,7 @@
   <section id="api" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
     <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// HTTP API</div>
     <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">A small, honest surface.</h2>
-    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Every request except <span style="font-family:'IBM Plex Mono'; font-size:14px;">/healthz</span> is appended to a JSONL audit log — timestamp, ip, method, path, status, duration.</p>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Eligible API operations are appended to a JSONL audit log — timestamp, ip, method, path, status, duration — while routine health (<span style="font-family:'IBM Plex Mono'; font-size:14px;">/healthz</span>), taxonomy (<span style="font-family:'IBM Plex Mono'; font-size:14px;">/tags</span>), and unfiltered list reads are excluded to avoid polling noise.</p>
 
     <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
       <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg2); border-bottom: 1px solid var(--border);">
