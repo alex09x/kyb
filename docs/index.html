@@ -4,17 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>KYB — Shared Memory &amp; Incident Tracker for AI Agent Fleets</title>
-<meta name="description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.">
+<meta name="description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.">
 <link rel="canonical" href="https://kybmemory.com/">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" content="#131720">
-<meta name="author" content="KYB">
-<meta name="keywords" content="AI agent memory, agent knowledge base, incident tracker, hybrid search, BM25, vector search, git-backed, Rust, Claude Code, Codex, MCP alternative, infrastructure knowledge base">
+<meta name="author" content="Alexander Panasenko">
+<meta name="keywords" content="AI agent memory, agent knowledge base, incident tracker, hybrid search, BM25, vector search, git-backed, Rust, Claude Code, Codex, Antigravity, MCP, Model Context Protocol, infrastructure knowledge base">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="KYB — Know Your Business">
 <meta property="og:title" content="KYB — the shared memory your AI agent fleet keeps forgetting it needs">
-<meta property="og:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.">
+<meta property="og:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.">
 <meta property="og:url" content="https://kybmemory.com/">
 <meta property="og:image" content="https://kybmemory.com/og.png">
 <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
 <meta property="og:image:alt" content="KYB — git-backed shared memory and incident tracker for AI agent fleets">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="KYB — shared memory for AI agent fleets">
-<meta name="twitter:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.">
+<meta name="twitter:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.">
 <meta name="twitter:image" content="https://kybmemory.com/og.png">
 
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -34,14 +34,14 @@
 
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"SoftwareApplication","name":"KYB — Know Your Business","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Docker","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT.","url":"https://kybmemory.com/","softwareVersion":"0.1","license":"https://opensource.org/licenses/MIT","programmingLanguage":"Rust","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"codeRepository":"https://github.com/alex09x/kyb"},
-{"@type":"WebSite","name":"KYB","url":"https://kybmemory.com/","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Hybrid BM25 + vector search in ~6ms, no database, no auth by design. Open source, Rust, MIT."},
+{"@type":"SoftwareApplication","name":"KYB — Know Your Business","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Docker","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.","url":"https://kybmemory.com/","softwareVersion":"0.2.3","license":"https://opensource.org/licenses/MIT","programmingLanguage":"Rust","author":{"@type":"Person","name":"Alexander Panasenko","url":"https://prod.codes/about/"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"codeRepository":"https://github.com/alex09x/kyb"},
+{"@type":"WebSite","name":"KYB","url":"https://kybmemory.com/","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.","author":{"@type":"Person","name":"Alexander Panasenko","url":"https://prod.codes/about/"}},
 {"@type":"FAQPage","mainEntity":[
 {"@type":"Question","name":"What is KYB?","acceptedAnswer":{"@type":"Answer","text":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. It stores which servers exist, how services are wired, what broke and how it ended, and what work is still in flight — so the operational truth survives between agent sessions and across machines."}},
 {"@type":"Question","name":"Does KYB need a database?","acceptedAnswer":{"@type":"Answer","text":"No. Git is the canon: one markdown file per entry, one commit per change, and a commit sha is a version id. The Tantivy search index is a disposable cache rebuilt from git on every start."}},
-{"@type":"Question","name":"How does KYB search work?","acceptedAnswer":{"@type":"Answer","text":"Hybrid search: BM25 lexical scoring fused by reciprocal rank with vector search over every entry, using a multilingual e5-small int8 ONNX model on CPU. A query takes about 6 ms. Without the model on disk the service degrades to lexical-only."}},
-{"@type":"Question","name":"Which AI agents does KYB support?","acceptedAnswer":{"@type":"Answer","text":"The installer wires the KYB skill into every agent it finds on a machine: Claude Code, Codex and Antigravity. It writes a pointer into each agent's always-loaded global instructions, so the skill is discovered without being asked for."}},
-{"@type":"Question","name":"How do I install KYB?","acceptedAnswer":{"@type":"Answer","text":"On Apple Silicon macOS: brew install alex09x/apps/kyb, then brew services start kyb. With Docker: docker compose up -d, using the ghcr.io/alex09x/kyb image. From source: cargo run --release."}}]}]}
+{"@type":"Question","name":"How does KYB search work?","acceptedAnswer":{"@type":"Answer","text":"Hybrid search: BM25 lexical scoring fused by reciprocal rank with vector search over every entry, using a multilingual e5-small int8 ONNX model on CPU. Typical queries complete in single-digit milliseconds on local CPU. Without the model on disk the service degrades to lexical-only."}},
+{"@type":"Question","name":"Which AI agents does KYB support?","acceptedAnswer":{"@type":"Answer","text":"The installer wires the KYB skill into every agent it finds on a machine: Claude Code, Codex and Antigravity. It writes a pointer into each agent's always-loaded global instructions, so the skill is discovered without being asked for. In addition, KYB serves native Model Context Protocol (MCP) over HTTP at POST /mcp."}},
+{"@type":"Question","name":"How do I install KYB?","acceptedAnswer":{"@type":"Answer","text":"On Apple Silicon macOS: brew install alex09x/apps/kyb, then brew services start kyb. With Docker: docker compose up -d, using the ghcr.io/alex09x/kyb image. Via Cargo: cargo install knowyourbusiness --locked. From source: cargo run --release."}}]}]}
 </script>
 
 <style>
@@ -105,9 +105,12 @@
         <a href="#how" style="color: var(--muted);">How it works</a>
         <a href="#incidents" style="color: var(--muted);">Incidents</a>
         <a href="#tasks" style="color: var(--muted);">Tasks</a>
-        <a href="#skill" style="color: var(--muted);">Agent skill</a>
+        <a href="#skill" style="color: var(--muted);">Skill</a>
+        <a href="#mcp" style="color: var(--muted);">MCP</a>
         <a href="#api" style="color: var(--muted);">API</a>
         <a href="#install" style="color: var(--muted);">Install</a>
+        <a href="#citation" style="color: var(--muted);">Cite</a>
+        <a href="/blog/" style="color: var(--muted);">Blog</a>
       </div>
       <a href="https://github.com/alex09x/kyb" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 15px; border-radius: 9px; background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 13.5px; font-weight: 600;" data-hover="0">
         <span style="color: var(--incident);">★</span> Star on GitHub
@@ -136,9 +139,9 @@
     <div style="display: flex; flex-wrap: wrap; gap: 9px; margin: 26px 0 32px;">
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">license</span><span style="padding: 4px 9px; background: var(--accent-dim); color: var(--text);">MIT</span></span>
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">tests</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 150); color: var(--text);">321 test cases</span></span>
-      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">search</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">hybrid · ~6ms</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">search</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">hybrid · sub-10ms CPU</span></span>
       <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">rust</span><span style="padding: 4px 9px; background: var(--panel2); color: var(--text);">edition 2021</span></span>
-      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">release</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 300); color: var(--text);">brew · docker</span></span>
+      <span style="display: inline-flex; font-family: 'IBM Plex Mono'; font-size: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);"><span style="padding: 4px 9px; background: var(--bg2); color: var(--muted);">release</span><span style="padding: 4px 9px; background: oklch(0.40 0.09 300); color: var(--text);">v0.2.3 · brew · docker · cargo</span></span>
     </div>
 
     <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
@@ -167,13 +170,34 @@
     </div>
   </section>
 
-  <!-- ===================== PROBLEM ===================== -->
+  <!-- ===================== PROBLEM & CONCRETE USE CASE ===================== -->
   <section style="max-width: 1120px; margin: 44px auto 0; padding: 0 28px;">
-    <div style="border-radius: 14px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 26px 30px; display: flex; flex-wrap: wrap; gap: 22px; align-items: center;">
-      <span style="font-family: 'Space Grotesk'; font-size: 15px; font-weight: 600; color: var(--incident);">The problem</span>
-      <p style="margin: 0; font-size: 17px; color: var(--text); flex: 1; min-width: 300px; text-wrap: pretty;">
-        Agents forget everything between sessions. Multiple agents — Claude Code, Codex, Antigravity — on multiple machines rediscover the same infrastructure over and over, and every hard-won incident lesson evaporates the moment the context window closes.
-      </p>
+    <div style="border-radius: 14px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 26px 30px; display: flex; flex-direction: column; gap: 20px;">
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: baseline;">
+        <span style="font-family: 'Space Grotesk'; font-size: 15px; font-weight: 600; color: var(--incident);">The problem</span>
+        <p style="margin: 0; font-size: 17px; color: var(--text); flex: 1; min-width: 280px; text-wrap: pretty;">
+          Agents forget everything between sessions. Multiple agents — Claude Code, Codex, Antigravity — on multiple machines rediscover the same infrastructure over and over, and every hard-won incident lesson evaporates the moment the context window closes.
+        </p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; padding-top: 18px; border-top: 1px solid var(--border);">
+        <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px;">
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent); margin-bottom: 6px;">Concrete scenario</div>
+          <div style="font-size: 14.5px; color: var(--muted); line-height: 1.6;">
+            <strong style="color: var(--text);">Session 1:</strong> An agent diagnoses an outage, discovers that a write buffer exhausted container memory, fixes it, and files <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--accent);">inc-orders-api-oom</code> with an executable detection check and resolution.<br><br>
+            <strong style="color: var(--text);">Session 2 (weeks later):</strong> Another agent on a different machine asks <em>"why did the order service keep restarting?"</em> Semantic search finds the exact resolution instantly — no keyword overlap needed, and no re-investigating what was already solved.
+          </div>
+        </div>
+
+        <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px;">
+          <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--good); margin-bottom: 6px;">Fast setup in 3 steps</div>
+          <div style="font-size: 14.5px; color: var(--muted); line-height: 1.6;">
+            <strong style="color: var(--text);">1. Launch the server:</strong> <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">brew install alex09x/apps/kyb &amp;&amp; brew services start kyb</code> (or Docker / Cargo).<br><br>
+            <strong style="color: var(--text);">2. Wire your fleet:</strong> Drop the skill into local agents via <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">bash skills/install.sh</code>, or connect directly over native HTTP MCP via <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">POST /mcp</code>.<br><br>
+            <strong style="color: var(--text);">3. Ask before reasoning:</strong> Agents query KYB first, claim tasks, and enrich the shared knowledge base before finishing.
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -192,7 +216,7 @@
       <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 18px; margin-bottom: 16px;">⌕</div>
         <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Hybrid search</h3>
-        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">BM25 fused (reciprocal rank) with vector search over every entry — e5-small, int8 ONNX, ~5&nbsp;ms on CPU. Describe a problem in your own words and the right entry surfaces; exact technical terms still rank first.</p>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">BM25 fused (reciprocal rank) with vector search over every entry — e5-small, int8 ONNX locally on CPU. Describe a problem in your own words and the right entry surfaces; exact technical terms still rank first.</p>
       </div>
       <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--incident); font-size: 18px; margin-bottom: 16px;">⚠</div>
@@ -396,37 +420,69 @@
     </div>
   </section>
 
+  <!-- ===================== MCP ===================== -->
+  <section id="mcp" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 40px 34px;">
+      <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Model Context Protocol</div>
+      <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; margin: 0 0 12px;">Native MCP over HTTP.</h2>
+      <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 24px; text-wrap: pretty;">KYB is not an MCP alternative — it speaks Model Context Protocol natively. The server serves the MCP protocol directly over HTTP at <span style="font-family: 'IBM Plex Mono'; font-size: 14px; color: var(--accent);">POST /mcp</span>. No client-side adapters, no subprocesses, and no client packages to install or update.</p>
+
+      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 14px; overflow-x: auto; margin-bottom: 24px;">
+        <span style="color: var(--good);">$</span> claude mcp add --transport http kyb http://&lt;host&gt;:9310/mcp
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
+        <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Zero client updates</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">The tool list is generated by the server. When new capabilities or query flags ship on the server, every connected client discovers them immediately without rebuilding or redeploying local tools.</p>
+        </div>
+        <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Unified audit log</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Tool calls forwarded through <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/mcp</span> execute against the same internal store routes. Every read and mutation is recorded in <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">audit.jsonl</span> with method, path, caller IP, status, and duration.</p>
+        </div>
+        <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
+          <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Agent skills or MCP</h3>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Use the filesystem-based agent skill (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">skills/install.sh</span>) for terminal-driven workflows (Claude Code, Codex, Antigravity), or connect via HTTP MCP for IDEs and desktop clients.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ===================== BENCHMARK ===================== -->
-  <section style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+  <section id="benchmark" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
     <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Search quality</div>
     <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">Vectors earn their keep.</h2>
-    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">14 real questions against a real base, phrased the way an agent would ask rather than the way the entry was written. Top-1 / top-3 hit rate — lexical alone barely finds anything.</p>
+    <p style="font-size: 18px; color: var(--muted); max-width: 64ch; margin: 0 0 24px; text-wrap: pretty;">Evaluated with <span style="font-family: 'IBM Plex Mono'; font-size: 14px; color: var(--accent);">scripts/eval-search.sh</span> using paraphrase questions that share few or no tokens with the entries they land on. In-memory Tantivy BM25 fused with an int8 multilingual ONNX model running locally on CPU.</p>
 
     <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden; background: var(--panel);">
       <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--faint); background: var(--bg2);">
         <div style="padding: 13px 20px;">SETUP</div>
         <div style="padding: 13px 20px; text-align: center;">TOP-1</div>
         <div style="padding: 13px 20px; text-align: center;">TOP-3</div>
-        <div style="padding: 13px 20px; text-align: center;">LATENCY</div>
+        <div style="padding: 13px 20px; text-align: center;">TYPICAL LATENCY</div>
       </div>
       <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px;">
-        <div style="padding: 16px 20px; color: var(--muted);">lexical only</div>
+        <div style="padding: 16px 20px; color: var(--muted);">lexical only (BM25)</div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">2 / 14</div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--faint);">3 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~2 ms</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~2–7 ms</div>
       </div>
       <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px; background: oklch(0.76 0.132 196 / 0.06);">
-        <div style="padding: 16px 20px; color: var(--text); font-weight: 600;">+ e5-small int8 <span style="color: var(--faint); font-weight: 400; font-family: 'IBM Plex Mono'; font-size: 12.5px;">118 MB · baked into the image</span></div>
+        <div style="padding: 16px 20px; color: var(--text); font-weight: 600;">+ e5-small int8 <span style="color: var(--faint); font-weight: 400; font-family: 'IBM Plex Mono'; font-size: 12.5px;">118 MB · default in container</span></div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">9 / 14</div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">12 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~6 ms</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-weight: 600;">~5–9 ms</div>
       </div>
       <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; align-items: center; border-top: 1px solid var(--border); font-size: 15px;">
         <div style="padding: 16px 20px; color: var(--muted);">+ e5-base int8 <span style="color: var(--faint); font-family: 'IBM Plex Mono'; font-size: 12.5px;">266 MB</span></div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--text);">10 / 14</div>
         <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--text);">12 / 14</div>
-        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~10 ms</div>
+        <div style="padding: 16px 20px; text-align: center; font-family: 'IBM Plex Mono'; color: var(--muted);">~10–15 ms</div>
       </div>
+    </div>
+
+    <div style="margin-top: 14px; padding: 14px 18px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--border); font-size: 13.5px; color: var(--muted); line-height: 1.6;">
+      <strong style="color: var(--text);">Workload &amp; reproducibility note:</strong> Latency and retrieval metrics were measured using the 14 reference queries in <code style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--accent);">scripts/eval-search.sh</code> on Apple Silicon and modern x86_64 CPU hardware via ONNX Runtime (CPU inference, in-memory index). Absolute hit rates and round-trip times vary with corpus size, hardware, and query wording. Replace the sample cases with queries against your own knowledge base before drawing production conclusions.
     </div>
   </section>
 
@@ -483,10 +539,10 @@
       <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
         <div style="padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 13px;">🦀</span>
-          <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">From source</span>
+          <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">Cargo &amp; Crates.io</span>
         </div>
-        <pre role="region" tabindex="0" aria-label="Source installation command" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> cargo run --release</span><span style="display:block;"><span style="color: var(--faint);"># reindexes, listens on :9310</span></span></pre>
-        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">Rust edition 2021. The index rebuilds from git on every start.</div>
+        <pre role="region" tabindex="0" aria-label="Cargo installation command" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> cargo install knowyourbusiness --locked</span><span style="display:block;"><span style="color: var(--faint);"># or from source: cargo run --release</span></span></pre>
+        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">Rust edition 2021. Published on crates.io; index rebuilds from git on every start.</div>
       </div>
     </div>
 
@@ -537,6 +593,39 @@
     </div>
   </section>
 
+  <!-- ===================== CITATION ===================== -->
+  <section id="citation" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
+    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 40px 34px;">
+      <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Citation &amp; Attribution</div>
+      <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; margin: 0 0 12px;">Citing KYB.</h2>
+      <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 22px; text-wrap: pretty;">
+        KYB is authored by <a href="https://prod.codes/about/" style="color: var(--accent); text-decoration: underline; font-weight: 600;">Alexander Panasenko</a>. If you use KYB in academic, archival, or technical research, cite the software via Zenodo:
+      </p>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px;">
+        <a href="https://doi.org/10.5281/zenodo.23027682" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent);">
+          <span style="color: var(--faint);">v0.2.3 DOI:</span> 10.5281/zenodo.23027682
+        </a>
+        <a href="https://doi.org/10.5281/zenodo.22850723" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--muted);">
+          <span style="color: var(--faint);">Concept DOI:</span> 10.5281/zenodo.22850723
+        </a>
+        <a href="https://prod.codes/about/" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--text);">
+          <span>Author Profile ↗</span>
+        </a>
+      </div>
+
+      <pre role="region" tabindex="0" aria-label="BibTeX citation" style="margin: 0; padding: 20px 22px; font-family: 'IBM Plex Mono'; font-size: 13px; line-height: 1.8; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow-x: auto;">@misc{panasenko2026kyb,
+  doi = {10.5281/zenodo.23027682},
+  url = {https://zenodo.org/records/23027682},
+  author = {Panasenko, Alexander},
+  title = {KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents},
+  version = {0.2.3},
+  publisher = {Zenodo},
+  year = {2026}
+}</pre>
+    </div>
+  </section>
+
   <!-- ===================== FINAL CTA ===================== -->
   <section style="max-width: 1120px; margin: 96px auto 0; padding: 0 28px;">
     <div style="border-radius: 22px; border: 1px solid var(--border); background: radial-gradient(ellipse at 50% -10%, oklch(0.76 0.132 196 / 0.16), var(--panel) 62%); padding: 64px 34px; text-align: center;">
@@ -563,9 +652,12 @@
     <div style="display: flex; flex-wrap: wrap; gap: 22px; font-family: 'IBM Plex Mono'; font-size: 13px; align-items: center;">
       <a href="https://kybmemory.com" style="color: var(--accent);">kybmemory.com</a>
       <a href="https://github.com/alex09x/kyb" style="color: var(--muted);">GitHub</a>
+      <a href="/blog/" style="color: var(--muted);">Blog</a>
+      <a href="#mcp" style="color: var(--muted);">MCP</a>
       <a href="#api" style="color: var(--muted);">API</a>
       <a href="#install" style="color: var(--muted);">Install</a>
-      <span style="color: var(--faint);">MIT © 2026</span>
+      <a href="#citation" style="color: var(--muted);">Cite</a>
+      <span style="color: var(--faint);">By <a href="https://prod.codes/about/" style="color: var(--muted); text-decoration: underline;">Alexander Panasenko</a> · MIT © 2026</span>
     </div>
   </footer>
 
