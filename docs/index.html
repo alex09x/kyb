@@ -41,7 +41,7 @@
 {"@type":"Question","name":"Does KYB need a database?","acceptedAnswer":{"@type":"Answer","text":"No. Git is the canon: one markdown file per entry, one commit per change, and a commit sha is a version id. The Tantivy search index is a disposable cache rebuilt from git on every start."}},
 {"@type":"Question","name":"How does KYB search work?","acceptedAnswer":{"@type":"Answer","text":"Hybrid search: BM25 lexical scoring fused by reciprocal rank with vector search over every entry, using a multilingual e5-small int8 ONNX model on CPU. In a 2026-09-22 benchmark against a 643-entry base, round-trip LAN queries completed in ~7–9 ms. Without the model on disk the service degrades to lexical-only."}},
 {"@type":"Question","name":"Which AI agents does KYB support?","acceptedAnswer":{"@type":"Answer","text":"The installer wires the KYB skill into every agent it finds on a machine: Claude Code, Codex and Antigravity. It writes a pointer into each agent's always-loaded global instructions, so the skill is discovered without being asked for. In addition, KYB serves native Model Context Protocol (MCP) over HTTP at POST /mcp."}},
-{"@type":"Question","name":"How do I install KYB?","acceptedAnswer":{"@type":"Answer","text":"On Apple Silicon macOS: brew install alex09x/apps/kyb, then brew services start kyb. With Docker: docker compose up -d, using the ghcr.io/alex09x/kyb image. Via Cargo: cargo install knowyourbusiness --locked. From source: cargo run --release."}}]}]}
+{"@type":"Question","name":"How do I install KYB?","acceptedAnswer":{"@type":"Answer","text":"On Apple Silicon macOS: brew install alex09x/apps/kyb, then brew services start kyb. With Docker: docker compose up -d, using the ghcr.io/alex09x/kyb image. Via Cargo: cargo install knowyourbusiness --locked, then kyb-server. Skills installation (skills/install.sh) and the client CLI require a repository checkout. From source: cargo run --release."}}]}]}
 </script>
 
 <style>
@@ -192,8 +192,8 @@
         <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px;">
           <div style="font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--good); margin-bottom: 6px;">Fast setup in 3 steps</div>
           <div style="font-size: 14.5px; color: var(--muted); line-height: 1.6;">
-            <strong style="color: var(--text);">1. Launch the server:</strong> <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">brew install alex09x/apps/kyb &amp;&amp; brew services start kyb</code> (or Docker / Cargo).<br><br>
-            <strong style="color: var(--text);">2. Wire your fleet:</strong> Drop the skill into local agents via <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">bash skills/install.sh</code>, or connect directly over native HTTP MCP via <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">POST /mcp</code>.<br><br>
+            <strong style="color: var(--text);">1. Launch the server:</strong> <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">brew install alex09x/apps/kyb &amp;&amp; brew services start kyb</code> (or Docker / Cargo: <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">cargo install knowyourbusiness --locked &amp;&amp; kyb-server</code>).<br><br>
+            <strong style="color: var(--text);">2. Wire your fleet:</strong> Drop the skill into local agents via <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">bash skills/install.sh</code> (from a <a href="https://github.com/alex09x/kyb" style="color: var(--accent); text-decoration: underline;">git checkout</a>), or connect directly over native HTTP MCP via <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--good);">POST /mcp</code>.<br><br>
             <strong style="color: var(--text);">3. Ask before reasoning:</strong> Agents query KYB first, claim tasks, and enrich the shared knowledge base before finishing.
           </div>
         </div>
@@ -406,7 +406,8 @@
         </div>
       </div>
 
-      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 14px; overflow-x: auto; margin-bottom: 26px;"><span style="color: var(--good);">$</span> KYB_SERVER=your-server:9310 bash skills/install.sh</div>
+      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 14px; overflow-x: auto; margin-bottom: 12px;"><span style="color: var(--good);">$</span> KYB_SERVER=your-server:9310 bash skills/install.sh</div>
+      <p style="margin: 0 0 26px; color: var(--muted); font-size: 13.5px; line-height: 1.6;">Executed from a clone of the <a href="https://github.com/alex09x/kyb" style="color: var(--accent); text-decoration: underline;">KYB repository</a>. (The Homebrew package installs the client CLI and wires this automatically.)</p>
 
       <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 17px; margin: 0 0 14px;">What no database can enforce — governance</h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">
@@ -535,8 +536,8 @@
           <span style="font-size: 13px;">🦀</span>
           <span style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 15px;">Cargo &amp; Crates.io</span>
         </div>
-        <pre role="region" tabindex="0" aria-label="Cargo installation command" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> cargo install knowyourbusiness --locked</span><span style="display:block;"><span style="color: var(--faint);"># or from source: cargo run --release</span></span></pre>
-        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">Rust edition 2021. Published on crates.io; index rebuilds from git on every start.</div>
+        <pre role="region" tabindex="0" aria-label="Cargo installation commands" style="margin: 0; padding: 20px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.85; color: var(--text); background: var(--bg); overflow-x: auto;"><span style="display:block;"><span style="color: var(--good);">$</span> cargo install knowyourbusiness --locked</span><span style="display:block;"><span style="color: var(--good);">$</span> kyb-server</span><span style="display:block;"><span style="color: var(--faint);"># or from source: cargo run --release</span></span></pre>
+        <div style="padding: 14px 18px; background: var(--bg2); color: var(--muted); font-size: 13.5px; border-top: 1px solid var(--border);">Installs and launches the <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--accent);">kyb-server</code> binary. Note: the client CLI and <code style="font-family: 'IBM Plex Mono'; font-size: 12.5px; color: var(--accent);">skills/install.sh</code> require a separate <a href="https://github.com/alex09x/kyb" style="color: var(--muted); text-decoration: underline;">git repository checkout</a>.</div>
       </div>
     </div>
 
