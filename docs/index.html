@@ -82,6 +82,10 @@
     section > div[style*="grid-template-columns: 1.1fr"],
     section > div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
   }
+  @media (max-width: 600px) {
+    #citation { padding-left: 16px !important; padding-right: 16px !important; }
+    #citation > div { padding: 24px 16px !important; }
+  }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -439,7 +443,7 @@
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Shared audit log</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Tool calls forwarded through <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/mcp</span> execute against the same API routes and share the audit log. Eligible operations (entry gets, search queries, and mutations) are recorded with caller IP and duration, while routine health (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/healthz</span>), taxonomy (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/tags</span>), and unfiltered background list reads are excluded to avoid polling noise.</p>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Tool calls forwarded through <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/mcp</span> execute against the same API routes and share the audit log. Eligible operations (entry gets, search queries, and mutations) are recorded with caller IP and duration, while routine health (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/healthz</span>), taxonomy (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">/tags</span>), and all incident and task list reads are excluded to avoid polling noise.</p>
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Agent skills or MCP</h3>
@@ -485,7 +489,7 @@
   <section id="api" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
     <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// HTTP API</div>
     <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; margin: 0 0 12px;">A small, honest surface.</h2>
-    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Eligible API operations are appended to a JSONL audit log — timestamp, ip, method, path, status, duration — while routine health (<span style="font-family:'IBM Plex Mono'; font-size:14px;">/healthz</span>), taxonomy (<span style="font-family:'IBM Plex Mono'; font-size:14px;">/tags</span>), and unfiltered list reads are excluded to avoid polling noise.</p>
+    <p style="font-size: 18px; color: var(--muted); max-width: 62ch; margin: 0 0 30px;">Eligible API operations are appended to a JSONL audit log — timestamp, ip, method, path, status, duration — while routine health (<span style="font-family:'IBM Plex Mono'; font-size:14px;">/healthz</span>), taxonomy (<span style="font-family:'IBM Plex Mono'; font-size:14px;">/tags</span>), and all incident and task list reads are excluded to avoid polling noise.</p>
 
     <div style="border-radius: 14px; border: 1px solid var(--border); overflow: hidden;">
       <div style="display: grid; grid-template-columns: 74px 1.15fr 2fr; font-family: 'IBM Plex Mono'; font-size: 12px; color: var(--faint); background: var(--bg2); border-bottom: 1px solid var(--border);">
@@ -590,7 +594,7 @@
 
   <!-- ===================== CITATION ===================== -->
   <section id="citation" style="max-width: 1120px; margin: 90px auto 0; padding: 0 28px;">
-    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 40px 34px;">
+    <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: clamp(24px, 4vw, 40px) clamp(16px, 3.5vw, 34px);">
       <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Citation &amp; Attribution</div>
       <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; margin: 0 0 12px;">Citing KYB.</h2>
       <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 22px; text-wrap: pretty;">
@@ -598,13 +602,13 @@
       </p>
 
       <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px;">
-        <a href="https://doi.org/10.5281/zenodo.23027682" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent);">
-          <span style="color: var(--faint);">v0.2.3 DOI:</span> 10.5281/zenodo.23027682
+        <a href="https://doi.org/10.5281/zenodo.23027682" style="display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: 100%; box-sizing: border-box; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); word-break: break-word;">
+          <span style="color: var(--faint); white-space: nowrap;">v0.2.3 DOI:</span> <span style="word-break: break-all; overflow-wrap: anywhere;">10.5281/zenodo.23027682</span>
         </a>
-        <a href="https://doi.org/10.5281/zenodo.22850723" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--muted);">
-          <span style="color: var(--faint);">Concept DOI:</span> 10.5281/zenodo.22850723
+        <a href="https://doi.org/10.5281/zenodo.22850723" style="display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: 100%; box-sizing: border-box; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--muted); word-break: break-word;">
+          <span style="color: var(--faint); white-space: nowrap;">Concept DOI:</span> <span style="word-break: break-all; overflow-wrap: anywhere;">10.5281/zenodo.22850723</span>
         </a>
-        <a href="https://prod.codes/about/" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--text);">
+        <a href="https://prod.codes/about/" style="display: inline-flex; align-items: center; gap: 8px; max-width: 100%; box-sizing: border-box; padding: 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--text);">
           <span>Author Profile ↗</span>
         </a>
       </div>
