@@ -196,6 +196,7 @@
             // A tag link reloaded must show what the tag click showed: the tagged entries, not a text search for the word.
             filterByTag(tag);
           } else if (term) {
+            App.tagFilter = null;  // a text search replaces whatever tag was filtering before
             if (searchEl) searchEl.value = term;
             App.searchQuery = term;
             apiFetch(`/search?q=${encodeURIComponent(term)}&limit=100`).then(data => {
@@ -211,7 +212,9 @@
               }
             });
           } else {
+            App.tagFilter = null;
             App.isBackendSearchResults = false;
+            if (searchEl && searchEl.value.startsWith('#')) searchEl.value = '';
             renderKnowledgeList();
           }
           document.title = term ? `KYB — Search: ${term}` : 'KYB — Fleet Knowledge';
