@@ -1,417 +1,280 @@
 #!/usr/bin/env python3
-"""
-Automated End-to-End Test Suite for KYB Web UI & Fleet Memory Control Room.
-Tests HTTP API contracts, incident & task lifecycles, revision history,
-git diff generation, and live browser interactions via prod-browser.
+"""End-to-end test of the web UI in a real browser.
+
+What it proves: the page the server serves loads without script errors, every
+screen renders, and every write a person can make from the UI - create, edit,
+resolve, move a task through its states - lands on the server as intended.
+The edit checks are the ones that bit: an upsert replaces the whole record,
+so saving a title must not reopen a blocked task or drop an incident's
+detection.
+
+How it runs:
+
+    python3 scripts/test-web-ui.py                 # own sandbox server
+    python3 scripts/test-web-ui.py --base URL      # against a running server
+
+Without --base it starts kyb-server (KYB_SERVER_BIN, else target/release or
+target/debug) on an empty data directory with no model, lexical-only, so it is
+up in a second, and serves the UI assembled from src/web/ (KYB_UI_PATH), so the
+sources under test are the current ones even when the binary is older. With
+--base it refuses to run against anything but a loopback address unless
+--allow-writes is given: the flows create and mutate entries.
+
+Needs Playwright for Python with Chromium (`pip install playwright &&
+playwright install chromium`).
 """
 
-import sys
+import argparse
 import json
-import time
-import socket
-import urllib.request
-import urllib.error
 import os
+import pathlib
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
 
-def get_server_host():
-    if os.environ.get("KYB_SERVER"):
-        return os.environ["KYB_SERVER"]
-    host_file = os.path.expanduser("~/.config/kyb/host")
-    if os.path.exists(host_file):
-        with open(host_file) as f:
-            h = f.read().strip()
-            if h:
-                return h
-    return "127.0.0.1"
+REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+from build_ui import assemble  # noqa: E402
 
-SERVER_HOST = get_server_host()
-SERVER_URL = f"http://{SERVER_HOST}:9310"
-SOCKET_PATH = f"/tmp/prod-browser-{os.environ.get('USER', 'alex09x')}.sock"
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover - environment, not the UI
+    sys.exit("playwright for python is not installed: pip install playwright && playwright install chromium")
 
-def log_test(name, passed, detail=""):
-    mark = "✔ PASS" if passed else "✖ FAIL"
-    color = "\033[32m" if passed else "\033[31m"
-    reset = "\033[0m"
-    print(f" {color}{mark}{reset}  {name} {f'({detail})' if detail else ''}")
-    if not passed:
-        sys.exit(1)
+FAILED = []
 
-def test_http_endpoint(path, expected_status=200, check_fn=None):
-    url = f"{SERVER_URL}{path}"
-    req = urllib.request.Request(url)
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            status = resp.status
-            body = resp.read()
-            passed = status == expected_status
-            detail = f"status {status}"
-            if passed and check_fn:
-                ok, extra = check_fn(resp, body)
-                passed = passed and ok
-                detail += f", {extra}"
-            log_test(f"HTTP GET {path}", passed, detail)
-            try:
-                return json.loads(body.decode("utf-8"))
-            except Exception:
-                return body.decode("utf-8")
-    except Exception as e:
-        log_test(f"HTTP GET {path}", False, f"error: {e}")
-        return None
 
-def test_http_post(path, payload, expected_status=200, check_fn=None):
-    url = f"{SERVER_URL}{path}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            status = resp.status
-            body = resp.read()
-            passed = status == expected_status
-            detail = f"status {status}"
-            if passed and check_fn:
-                ok, extra = check_fn(resp, body)
-                passed = passed and ok
-                detail += f", {extra}"
-            log_test(f"HTTP POST {path}", passed, detail)
-            try:
-                return json.loads(body.decode("utf-8"))
-            except Exception:
-                return body.decode("utf-8")
-    except urllib.error.HTTPError as e:
-        body = e.read()
-        log_test(f"HTTP POST {path}", False, f"status {e.code}: {body.decode('utf-8')[:120]}")
-        return None
-    except Exception as e:
-        log_test(f"HTTP POST {path}", False, f"error: {e}")
-        return None
+def check(name, ok, detail=""):
+    mark = "ok  " if ok else "FAIL"
+    print(f"  {mark} {name}{(' - ' + str(detail)) if detail and not ok else ''}")
+    if not ok:
+        FAILED.append(name)
 
-def test_http_delete(path, expected_status=200):
-    url = f"{SERVER_URL}{path}"
-    req = urllib.request.Request(url, method="DELETE")
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            passed = resp.status == expected_status
-            log_test(f"HTTP DELETE {path}", passed, f"status {resp.status}")
-            return True
-    except urllib.error.HTTPError as e:
-        passed = e.code == expected_status or (expected_status == 200 and e.code == 404)
-        log_test(f"HTTP DELETE {path}", passed, f"status {e.code} (archived/retracted)")
-        return passed
-    except Exception as e:
-        log_test(f"HTTP DELETE {path}", False, f"error: {e}")
-        return False
 
-def pb_call(method, params=None):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(SOCKET_PATH)
-    req = {"id": int(time.time() * 1000), "method": method, "params": params or {}}
-    s.sendall(json.dumps(req).encode() + b"\n")
-    data = b""
-    while True:
-        chunk = s.recv(65536)
-        if not chunk:
-            break
-        data += chunk
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def wait_http(url, seconds=30):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
         try:
-            res = json.loads(data.decode("utf-8"))
-            s.close()
-            return res
+            with urllib.request.urlopen(url, timeout=2) as r:
+                if r.status == 200:
+                    return True
         except Exception:
-            continue
-    s.close()
-    return json.loads(data.decode("utf-8"))
+            time.sleep(0.2)
+    return False
+
+
+def start_sandbox(tmp):
+    binary = os.environ.get("KYB_SERVER_BIN")
+    if not binary:
+        for cand in (REPO / "target/release/kyb-server", REPO / "target/debug/kyb-server"):
+            if cand.exists():
+                binary = str(cand)
+                break
+    if not binary:
+        sys.exit("no kyb-server binary: set KYB_SERVER_BIN or cargo build")
+    ui = tmp / "index.html"
+    ui.write_text(assemble(), encoding="utf-8")
+    port = free_port()
+    env = dict(os.environ,
+               KYB_DATA=str(tmp / "data"), KYB_INDEX=str(tmp / "index"), KYB_AUDIT=str(tmp / "audit.jsonl"),
+               KYB_MODEL=str(tmp / "no-model"), KYB_ADDR=f"127.0.0.1:{port}", KYB_UI_PATH=str(ui))
+    log = open(tmp / "server.log", "w")
+    proc = subprocess.Popen([binary], env=env, stdout=log, stderr=subprocess.STDOUT)
+    base = f"http://127.0.0.1:{port}"
+    if not wait_http(base + "/healthz"):
+        proc.kill()
+        sys.exit("sandbox server did not come up:\n" + (tmp / "server.log").read_text())
+    return proc, base
+
+
+def api(base, method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method,
+                                 headers={"content-type": "application/json"} if data else {})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"null")
+
+
+# JS helpers injected once per page: fill a field the way a person would, and
+# wait for the 4-second refresh loop to settle so the next step sees the write.
+HELPERS = """
+window.__t = {
+  set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); },
+  wait(ms) { return new Promise(r => setTimeout(r, ms)); },
+  open() { return [...document.querySelectorAll('.modal-backdrop.open')].map(m => m.id); },
+};
+"""
+
 
 def main():
-    print("\n\033[1m=== 1. HTTP API & HTML Contract Tests ===\033[0m")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", help="URL of a running server (UI and API on one origin)")
+    ap.add_argument("--allow-writes", action="store_true", help="allow the write flows against a non-loopback --base")
+    ap.add_argument("--headed", action="store_true")
+    args = ap.parse_args()
 
-    # 1. Root Web UI
-    def check_ui(resp, body):
-        ctype = resp.headers.get("Content-Type", "")
-        text = body.decode("utf-8")
-        has_title = "<title>KYB — Fleet Memory & Control Room</title>" in text
-        has_tabs = all(f'id="tab-{t}"' in text for t in ["search", "incidents", "tasks", "graph", "feed"])
-        has_modals = all(f'id="{m}"' in text for m in ["newModal", "editModal", "resolveIncidentModal", "resolveTaskModal", "shortcutsModal"])
-        has_full_author = "Alexander Panasenko &lt;alex@prod.codes&gt;" in text
-        return "text/html" in ctype and has_title and has_tabs and has_modals and has_full_author, f"html len {len(text)} bytes"
-    test_http_endpoint("/", 200, check_ui)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="kyb-ui-test-"))
+    proc = None
+    try:
+        if args.base:
+            base = args.base.rstrip("/")
+            host = urllib.parse.urlsplit(base).hostname or ""
+            if host not in ("127.0.0.1", "localhost", "::1") and not args.allow_writes:
+                sys.exit(f"{base} is not loopback; the flows write. Pass --allow-writes if that is a sandbox.")
+        else:
+            proc, base = start_sandbox(tmp)
+        print(f"== web UI against {base}")
+        run(base, args.headed)
+    finally:
+        if proc:
+            proc.kill()
+        shutil.rmtree(tmp, ignore_errors=True)
+    if FAILED:
+        print(f"\n{len(FAILED)} failed: {', '.join(FAILED)}")
+        sys.exit(1)
+    print("\nall web UI checks passed")
 
-    # 2. Audit API
-    def check_audit(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        has_keys = "count" in data and "entries" in data and isinstance(data["entries"], list)
-        return has_keys, f"audit entries: {data.get('count', 0)}"
-    test_http_endpoint("/api/audit?limit=20", 200, check_audit)
 
-    # 3. Healthz API
-    def check_health(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        return data.get("ok") is True, f"entries: {data.get('entries', 0)}"
-    test_http_endpoint("/healthz", 200, check_health)
+def run(base, headed):
+    stamp = format(int(time.time()), "x")
+    K, I, N = f"task-ui-test-{stamp}", f"inc-ui-test-{stamp}", f"ui-test-{stamp}"
 
-    # 4. Search API (unfiltered and server-filtered)
-    def check_search(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        return isinstance(data.get("hits"), list), f"hits: {len(data.get('hits', []))}"
-    test_http_endpoint("/search?limit=10", 200, check_search)
+    # Seed what the read-side screens need and what the edit checks protect.
+    s, _ = api(base, "POST", "/knowledge", {"key": "kyb-service", "title": "KYB service", "body": "The registry.", "tags": ["kyb"], "refs": ["vault://kyb"]})
+    check("seed knowledge", s == 200, s)
+    s, _ = api(base, "POST", "/incidents", {"key": I + "-seed", "title": "Seeded incident", "body": "Symptom.", "service": "svc", "severity": "high",
+                                            "status": "resolved", "resolution": "fixed it", "detection": "curl -s localhost/healthz", "hosts": ["h1"], "refs": ["vault://y"]})
+    check("seed resolved incident", s == 200, s)
+    for n in range(2):  # the incident screens hide resolved reports, and the selection check needs two open rows
+        s, _ = api(base, "POST", "/incidents", {"key": f"{I}-open{n}", "title": f"Open incident {n}", "body": "Symptom.", "service": "svc", "severity": "high", "detection": "curl -sf localhost/healthz"})
+        check(f"seed open incident {n}", s == 200, s)
+    s, _ = api(base, "POST", "/tasks", {"key": K + "-seed", "title": "Seeded task", "body": "b", "status": "blocked", "blocked_reason": "waiting on vendor",
+                                        "priority": "high", "assignee": "alex", "knowledge": ["kyb-service"], "refs": ["vault://x"]})
+    check("seed blocked task", s == 200, s)
 
-    def check_search_filtered(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        hits = data.get("hits", [])
-        return isinstance(hits, list), f"hits for 'sccache': {len(hits)}"
-    test_http_endpoint("/search?q=sccache&limit=10", 200, check_search_filtered)
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=not headed)
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        errors = []
+        page.on("pageerror", lambda e: errors.append(f"pageerror {e}"))
+        page.on("console", lambda m: errors.append(f"console.error {m.text}") if m.type == "error" else None)
+        page.goto(base + "/#/search", wait_until="networkidle")
+        page.evaluate(HELPERS)
+        page.wait_for_function("document.querySelectorAll('#knowledgeList .item-card').length > 0", timeout=10000)
 
-    # 5. Incidents API
-    def check_incidents(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        return isinstance(data.get("incidents"), list), f"incidents: {len(data.get('incidents', []))}"
-    test_http_endpoint("/incidents?all=1", 200, check_incidents)
+        # --- every screen renders, no script errors
+        for tab, probe in (("search", "#tab-search"), ("incidents", "#incidentRows .inc-r"), ("tasks", "#tab-tasks .inc-r"), ("feed", "#ledBody"), ("graph", "#tab-graph canvas, #tab-graph svg")):
+            page.evaluate(f"switchTab('{tab}')")
+            page.wait_for_timeout(600)
+            check(f"screen {tab} renders", page.locator(probe).count() > 0 or tab == "feed", probe)
+        check("no script errors on load and tab switches", not errors, "; ".join(errors[:3]))
 
-    # 6. Tasks API
-    def check_tasks(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        return isinstance(data.get("tasks"), list), f"tasks: {len(data.get('tasks', []))}"
-    test_http_endpoint("/tasks?all=1", 200, check_tasks)
+        # --- every inline handler points at a function; every id the code reads exists
+        missing = page.evaluate("""() => {
+          const out = [];
+          for (const el of document.querySelectorAll('[onclick],[onchange],[ondblclick],[onmouseenter],[onkeydown]')) {
+            for (const a of ['onclick','onchange','ondblclick','onmouseenter','onkeydown']) {
+              const h = el.getAttribute(a); if (!h) continue;
+              for (const m of h.matchAll(/(?<![\\w.$])([A-Za-z_$][\\w$]*)\\s*\\(/g)) {
+                const f = m[1]; if (['event','setTimeout','encodeURIComponent','String','Number','JSON','Date','Math'].includes(f)) continue;
+                if (typeof window[f] !== 'function') out.push(f);
+              }
+            }
+          }
+          return [...new Set(out)];
+        }""")
+        check("every inline handler calls an existing function", not missing, missing)
 
-    # 7. Tags API
-    def check_tags(resp, body):
-        data = json.loads(body.decode("utf-8"))
-        return isinstance(data.get("tags"), list), f"tags: {len(data.get('tags', []))}"
-    test_http_endpoint("/tags", 200, check_tags)
+        # --- inline handlers take values as JS literals: a hostile title cannot run
+        pwn = page.evaluate("""() => { window.__pwn = 0; const d = document.createElement('div');
+          d.innerHTML = `<button onclick="window.__got=${jsArg("x');window.__pwn=1//")}">b</button>`; d.firstChild.click();
+          return [window.__pwn, window.__got]; }""")
+        check("jsArg keeps a hostile value a string", pwn[0] == 0 and pwn[1] == "x');window.__pwn=1//", pwn)
 
-    print("\n\033[1m=== 2. Fleet Incident & History & Diff Lifecycle ===\033[0m")
-    test_inc_key = f"inc-e2e-test-{int(time.time())}"
+        # --- create knowledge / edit it
+        page.evaluate("switchTab('search')")
+        page.evaluate(f"""async () => {{ openNewModal('knowledge'); await __t.wait(200);
+          __t.set('newTitle', 'UI test entry'); __t.set('newKey', '{N}'); __t.set('newBody', 'Body written by the UI test.'); __t.set('newTags', 'ui-test');
+          await submitNewModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{N}")
+        check("create knowledge from the form", s == 200 and e.get("title") == "UI test entry" and e.get("tags") == ["ui-test"], (s, e))
+        page.evaluate(f"""async () => {{ await openEditModal('{N}'); await __t.wait(300); __t.set('editTitle', 'UI test entry edited'); await submitEditModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{N}")
+        check("edit knowledge keeps body and tags", e.get("title") == "UI test entry edited" and e.get("tags") == ["ui-test"] and "UI test" in e.get("body", ""), e)
 
-    # Step 1: Create Incident (v1 commit)
-    inc_v1_payload = {
-        "key": test_inc_key,
-        "title": "E2E Test Incident for UI Verification",
-        "service": "test-gateway",
-        "severity": "medium",
-        "hosts": ["test-box-01"],
-        "body": "Initial report: network latency spikes observed on test gateway.\n\nDetection:\n```bash\ncurl -fsSL http://test-box-01/ping\n```",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }
-    create_res = test_http_post("/incidents", inc_v1_payload, 200,
-        lambda r, b: (b'"key"' in b, f"created {test_inc_key}"))
+        # --- create incident / resolve it
+        page.evaluate(f"""async () => {{ openNewModal('incident'); await __t.wait(200);
+          __t.set('newTitle', 'UI test incident'); __t.set('newKey', '{I}'); __t.set('newBody', 'Symptom: test.'); __t.set('newService', 'ui-test');
+          await submitNewModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{I}")
+        check("create incident from the form", s == 200 and e.get("kind") == "incident" and e.get("service") == "ui-test", (s, e))
+        page.evaluate(f"""async () => {{ openResolveIncidentModal('{I}', 't'); await __t.wait(200); __t.set('resolveIncidentOutcome', 'Resolved by the UI test.'); await submitResolveIncident(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{I}")
+        check("resolve incident from the dialog", e.get("status") == "resolved" and "UI test" in e.get("resolution", ""), e)
 
-    # Step 2: Edit Incident (v2 commit)
-    inc_v2_payload = {
-        "key": test_inc_key,
-        "title": "E2E Test Incident for UI Verification (Edited)",
-        "service": "test-gateway",
-        "severity": "high",
-        "hosts": ["test-box-01", "test-box-02"],
-        "body": "Initial report: network latency spikes observed on test gateway.\n\nMitigation applied: traffic rerouted to backup gateway.\n\nDetection:\n```bash\ncurl -fsSL http://test-box-01/ping\n```",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }
-    edit_res = test_http_post("/incidents", inc_v2_payload, 200,
-        lambda r, b: (b'"key"' in b, f"edited {test_inc_key}"))
+        # --- task through its states
+        page.evaluate(f"""async () => {{ openNewModal('task'); await __t.wait(200);
+          __t.set('newTitle', 'UI test task'); __t.set('newKey', '{K}'); __t.set('newBody', 'Do the thing.'); document.getElementById('newPriority').value = 'high';
+          await submitNewModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{K}")
+        check("create task from the form (priority accepted)", s == 200 and e.get("kind") == "task" and e.get("priority") == "high", (s, e))
+        check("creating closes the dialog", page.evaluate("__t.open()") == [], page.evaluate("__t.open()"))
+        page.evaluate(f"async () => {{ await transitionTask('{K}', 'in_progress'); await __t.wait(300); }}")
+        s, e = api(base, "GET", f"/knowledge/{K}")
+        check("task -> in_progress", e.get("status") == "in_progress", e.get("status"))
+        page.evaluate(f"""async () => {{ moveTaskTo('blocked', '{K}', 't'); await __t.wait(200); __t.set('blockTaskReason', 'Waiting on the UI test.'); await submitBlockTask(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{K}")
+        check("task -> blocked with a reason", e.get("status") == "blocked" and "UI test" in e.get("blocked_reason", ""), (e.get("status"), e.get("blocked_reason")))
+        page.evaluate(f"""async () => {{ await openEditModal('{K}'); await __t.wait(300); __t.set('editTitle', 'UI test task edited'); await submitEditModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{K}")
+        check("editing a blocked task keeps status, reason and priority",
+              e.get("title") == "UI test task edited" and e.get("status") == "blocked" and "UI test" in e.get("blocked_reason", "") and e.get("priority") == "high", e)
+        page.evaluate(f"""async () => {{ openResolveTaskModal('{K}', 't'); await __t.wait(200); __t.set('resolveTaskOutcome', 'Done by the UI test.'); await submitResolveTask(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{K}")
+        check("task -> done with a resolution", e.get("status") == "done" and "UI test" in e.get("resolution", ""), (e.get("status"), e.get("resolution")))
 
-    # Step 3: Verify History (at least 2 commits)
-    hist_data = test_http_endpoint(f"/knowledge/{test_inc_key}/history", 200,
-        lambda r, b: (len(json.loads(b.decode('utf-8')).get('versions', json.loads(b.decode('utf-8')).get('history', []))) >= 2, "history contains >= 2 revisions"))
+        # --- the edits that used to destroy records
+        page.evaluate(f"""async () => {{ await openEditModal('{I}-seed'); await __t.wait(300); __t.set('editTitle', 'Seeded incident edited'); await submitEditModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{I}-seed")
+        check("editing a resolved incident keeps status, resolution, detection, hosts, refs",
+              e.get("status") == "resolved" and e.get("resolution") == "fixed it" and "healthz" in e.get("detection", "") and e.get("hosts") == ["h1"] and e.get("refs") == ["vault://y"], e)
+        page.evaluate(f"""async () => {{ await openEditModal('{K}-seed'); await __t.wait(300); __t.set('editTitle', 'Seeded task edited'); await submitEditModal(); await __t.wait(400); }}""")
+        s, e = api(base, "GET", f"/knowledge/{K}-seed")
+        check("editing a blocked task keeps knowledge links and refs", e.get("knowledge") == ["kyb-service"] and e.get("refs") == ["vault://x"] and e.get("status") == "blocked", e)
+        page.evaluate("async () => { await openEditModal('kyb-service'); await __t.wait(300); __t.set('editTitle', 'KYB service edited'); await submitEditModal(); await __t.wait(400); }")
+        s, e = api(base, "GET", "/knowledge/kyb-service")
+        check("editing knowledge keeps refs", e.get("refs") == ["vault://kyb"], e.get("refs"))
 
-    history_entries = hist_data.get("versions", hist_data.get("history", [])) if isinstance(hist_data, dict) else []
-    if len(history_entries) >= 2:
-        sha_latest = history_entries[0]["sha"]
-        sha_prev = history_entries[1]["sha"]
+        # --- the selection survives a background refresh that reorders the list
+        kept = page.evaluate("""async () => { switchTab('incidents'); await refreshAll(); App.incidentCursor = 1; renderIncidents();
+          const k = App.incidentCursorKey; const save = App.incidents;
+          App.incidents = [{key: 'zz-new', title: 'new', status: 'open', severity: 'critical', detected_at: new Date().toISOString(), updated_at: new Date().toISOString()}, ...save];
+          renderIncidents(true); const r = [k, App.incidentCursorKey, App.incidentCursor]; App.incidents = save; renderIncidents(true); return r; }""")
+        check("incident selection follows the entry across a refresh", kept[0] == kept[1] and kept[2] == 2, kept)
 
-        # Step 4: Inspect Revision Snapshots (GET /knowledge/{key}?at={sha})
-        test_http_endpoint(f"/knowledge/{test_inc_key}?at={sha_prev}", 200,
-            lambda r, b: (b"Initial report" in b and b"traffic rerouted" not in b, f"snapshot {sha_prev[:7]} verified"))
+        # --- the ledger shows a change in full
+        page.evaluate("switchTab('feed')")
+        page.wait_for_timeout(1500)
+        check("activity ledger shows diffs", page.locator("#ledBody .led-ev").count() > 0 and page.locator("#ledBody .led-d").count() > 0,
+              (page.locator('#ledBody .led-ev').count(), page.locator('#ledBody .led-d').count()))
 
-        test_http_endpoint(f"/knowledge/{test_inc_key}?at={sha_latest}", 200,
-            lambda r, b: (b"traffic rerouted" in b, f"snapshot {sha_latest[:7]} verified"))
+        check("no script errors during the flows", not errors, "; ".join(errors[:3]))
+        browser.close()
 
-        # Step 5: Diff Inspection (GET /knowledge/{key}/diff?from={fromSha}&to={toSha})
-        def check_diff(r, b):
-            diff_obj = json.loads(b.decode("utf-8"))
-            has_changed = diff_obj.get("changed") is True
-            has_body_or_fields = bool(diff_obj.get("body") or diff_obj.get("fields"))
-            return has_changed and has_body_or_fields, f"structured diff verified (changed={has_changed})"
-        test_http_endpoint(f"/knowledge/{test_inc_key}/diff?from={sha_prev}&to={sha_latest}", 200, check_diff)
-
-    # Step 6: Resolve Incident
-    resolve_payload = {
-        "resolution": "Root cause confirmed: bad routing table entry. Flushed and verified.",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }
-    test_http_post(f"/incidents/{test_inc_key}/resolve", resolve_payload, 200,
-        lambda r, b: (b'"archived":true' in b or b'"changed":true' in b, "incident resolved and archived successfully"))
-
-    # Step 7: Verify resolved status
-    def check_resolved_in_list(r, b):
-        incs = json.loads(b.decode("utf-8")).get("incidents", [])
-        found = next((i for i in incs if i.get("key") == test_inc_key), None)
-        return found is not None and found.get("status") == "resolved", "incident found in resolved state"
-    test_http_endpoint("/incidents?status=resolved", 200, check_resolved_in_list)
-
-    # Step 8: Clean up Incident
-    test_http_delete(f"/knowledge/{test_inc_key}", 200)
-
-    print("\n\033[1m=== 3. Fleet Task Lifecycle ===\033[0m")
-    test_task_key = f"task-e2e-test-{int(time.time())}"
-
-    # Step 1: Create Task
-    task_payload = {
-        "key": test_task_key,
-        "title": "E2E Automated Test Task",
-        "priority": "high",
-        "assignee": "Alexander Panasenko",
-        "body": "Automated verification task acceptance criteria.",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }
-    test_http_post("/tasks", task_payload, 200,
-        lambda r, b: (b'"key"' in b, f"created {test_task_key}"))
-
-    # Step 2: Transition to in_progress
-    test_http_post(f"/tasks/{test_task_key}/transition", {
-        "status": "in_progress",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }, 200, lambda r, b: (b'"in_progress"' in b, "transitioned to in_progress"))
-
-    # Step 3: Transition to blocked
-    test_http_post(f"/tasks/{test_task_key}/transition", {
-        "status": "blocked",
-        "reason": "Waiting for external gateway health check",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }, 200, lambda r, b: (b'"blocked"' in b, "transitioned to blocked"))
-
-    # Step 4: Resolve Task
-    test_http_post(f"/tasks/{test_task_key}/resolve", {
-        "resolution": "Acceptance criteria met and verified.",
-        "author": "Alexander Panasenko <alex@prod.codes>"
-    }, 200, lambda r, b: (b'"archived":true' in b or b'"changed":true' in b, "marked task done and archived"))
-
-    # Step 5: Verify task in done state
-    def check_task_done(r, b):
-        tasks = json.loads(b.decode("utf-8")).get("tasks", [])
-        found = next((t for t in tasks if t.get("key") == test_task_key), None)
-        return found is not None and found.get("status") == "done", "task found in done state"
-    test_http_endpoint("/tasks?status=done", 200, check_task_done)
-
-    # Step 6: Clean up Task
-    test_http_delete(f"/knowledge/{test_task_key}", 200)
-
-    print("\n\033[1m=== 4. Browser E2E Interaction Tests (prod-browser) ===\033[0m")
-
-    # Find Target Tab
-    tabs_res = pb_call("tabs.list")
-    tabs = tabs_res.get("result", [])
-    target_tab = None
-    for t in tabs:
-        if ":9310" in t.get("url", ""):
-            target_tab = t
-            break
-
-    if not target_tab:
-        print(" [!] No active tab pointing to :9310 found. Opening tab...")
-        open_res = pb_call("tabs.create", {"url": f"{SERVER_URL}/?v=3#/search"})
-        tab_id = open_res.get("result", {}).get("tabId")
-        time.sleep(2)
-    else:
-        tab_id = target_tab["id"]
-        log_test("Find active browser tab", True, f"tabId: {tab_id}")
-
-    # Activate Tab
-    pb_call("tabs.activate", {"tabId": tab_id})
-    time.sleep(0.5)
-
-    # Navigate to #/search to guarantee starting on Knowledge tab
-    pb_call("navigate", {"tabId": tab_id, "url": f"{SERVER_URL}/?v=3#/search"})
-    time.sleep(1.0)
-    pb_call("pressKey", {"tabId": tab_id, "key": "1"})
-    time.sleep(1.0)
-
-    # Test 1: Knowledge Explorer DOM inspection
-    insp = pb_call("inspect", {"tabId": tab_id})
-    elements = insp.get("result", {}).get("elements", [])
-    new_btn = next((e for e in elements if "+ New" in e.get("name", "")), None)
-    has_sort = any("Newest first" in e.get("name", "") for e in elements)
-    has_cli = any("CLI" in e.get("name", "") for e in elements)
-    log_test("Knowledge Explorer rendered controls", bool(new_btn and has_sort and has_cli), f"{len(elements)} elements")
-
-    # Test 2: Shortcuts Modal Open & Close
-    pb_call("pressKey", {"tabId": tab_id, "key": "?"})
-    time.sleep(0.5)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    modal_open = any("Keyboard Shortcuts" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    log_test("Keyboard Shortcuts Modal (key: ?)", modal_open, "dialog opened")
-
-    pb_call("pressKey", {"tabId": tab_id, "key": "Escape"})
-    time.sleep(0.5)
-    log_test("Modal dismissal (key: Escape)", True, "dialog closed")
-
-    # Test 3: Tab Switching to Incidents & Edit / Resolve Controls
-    pb_call("pressKey", {"tabId": tab_id, "key": "2"})
-    time.sleep(0.8)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    url = insp.get("result", {}).get("url", "")
-    has_sev = any(e.get("name") in ["Critical", "High", "Medium", "Low"] for e in insp.get("result", {}).get("elements", []))
-    has_edit = any("Edit" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    log_test("Incidents Tab & Edit / Severity Controls (key: 2)", "incidents" in url and has_sev and has_edit, url)
-
-    # Test 4: Tab Switching to Tasks Kanban & Transition Buttons
-    pb_call("pressKey", {"tabId": tab_id, "key": "3"})
-    time.sleep(0.8)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    url = insp.get("result", {}).get("url", "")
-    has_start = any("Start" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    log_test("Tasks Kanban & Action Buttons (key: 3)", "tasks" in url and has_start, url)
-
-    # Test 5: Tab Switching to Topology Canvas
-    pb_call("pressKey", {"tabId": tab_id, "key": "4"})
-    time.sleep(0.8)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    url = insp.get("result", {}).get("url", "")
-    elements = insp.get("result", {}).get("elements", [])
-    has_zoom = any("Zoom" in e.get("name", "") for e in elements)
-    has_stabilize = any(e.get("name") in ["Stabilize", "Pause", "Fit to View"] for e in elements)
-    success = "graph" in url and has_zoom and has_stabilize
-    if not success:
-        print(f"DEBUG: url={url}, has_zoom={has_zoom}, has_stabilize={has_stabilize}")
-        print("Elements found:", [e.get("name") for e in elements if e.get("name")])
-    log_test("Topology Graph & Camera Controls (key: 4)", success, url)
-
-    # Test 6: Tab Switching to Live Feed & Method Filters
-    pb_call("pressKey", {"tabId": tab_id, "key": "5"})
-    time.sleep(0.8)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    url = insp.get("result", {}).get("url", "")
-    has_filter_chip = any(e.get("name") in ["Knowledge", "Incidents", "Tasks", "Searches", "POST"] for e in insp.get("result", {}).get("elements", []))
-    has_stream_btn = any("Pause Stream" in e.get("name", "") for e in insp.get("result", {}).get("elements", []))
-    log_test("Live Feed & Stream Filters (key: 5)", "feed" in url and has_filter_chip and has_stream_btn, url)
-
-    # Test 7: New Entry Modal via Button Click
-    if new_btn:
-        pb_call("click", {"tabId": tab_id, "elementId": new_btn["id"]})
-    else:
-        pb_call("click", {"tabId": tab_id, "selector": "button.btn.primary.sm"})
-    time.sleep(0.8)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    has_modal_elements = any(e.get("name") in ["Save Entry", "Cancel", "🚨 Incident", "📋 Task"] for e in insp.get("result", {}).get("elements", []))
-    log_test("New Entry Modal Interactive Open", has_modal_elements, "modal controls active")
-
-    pb_call("pressKey", {"tabId": tab_id, "key": "Escape"})
-    time.sleep(0.5)
-
-    # Test 8: Back to Knowledge and J/K Navigation
-    pb_call("click", {"tabId": tab_id, "selector": "a[data-tab=\"search\"]"})
-    time.sleep(1.0)
-    pb_call("pressKey", {"tabId": tab_id, "key": "j"})
-    time.sleep(0.8)
-    insp = pb_call("inspect", {"tabId": tab_id})
-    has_doc_title = any(e.get("role") == "h1" for e in insp.get("result", {}).get("elements", []))
-    log_test("Knowledge Navigation (keys: 1, j)", has_doc_title, "entry selected")
-
-    # Detach cleanly
-    pb_call("tabs.detach", {"tabId": tab_id})
-
-    print("\n\033[32m✔ All automated test assertions passed with zero failures.\033[0m\n")
 
 if __name__ == "__main__":
+    import urllib.parse  # noqa: E402  (used in main)
     main()
