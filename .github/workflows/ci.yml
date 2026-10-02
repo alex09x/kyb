@@ -106,12 +106,16 @@ jobs:
           kill $SERVER_PID
       # The web UI in a real browser: every screen, every write a person can make
       # from it, against a sandbox server the test starts itself.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install Playwright
         run: |
-          python3 -m pip install --quiet playwright
-          python3 -m playwright install --with-deps chromium
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet playwright
+          python -m playwright install --with-deps chromium
       - name: Exercise the web UI end to end
-        run: KYB_SERVER_BIN=./target/release/kyb-server python3 scripts/test-web-ui.py
+        run: KYB_SERVER_BIN=./target/release/kyb-server python scripts/test-web-ui.py
 
   # Tag builds only. Branch and PR runs are untouched by this job.
   #

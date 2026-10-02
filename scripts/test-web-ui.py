@@ -182,7 +182,7 @@ def run(base, headed):
             check(f"screen {tab} renders", page.locator(probe).count() > 0 or tab == "feed", probe)
         check("no script errors on load and tab switches", not errors, "; ".join(errors[:3]))
 
-        # --- every inline handler points at a function; every id the code reads exists
+        # --- every inline handler points at a function (the ids the code reads are checked by use, in the flows below)
         missing = page.evaluate("""() => {
           const out = [];
           for (const el of document.querySelectorAll('[onclick],[onchange],[ondblclick],[onmouseenter],[onkeydown]')) {
@@ -245,6 +245,9 @@ def run(base, headed):
         page.evaluate(f"""async () => {{ openResolveTaskModal('{K}', 't'); await __t.wait(200); __t.set('resolveTaskOutcome', 'Done by the UI test.'); await submitResolveTask(); await __t.wait(400); }}""")
         s, e = api(base, "GET", f"/knowledge/{K}")
         check("task -> done with a resolution", e.get("status") == "done" and "UI test" in e.get("resolution", ""), (e.get("status"), e.get("resolution")))
+        page.evaluate(f"async () => {{ await moveTaskTo('open', '{K}', 't'); await __t.wait(300); }}")
+        s, e = api(base, "GET", f"/knowledge/{K}")
+        check("reopen a done task", e.get("status") == "open" and e.get("title") == "UI test task edited" and e.get("priority") == "high", (e.get("status"), e.get("title"), e.get("priority")))
 
         # --- the edits that used to destroy records
         page.evaluate(f"""async () => {{ await openEditModal('{I}-seed'); await __t.wait(300); __t.set('editTitle', 'Seeded incident edited'); await submitEditModal(); await __t.wait(400); }}""")
