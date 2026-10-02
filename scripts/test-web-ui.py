@@ -245,7 +245,7 @@ def run(base, headed):
         page.evaluate(f"""async () => {{ openResolveTaskModal('{K}', 't'); await __t.wait(200); __t.set('resolveTaskOutcome', 'Done by the UI test.'); await submitResolveTask(); await __t.wait(400); }}""")
         s, e = api(base, "GET", f"/knowledge/{K}")
         check("task -> done with a resolution", e.get("status") == "done" and "UI test" in e.get("resolution", ""), (e.get("status"), e.get("resolution")))
-        page.evaluate(f"async () => {{ await moveTaskTo('open', '{K}', 't'); await __t.wait(300); }}")
+        page.evaluate(f"() => moveTaskTo('open', '{K}', 't')")  # the Reopen button's handler; returns the transition promise
         s, e = api(base, "GET", f"/knowledge/{K}")
         check("reopen a done task", e.get("status") == "open" and e.get("title") == "UI test task edited" and e.get("priority") == "high", (e.get("status"), e.get("title"), e.get("priority")))
 

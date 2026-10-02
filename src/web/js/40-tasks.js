@@ -126,6 +126,8 @@
     }, true);
 
 
+    // Returns the transition's promise when there is one, so a caller can wait
+    // for the write; the two dialog branches hand off to a person and return nothing.
     function moveTaskTo(targetStatus, key, title) {
       if (!targetStatus) return;
       if (targetStatus === 'done') {
@@ -133,7 +135,7 @@
       } else if (targetStatus === 'blocked') {
         promptBlockTask(key, title);
       } else {
-        transitionTask(key, targetStatus);
+        return transitionTask(key, targetStatus);
       }
     }
 
