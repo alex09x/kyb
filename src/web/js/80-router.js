@@ -26,10 +26,13 @@
       }
     }
 
+    // A tag is a filter, not a search term: only entries carrying exactly this tag.
     function filterByTag(tag) {
       const searchEl = document.getElementById('globalSearch');
-      if (searchEl) searchEl.value = tag;
-      App.searchQuery = tag;
+      if (searchEl) searchEl.value = '#' + tag;
+      App.searchQuery = '';
+      App.tagFilter = tag;
+      App.isBackendSearchResults = false;
       switchTab('search', false);
       const targetHash = `#/search?tag=${encodeURIComponent(tag)}`;
       if (window.location.hash !== targetHash) {

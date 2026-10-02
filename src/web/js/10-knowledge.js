@@ -5,6 +5,10 @@
       else if (App.currentFilter === 'incident') list = list.filter(e => e.kind === 'incident');
       else if (App.currentFilter === 'task') list = list.filter(e => e.kind === 'task');
 
+      if (App.tagFilter) {
+        const want = App.tagFilter.toLowerCase();
+        list = list.filter(e => (e.tags || []).some(t => String(t).toLowerCase() === want));
+      }
       if (!App.isBackendSearchResults && App.searchQuery.trim()) {
         const q = App.searchQuery.toLowerCase();
         list = list.filter(e =>

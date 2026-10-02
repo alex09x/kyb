@@ -155,6 +155,8 @@ def run(base, headed):
     # Seed what the read-side screens need and what the edit checks protect.
     s, _ = api(base, "POST", "/knowledge", {"key": "kyb-service", "title": "KYB service", "body": "The registry.", "tags": ["kyb"], "refs": ["vault://kyb"]})
     check("seed knowledge", s == 200, s)
+    s, _ = api(base, "POST", "/knowledge", {"key": "mentions-kyb", "title": "Mentions the word", "body": "Talks about kyb without carrying the tag.", "tags": ["other"]})
+    check("seed decoy without the tag", s == 200, s)
     s, _ = api(base, "POST", "/incidents", {"key": I + "-seed", "title": "Seeded incident", "body": "Symptom.", "service": "svc", "severity": "high",
                                             "status": "resolved", "resolution": "fixed it", "detection": "curl -s localhost/healthz", "hosts": ["h1"], "refs": ["vault://y"]})
     check("seed resolved incident", s == 200, s)
@@ -320,7 +322,8 @@ def run(base, headed):
         check("search writes the url", page.evaluate("location.hash") == "#/search?q=entry%20edited", page.evaluate("location.hash"))
         page.evaluate("filterByTag('kyb')")
         keys = page.evaluate("[...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.dataset.key)")
-        check("filterByTag keeps only entries carrying the tag", keys == ["kyb-service"], keys)
+        check("filterByTag keeps only entries carrying the tag, not ones that merely mention it", keys == ["kyb-service"], keys)
+        check("the search box shows the tag as a tag", page.evaluate("document.getElementById('globalSearch').value") == "#kyb")
         page.evaluate("setGlobalSearchQuery('')")
         page.evaluate(f"handleCardClick(new MouseEvent('click'), '{N}', 'knowledge')")
         page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('detailBodyContent') && document.getElementById('detailBodyContent').textContent.includes('Body')", timeout=5000)
@@ -481,7 +484,8 @@ def run(base, headed):
         check("ledWho/verWho strip the e-mail", ev("[ledWho('Alexander Panasenko <a@b.c>'), ledWho(''), verWho({author: 'X <y>'}), verWho({})]") == ["Alexander Panasenko", "unknown", "X", ""])
         check("ledDay labels today and yesterday", ev(f"[ledDay(new Date({now}).toISOString()).startsWith('today'), ledDay(new Date({now} - 86400e3).toISOString()).startsWith('yesterday'), ledDay('2020-01-05T00:00:00Z').startsWith('today')]") == [True, True, False])
         check("ledTime is HH:MM", ev("/^\\d{2}:\\d{2}$/.test(ledTime(new Date().toISOString()))"))
-        check("verWhen names day, month and time", ev("/\\d/.test(verWhen({committed_at: '2026-03-04T05:06:00Z'}))"))
+        vw = ev("verWhen({committed_at: new Date(2026, 2, 4, 5, 6).toISOString()})")
+        check("verWhen names the day, a month word and HH:MM", "4" in vw and "05:06" in vw and ev(f"/[A-Za-z\u0400-\u04ff]{{3,}}/.test({vw!r})"), vw)
         check("highlightText marks matches, escapes html, and leaves text alone without a query", ev("[highlightText('a <b> c', 'b'), highlightText('x', ''), highlightText('a.b', 'a.b')]")
               == ['a &lt;<mark class="search-highlight">b</mark>&gt; c', "x", '<mark class="search-highlight">a.b</mark>'])
         check("verPrevSha walks the list it is given", ev("[verPrevSha([{sha:'c'},{sha:'b'},{sha:'a'}], 'c'), verPrevSha([{sha:'c'},{sha:'b'},{sha:'a'}], 'a'), verPrevSha([], 'x')]") == ["b", None, None])

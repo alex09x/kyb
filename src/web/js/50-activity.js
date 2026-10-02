@@ -153,6 +153,7 @@
       if (searchEl) {
         searchEl.value = q;
         App.searchQuery = q;
+        App.tagFilter = null;
         switchTab('search', false);
         const targetHash = q ? `#/search?q=${encodeURIComponent(q)}` : '#/search';
         if (window.location.hash !== targetHash) {

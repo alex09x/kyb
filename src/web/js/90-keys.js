@@ -22,6 +22,7 @@
       const searchEl = document.getElementById('globalSearch');
       searchEl.addEventListener('input', (e) => {
         App.searchQuery = e.target.value;
+        App.tagFilter = null;  // typing replaces a tag filter with a text search
         if (App.activeTab !== 'search') switchTab('search', false);
         renderKnowledgeList();
       });
