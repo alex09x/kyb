@@ -337,6 +337,12 @@ def run(base, headed):
         page.wait_for_function("document.querySelectorAll('#verList .ver-ev').length >= 2", timeout=8000)  # the edit above must show up: no stale cache
         stale = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = prefetchEntry('{N}'); App.cacheGen++; await p; return App.detailCache.has('{N}'); }}""")
         check("a prefetch that started before a write does not repopulate the cache", stale is False, stale)
+        drawn = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = selectEntry('kyb-service', false); App.selectedKey = '{N}'; await p;
+          return [[...document.querySelectorAll('.detail-tab')].map(b => b.textContent).join('|'), App.detailCache.has('kyb-service')]; }}""")
+        # the optimistic skeleton (history: 0 versions) may draw before the key changes; the fetched history must not follow it
+        check("a stale selectEntry response neither draws nor caches", drawn[1] is False and "Versions (0)" in drawn[0], drawn)
+        page.evaluate(f"selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
         check("the edited entry has two versions, each with its change", page.locator("#verList .ver-ev").count() == 2 and page.locator("#verList .ver-fld, #verList .ver-dif, #verList .ver-note").count() >= 2)
         sha = page.evaluate("App.currentHistoryList[App.currentHistoryList.length - 1].sha")
         page.evaluate(f"verToggleText('{sha}')")

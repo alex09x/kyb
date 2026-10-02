@@ -149,7 +149,9 @@
       }
 
       const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
-      if (gen === App.cacheGen) App.detailCache.set(key, { entry: entryData, history: historyList });
+      // A response from before a write, or for an entry no longer selected, is history: neither cached nor drawn.
+      if (gen !== App.cacheGen || App.selectedKey !== key) return;
+      App.detailCache.set(key, { entry: entryData, history: historyList });
       renderDetailView(entryData, historyList);
     }
 
