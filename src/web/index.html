@@ -1628,6 +1628,8 @@
     .inc-note.res { border-left-color:var(--green); } .inc-note.res b { color:var(--green); }
     .inc-note .parent { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); }
     .inc-note .parent a { color:var(--accent); text-decoration:none; }
+    .inc-note.det { border-left-color:var(--border); }
+    .inc-note.det code { font-family:var(--font-mono); font-size:11px; color:var(--text-dim); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .inc-r .acts { grid-column:3 / -1; display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 2px; }
     .inc-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
 
@@ -3672,12 +3674,19 @@
               <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">Topology</a>
             </div></div>`;
         }
+        // What makes the row actionable sits in the row; under the cursor the peek already says it.
+        const det = (inc.detection || '').trim();
+        const note = cur ? ''
+          : inc.status === 'resolved' ? (inc.resolution ? `<div class="inc-note res"><b>Resolved</b> &middot; ${escapeHtml(inc.resolution)}</div>` : '')
+          : det ? `<div class="inc-note det"><code title="${escapeHtml(det)}">${escapeHtml(det)}</code></div>`
+          : `<div class="inc-note"><b>No detection</b> &middot; nobody can tell whether it is still happening</div>`;
         return `<div class="inc-r ${cur ? 'cur' : ''} ${inc.status}" data-idx="${idx}" onclick="App.incidentCursor=${idx}; renderIncidents();" ondblclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">
             <span class="n">${idx + 1}</span>
             <span class="dot ${inc.status === 'resolved' ? 'resolved' : sev}"></span>
             <div class="t"><b>${escapeHtml(inc.title)}</b><span>${escapeHtml(inc.key)}</span></div>
             <span class="sv">${escapeHtml(inc.service || 'infrastructure')}</span>
             <span class="age">${incAgeLabel(inc)}</span>
+            ${note}
           </div>${peek}`;
       }).join('');
       const curEl = rows.querySelector('.inc-r.cur');
