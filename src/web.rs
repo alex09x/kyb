@@ -10,7 +10,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
-pub const UI_HTML: &str = include_str!("web/index.html");
+// Assembled by build.rs from src/web/{index.html,css/*,js/*}.
+pub const UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
 pub async fn serve_ui() -> impl IntoResponse {
     let content = if let Ok(path) = std::env::var("KYB_UI_PATH") {

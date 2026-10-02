@@ -16,7 +16,11 @@ export KYB_DATA="$REPO/kyb-data"
 export KYB_INDEX="$REPO/index"
 export KYB_AUDIT="$REPO/audit.jsonl"
 export KYB_ADDR="${KYB_ADDR:-127.0.0.1:9310}"
-export KYB_UI_PATH="$REPO/src/web/index.html"
+# The UI is many source files; the server serves one. Assemble once here -
+# for live editing of the UI use scripts/dev.py instead.
+mkdir -p "$REPO/target/ui"
+python3 "$REPO/scripts/build_ui.py" "$REPO/target/ui/index.html"
+export KYB_UI_PATH="$REPO/target/ui/index.html"
 
 echo "============================================================"
 echo "  🚀 Starting local kyb-server"
