@@ -2741,10 +2741,10 @@
             ${historyList.length > 1 ? `<div class="ver-line" onclick="switchDetailTab('history')">${historyList.length} versions &middot; last change ${timeAgo(historyList[0].committed_at)} &middot; <span>see what moved &rarr;</span></div>` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink('#/knowledge/${encodeURIComponent(e.key)}')">Link</button>
+            <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink(${jsArg('#/knowledge/' + encodeURIComponent(e.key))})">Link</button>
             <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, ${jsArg(e.key)})">Graph</a>
             <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit</button>
-            <button class="btn sm" onclick="copyToClipboard('kyb get ${escapeHtml(e.key)}', 'CLI command copied!')">CLI</button>
+            <button class="btn sm" onclick="copyToClipboard(${jsArg('kyb get ' + e.key)}, 'CLI command copied!')">CLI</button>
             <button class="btn sm" onclick="copyEntryBody(${jsArg(e.key)})">Markdown</button>
             <button class="btn sm" onclick="copyToClipboard(${jsArg(e.key)}, 'Key copied!')">Key</button>
           </div>
