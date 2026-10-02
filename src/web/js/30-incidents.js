@@ -123,7 +123,7 @@
         const note = cur ? ''
           : inc.status === 'resolved' ? (inc.resolution ? `<div class="inc-note res"><b>Resolved</b> &middot; ${escapeHtml(inc.resolution)}</div>` : '')
           : det ? `<div class="inc-note det"><code title="${escapeHtml(det)}">${escapeHtml(det)}</code></div>`
-          : `<div class="inc-note"><b>No detection</b> &middot; nobody can tell whether it is still happening</div>`;
+          : `<div class="inc-note"><b>no detection</b></div>`;  // the queue header above says why that matters; the row only has to show it
         return `<div class="inc-r ${cur ? 'cur' : ''} ${inc.status}" data-idx="${idx}" onclick="App.incidentCursor=${idx}; renderIncidents();" ondblclick="handleCardClick(event, ${jsArg(inc.key)}, 'knowledge')">
             <span class="n">${idx + 1}</span>
             <span class="dot ${inc.status === 'resolved' ? 'resolved' : sev}"></span>
