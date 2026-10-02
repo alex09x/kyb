@@ -411,6 +411,24 @@ def run(base, headed):
         page.evaluate("filterFleetByHub('svc:ui-test')")
         check("a hub chip searches by its service", page.evaluate("document.getElementById('globalSearch').value") == "ui-test" and page.evaluate("App.activeTab") == "search")
 
+        # the thin click wrappers behind chips and drawer links
+        page.evaluate("switchTab('graph')")
+        page.evaluate(f"handleGraphChipClick(new MouseEvent('click'), '{N}')")
+        check("a connected-node chip focuses that node", page.evaluate("document.getElementById('drawerKey').textContent") == N and page.evaluate("document.getElementById('graphDrawer').classList.contains('open')"))
+        page.evaluate(f"handleDrawerOpenFullClick(new MouseEvent('click'), '{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}' && App.activeTab === 'search'", timeout=5000)
+        check("'Open full' from the drawer lands on the entry", not page.evaluate("document.getElementById('graphDrawer').classList.contains('open')"))
+        page.evaluate("handleTagClick(new MouseEvent('click'), 'kyb')")
+        check("a tag badge filters by its tag", page.evaluate("location.hash") == "#/search?tag=kyb" and page.evaluate("[...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.dataset.key)") == ["kyb-service"])
+        page.evaluate("setGlobalSearchQuery('')")
+        page.evaluate(f"openDiffForEntry('{K}')")
+        page.wait_for_function(f"App.selectedKey === '{K}' && App.detailTab === 'history'", timeout=5000)
+        check("d/Diff from a row opens the same Versions ledger", True)
+        copied = page.evaluate("""() => { const real = navigator.clipboard; Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
+          let got = null; const ex = document.execCommand; document.execCommand = (c) => { if (c === 'copy') got = document.activeElement && document.activeElement.value; return true; };
+          copyToClipboard('fallback text', 'x'); document.execCommand = ex; Object.defineProperty(navigator, 'clipboard', {value: real, configurable: true}); return got; }""")
+        check("without the clipboard API the copy falls back to execCommand", copied == "fallback text", copied)
+
         # modals and refresh
         page.evaluate("openShortcutsModal()")
         check("? opens the shortcuts dialog", page.evaluate("__t.open()") == ["shortcutsModal"], page.evaluate("__t.open()"))
