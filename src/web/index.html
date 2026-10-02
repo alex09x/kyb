@@ -2272,8 +2272,8 @@
 
       renderHeaderStats();
       renderKnowledgeList();
-      renderIncidents();
-      renderTasks();
+      renderIncidents(true);
+      renderTasks(true);
       if (!App.feedPaused) renderFeed();
       buildTopology();
     }
@@ -2314,7 +2314,7 @@
       // Tag Pills in Explorer (Top 8 to keep view calm)
       const tagContainer = document.getElementById('tagPills');
       tagContainer.innerHTML = App.tags.slice(0, 8).map(t =>
-        `<a class="badge-tag" onclick="filterByTag('${t.tag}')">#${t.tag} <span style="opacity:0.6">${t.count}</span></a>`
+        `<a class="badge-tag" onclick="filterByTag(${jsArg(t.tag)})">#${escapeHtml(t.tag)} <span style="opacity:0.6">${t.count}</span></a>`
       ).join('');
     }
 
@@ -2397,8 +2397,8 @@
           <a href="#/knowledge/${encodeURIComponent(item.key)}" 
              class="item-card ${isSel ? 'selected' : ''}" 
              data-key="${escapeHtml(item.key)}" 
-             onmouseenter="prefetchEntry('${escapeHtml(item.key)}')" 
-             onclick="handleCardClick(event, '${escapeHtml(item.key)}', 'knowledge')">
+             onmouseenter="prefetchEntry(${jsArg(item.key)})" 
+             onclick="handleCardClick(event, ${jsArg(item.key)}, 'knowledge')">
             <div class="card-top">
               <span class="item-title">${highlightText(item.title || item.key, App.searchQuery)}</span>
               ${kindBadge}
@@ -2493,7 +2493,7 @@
                   <span>${createdAt ? timeAgo(createdAt) : 'recent'}</span>
                 </span>
                 ${e.parent_task ? `
-                  <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" class="badge-tag" onclick="handleCardClick(event, '${escapeHtml(e.parent_task)}', 'knowledge')">
+                  <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">
                     ↳ Part of ${escapeHtml(e.parent_task)}
                   </a>
                 ` : ''}
@@ -2501,40 +2501,40 @@
 
               <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 ${isOpen ? `
-                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Start Progress</button>
-                  <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Block Task</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Task</button>
+                  <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Start Progress</button>
+                  <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
+                  <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
                 ` : ''}
                 ${isProgress ? `
-                  <button class="btn sm warning" onclick="promptBlockTask('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Block Task</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Task</button>
-                  <button class="btn sm" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">Move to Backlog</button>
+                  <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
+                  <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
+                  <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>
                 ` : ''}
                 ${isBlocked ? `
-                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Unblock & Resume</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Task</button>
-                  <button class="btn sm" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">Move to Backlog</button>
+                  <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock & Resume</button>
+                  <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
+                  <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>
                 ` : ''}
                 ${isDone ? `
-                  <button class="btn sm primary" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Re-open Task</button>
+                  <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Re-open Task</button>
                 ` : ''}
-                <a href="#/tasks/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(e.key)}', 'tasks')">Kanban View →</a>
+                <a href="#/tasks/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, ${jsArg(e.key)}, 'tasks')">Kanban View →</a>
               </div>
             </div>
 
             <!-- Lifecycle Stepper -->
             <div class="lifecycle-stepper">
-              <div class="step-item ${isOpen ? 'active' : (isProgress || isDone ? 'completed' : '')}" onclick="transitionTask('${escapeHtml(e.key)}', 'open')">
+              <div class="step-item ${isOpen ? 'active' : (isProgress || isDone ? 'completed' : '')}" onclick="transitionTask(${jsArg(e.key)}, 'open')">
                 <div class="step-indicator">${isOpen ? '●' : (isProgress || isDone ? '✓' : '1')}</div>
                 <span>1. Backlog</span>
               </div>
               <div class="step-connector ${isProgress || isDone ? 'active' : ''}"></div>
-              <div class="step-item ${isProgress ? 'active' : (isDone ? 'completed' : '')}" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">
+              <div class="step-item ${isProgress ? 'active' : (isDone ? 'completed' : '')}" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">
                 <div class="step-indicator">${isProgress ? '●' : (isDone ? '✓' : '2')}</div>
                 <span>2. In Progress</span>
               </div>
               <div class="step-connector ${isDone ? 'active' : ''}"></div>
-              <div class="step-item ${isDone ? 'active completed' : ''}" onclick="openResolveTaskModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">
+              <div class="step-item ${isDone ? 'active completed' : ''}" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">
                 <div class="step-indicator">${isDone ? '✓' : '3'}</div>
                 <span>3. Done / Resolved</span>
               </div>
@@ -2581,7 +2581,7 @@
               <div class="hero-callout hero-callout-warning">
                 <div class="callout-header">
                   <strong>Blocked Reason:</strong>
-                  <button class="btn sm primary" style="padding:2px 8px; font-size:11px;" onclick="transitionTask('${escapeHtml(e.key)}', 'in_progress')">Unblock</button>
+                  <button class="btn sm primary" style="padding:2px 8px; font-size:11px;" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock</button>
                 </div>
                 <div>${escapeHtml(e.blocked_reason)}</div>
               </div>
@@ -2619,9 +2619,9 @@
 
               <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                 ${!isResolved ? `
-                  <button class="btn sm success" onclick="openResolveIncidentModal('${escapeHtml(e.key)}', '${escapeHtml(e.title)}')">Resolve Incident</button>
+                  <button class="btn sm success" onclick="openResolveIncidentModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Incident</button>
                 ` : ''}
-                <a href="#/incidents/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, '${escapeHtml(e.key)}', 'incidents')">Incidents View →</a>
+                <a href="#/incidents/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, ${jsArg(e.key)}, 'incidents')">Incidents View →</a>
               </div>
             </div>
 
@@ -2661,7 +2661,7 @@
               <div style="display:flex; align-items:center; gap:8px; margin: 10px 0; font-size:12px; flex-wrap:wrap;">
                 <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); font-weight:700;">Linked Runbooks:</span>
                 ${e.knowledge.map(k => `
-                  <a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, '${escapeHtml(k)}', 'knowledge')">
+                  <a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(k)}, 'knowledge')">
                     ${escapeHtml(k)}
                   </a>
                 `).join(' ')}
@@ -2672,7 +2672,7 @@
               <div class="block-box" style="margin-bottom:12px;">
                 <div class="block-label" style="display:flex; justify-content:space-between; align-items:center;">
                   <span>Executable Detection Check / Blast Radius Verification:</span>
-                  <button class="btn sm" style="padding:2px 6px; font-size:10.5px;" onclick="copyToClipboard('${escapeHtml(e.detection)}', 'Check command copied!')">Copy Command</button>
+                  <button class="btn sm" style="padding:2px 6px; font-size:10.5px;" onclick="copyToClipboard(${jsArg(e.detection)}, 'Check command copied!')">Copy Command</button>
                 </div>
                 <code>${escapeHtml(e.detection)}</code>
               </div>
@@ -2736,17 +2736,17 @@
             </div>
             <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title || e.key)}</h1>
             <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-              ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" style="text-decoration:none;" onclick="handleTagClick(event, '${escapeHtml(t)}')">#${escapeHtml(t)}</a>`).join('')}
+              ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" style="text-decoration:none;" onclick="handleTagClick(event, ${jsArg(t)})">#${escapeHtml(t)}</a>`).join('')}
             </div>
             ${historyList.length > 1 ? `<div class="ver-line" onclick="switchDetailTab('history')">${historyList.length} versions &middot; last change ${timeAgo(historyList[0].committed_at)} &middot; <span>see what moved &rarr;</span></div>` : ''}
           </div>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink('#/knowledge/${encodeURIComponent(e.key)}')">Link</button>
-            <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(e.key)}')">Graph</a>
-            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal('${escapeHtml(e.key)}')">Edit</button>
+            <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, ${jsArg(e.key)})">Graph</a>
+            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit</button>
             <button class="btn sm" onclick="copyToClipboard('kyb get ${escapeHtml(e.key)}', 'CLI command copied!')">CLI</button>
-            <button class="btn sm" onclick="copyEntryBody('${escapeHtml(e.key)}')">Markdown</button>
-            <button class="btn sm" onclick="copyToClipboard('${escapeHtml(e.key)}', 'Key copied!')">Key</button>
+            <button class="btn sm" onclick="copyEntryBody(${jsArg(e.key)})">Markdown</button>
+            <button class="btn sm" onclick="copyToClipboard(${jsArg(e.key)}, 'Key copied!')">Key</button>
           </div>
         </div>
 
@@ -2784,8 +2784,9 @@
     App.verDiffs = App.verDiffs || new Map();   // `${key}@${sha}` -> diff | {created:true, lines}
     App.verTextOpen = App.verTextOpen || new Set();
     App.verSnaps = App.verSnaps || new Map();
-    function verPrevSha(sha) {
-      const h = App.currentHistoryList || [];
+    // The list is passed in, never read from App here: a load that outlives a
+    // switch to another entry must still pair each version with its own parent.
+    function verPrevSha(h, sha) {
       const i = h.findIndex(v => v.sha === sha);
       return i >= 0 && i < h.length - 1 ? h[i + 1].sha : null;
     }
@@ -2804,7 +2805,7 @@
           let stat = '<span class="dim">&hellip;</span>', body = '';
           if (d && d.created) {
             stat = `<ins>+${d.lines}</ins>`;
-            body = `<div class="ver-note">created &middot; ${d.lines} lines &middot; <a href="javascript:void(0)" onclick="verToggleText('${escapeHtml(v.sha)}')">${App.verTextOpen.has(v.sha) ? 'hide' : 'show'} the document as first written</a></div>`;
+            body = `<div class="ver-note">created &middot; ${d.lines} lines &middot; <a href="javascript:void(0)" onclick="verToggleText(${jsArg(v.sha)})">${App.verTextOpen.has(v.sha) ? 'hide' : 'show'} the document as first written</a></div>`;
           } else if (d) {
             const fields = (d.fields || []).filter(f => f.field !== 'updated_at');
             const rm = (d.body?.removed || []).filter(l => l.trim()), ad = (d.body?.added || []).filter(l => l.trim());
@@ -2816,24 +2817,25 @@
           const snap = App.verTextOpen.has(v.sha) ? (App.verSnaps.get(id) ? `<div class="prose ver-text"><h3 style="margin-top:0">${escapeHtml(App.verSnaps.get(id).title || '')}</h3>${renderMarkdown(App.verSnaps.get(id).body || '')}</div>` : '<div class="ver-note">Loading&hellip;</div>') : '';
           return `<div class="ver-ev">
             <div class="ver-bh"><span class="mono vn">v${n}</span><span>${verWhen(v)}</span>${who ? `<span>${escapeHtml(who)}</span>` : ''}<span class="mono dim">${v.sha.slice(0, 7)}</span><span class="pm mono">${stat}</span>
-              ${!(d && d.created) ? `<a class="tx" href="javascript:void(0)" onclick="verToggleText('${escapeHtml(v.sha)}')">${App.verTextOpen.has(v.sha) ? 'hide text' : 'text at v' + n}</a>` : ''}</div>
+              ${!(d && d.created) ? `<a class="tx" href="javascript:void(0)" onclick="verToggleText(${jsArg(v.sha)})">${App.verTextOpen.has(v.sha) ? 'hide text' : 'text at v' + n}</a>` : ''}</div>
             ${body}${snap}
           </div>`;
         }).join('');
       verLoadDiffs();
     }
     async function verLoadDiffs() {
-      const key = App.verKey, h = (App.currentHistoryList || []).slice(0, 25);
+      const key = App.verKey, all = (App.currentHistoryList || []).slice(), h = all.slice(0, 25);
       const want = h.filter(v => !App.verDiffs.has(`${key}@${v.sha}`));
       const textWant = h.filter(v => App.verTextOpen.has(v.sha) && !App.verSnaps.has(`${key}@${v.sha}`));
       if (!want.length && !textWant.length) return;
       await Promise.all([
         ...want.map(async v => {
-          const prev = verPrevSha(v.sha);
+          const prev = verPrevSha(all, v.sha);
           let d = null;
           if (prev) d = await apiFetch(`/knowledge/${encodeURIComponent(key)}/diff?from=${prev}&to=${v.sha}`);
-          else { const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`); if (snap) App.verSnaps.set(`${key}@${v.sha}`, snap); d = { created: true, lines: (snap?.body || '').split('\n').filter(l => l.trim()).length }; }
-          App.verDiffs.set(`${key}@${v.sha}`, d || { fields: [], body: { added: [], removed: [] } });
+          else { const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`); if (snap) { App.verSnaps.set(`${key}@${v.sha}`, snap); d = { created: true, lines: (snap.body || '').split('\n').filter(l => l.trim()).length }; } }
+          // a failed request is not a version with no changes: leave it unloaded
+          if (d) App.verDiffs.set(`${key}@${v.sha}`, d);
         }),
         ...textWant.map(async v => { const snap = await apiFetch(`/knowledge/${encodeURIComponent(key)}?at=${v.sha}`); if (snap) App.verSnaps.set(`${key}@${v.sha}`, snap); }),
       ]);
@@ -3385,7 +3387,7 @@
           <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); display:flex; align-items:center; gap:6px;">
             Git Revision History & Timeline
           </span>
-          <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(key)}')">Full History View →</button>
+          <button class="btn sm" onclick="openHistoryForEntry(${jsArg(key)})">Full History View →</button>
         </div>
         <div style="color:var(--text-muted); font-size:12px; padding:8px 0;">Loading git revisions...</div>
       `;
@@ -3404,8 +3406,8 @@
               Git Revision History (${versions.length} revision${versions.length === 1 ? '' : 's'})
             </span>
             <div style="display:flex; gap:6px;">
-              <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(key)}')">Compare Diff</button>
-              <button class="btn sm primary" onclick="openHistoryForEntry('${escapeHtml(key)}')">Full History View →</button>
+              <button class="btn sm" onclick="openDiffForEntry(${jsArg(key)})">Compare Diff</button>
+              <button class="btn sm primary" onclick="openHistoryForEntry(${jsArg(key)})">Full History View →</button>
             </div>
           </div>
           <div style="display:flex; flex-direction:column; gap:6px;">
@@ -3419,9 +3421,9 @@
                 </div>
                 <div style="display:flex; gap:4px; align-items:center;">
                   ${idx < versions.length - 1 ? `
-                    <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit('${escapeHtml(key)}', '${escapeHtml(h.sha)}')">Diff vs Prev</button>
+                    <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit(${jsArg(key)}, ${jsArg(h.sha)})">Diff vs Prev</button>
                   ` : `
-                    <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit('${escapeHtml(key)}', '${escapeHtml(h.sha)}')">Initial Diff</button>
+                    <button class="btn sm" onclick="event.stopPropagation(); openDiffForCommit(${jsArg(key)}, ${jsArg(h.sha)})">Initial Diff</button>
                   `}
                 </div>
               </div>
@@ -3449,7 +3451,7 @@
               <span style="font-family:var(--font-mono); font-size:12px; margin-left:6px;">commit ${sha.slice(0, 7)}</span>
               <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${escapeHtml(snap.author || '')}</span>
             </div>
-            <button class="btn sm" onclick="selectEntry('${escapeHtml(key)}')">Back to Head</button>
+            <button class="btn sm" onclick="selectEntry(${jsArg(key)})">Back to Head</button>
           </div>
           <div class="prose">${renderMarkdown(snap.body)}</div>
         `;
@@ -3611,7 +3613,7 @@
 
     function incClearCell() { App.incidentQueue = null; App.incidentCursor = 0; renderIncidents(); }
 
-    function renderIncidents() {
+    function renderIncidents(keepSelection) {
       const open = App.incidents.filter(i => i.status !== 'resolved');
       const crit = open.filter(i => i.severity === 'critical').length;
       const high = open.filter(i => i.severity === 'high').length;
@@ -3651,7 +3653,10 @@
          <span class="cnt">${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' &middot; open only' : ''}</span>`;
 
       // ---- rows + peek under the cursor
+      // A background refresh may reorder the list; the selection is an incident, not a row number.
+      if (keepSelection && App.incidentCursorKey) { const at = list.findIndex(i => i.key === App.incidentCursorKey); if (at >= 0) App.incidentCursor = at; }
       if (App.incidentCursor == null || App.incidentCursor >= list.length) App.incidentCursor = 0;
+      App.incidentCursorKey = list.length ? list[App.incidentCursor].key : null;
       const rows = document.getElementById('incidentRows');
       if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the queue filter.</div>`; return; }
       rows.innerHTML = list.map((inc, idx) => {
@@ -3666,12 +3671,12 @@
             <div class="k">${inc.status} &middot; ${escapeHtml(inc.service || 'infrastructure')}${(inc.hosts || []).length ? ' &middot; ' + escapeHtml(inc.hosts.join(', ')) : ''} &middot; detected ${timeAgo(inc.detected_at || inc.started_at)}${inc.open_followups ? ` &middot; ${inc.open_followups} open follow-up${inc.open_followups > 1 ? 's' : ''}` : ''}</div>
             ${inc.resolution ? `<div><span style="color:var(--green)">Resolution:</span> ${escapeHtml(inc.resolution)}</div>` : ''}
             <div class="row">
-              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">&#9166; Full report</a>
-              ${inc.status !== 'resolved' ? `<button class="btn sm" onclick="event.stopPropagation(); openResolveIncidentModal('${escapeHtml(inc.key)}', '${escapeHtml(inc.title)}')">r Resolve</button>` : ''}
-              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry('${escapeHtml(inc.key)}')">d Diff</button>
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry('${escapeHtml(inc.key)}')">h History${hist ? ` (${hist.length})` : ''}</button>
-              <button class="btn sm" onclick="event.stopPropagation(); openEditModal('${escapeHtml(inc.key)}')">e Edit</button>
-              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, '${escapeHtml(inc.key)}')">Topology</a>
+              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(inc.key)}, 'knowledge')">&#9166; Full report</a>
+              ${inc.status !== 'resolved' ? `<button class="btn sm" onclick="event.stopPropagation(); openResolveIncidentModal(${jsArg(inc.key)}, ${jsArg(inc.title)})">r Resolve</button>` : ''}
+              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry(${jsArg(inc.key)})">d Diff</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry(${jsArg(inc.key)})">h History${hist ? ` (${hist.length})` : ''}</button>
+              <button class="btn sm" onclick="event.stopPropagation(); openEditModal(${jsArg(inc.key)})">e Edit</button>
+              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, ${jsArg(inc.key)})">Topology</a>
             </div></div>`;
         }
         // What makes the row actionable sits in the row; under the cursor the peek already says it.
@@ -3680,7 +3685,7 @@
           : inc.status === 'resolved' ? (inc.resolution ? `<div class="inc-note res"><b>Resolved</b> &middot; ${escapeHtml(inc.resolution)}</div>` : '')
           : det ? `<div class="inc-note det"><code title="${escapeHtml(det)}">${escapeHtml(det)}</code></div>`
           : `<div class="inc-note"><b>No detection</b> &middot; nobody can tell whether it is still happening</div>`;
-        return `<div class="inc-r ${cur ? 'cur' : ''} ${inc.status}" data-idx="${idx}" onclick="App.incidentCursor=${idx}; renderIncidents();" ondblclick="handleCardClick(event, '${escapeHtml(inc.key)}', 'knowledge')">
+        return `<div class="inc-r ${cur ? 'cur' : ''} ${inc.status}" data-idx="${idx}" onclick="App.incidentCursor=${idx}; renderIncidents();" ondblclick="handleCardClick(event, ${jsArg(inc.key)}, 'knowledge')">
             <span class="n">${idx + 1}</span>
             <span class="dot ${inc.status === 'resolved' ? 'resolved' : sev}"></span>
             <div class="t"><b>${escapeHtml(inc.title)}</b><span>${escapeHtml(inc.key)}</span></div>
@@ -3795,7 +3800,7 @@
       return list;
     }
 
-    function renderTasks() {
+    function renderTasks(keepSelection) {
       const top = document.getElementById('taskTop');
       if (!top) return;
       const live = App.tasks.filter(TASK_LIVE);
@@ -3825,7 +3830,9 @@
         `<span class="p">kyb</span><span>${parts.join(' ')}</span><span class="cur"></span>
          <span class="cnt">${list.length} of ${App.tasks.length}${f === 'live' ? ' &middot; live only' : ''}</span>`;
 
+      if (keepSelection && App.taskCursorKey) { const at = list.findIndex(t => t.key === App.taskCursorKey); if (at >= 0) App.taskCursor = at; }
       if (App.taskCursor == null || App.taskCursor >= list.length) App.taskCursor = 0;
+      App.taskCursorKey = list.length ? list[App.taskCursor].key : null;
       const rows = document.getElementById('taskRows');
       if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the queue filter.</div>`; return; }
       rows.innerHTML = list.map((t, idx) => {
@@ -3836,22 +3843,22 @@
         const dot = done ? 'resolved' : pr === 'critical' ? 'critical' : pr === 'high' ? 'high' : '';
         const age = Math.max(0, Math.floor((Date.now() - new Date(t.updated_at || 0).getTime()) / 86400e3));
         const note = st === 'blocked' && t.blocked_reason
-          ? `<div class="inc-note"><b>Blocked</b> &middot; ${escapeHtml(t.blocked_reason)}${t.parent_task ? ` <span class="parent">&middot; part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, '${escapeHtml(t.parent_task)}', 'knowledge')">${escapeHtml(t.parent_task)}</a></span>` : ''}</div>`
+          ? `<div class="inc-note"><b>Blocked</b> &middot; ${escapeHtml(t.blocked_reason)}${t.parent_task ? ` <span class="parent">&middot; part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span>` : ''}</div>`
           : done && t.resolution ? `<div class="inc-note res"><b>${st === 'dropped' ? 'Dropped' : 'Done'}</b> &middot; ${escapeHtml(t.resolution)}</div>`
-          : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, '${escapeHtml(t.parent_task)}', 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
+          : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
         const acts = cur ? `<div class="acts" onclick="event.stopPropagation()">
-            <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">&#9166; Doc</a>
-            ${!done ? `<select class="form-select" onchange="moveTaskTo(this.value, '${escapeHtml(t.key)}', '${escapeHtml(t.title)}'); this.value='';" style="padding:2px 6px; font-size:11px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
+            <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">&#9166; Doc</a>
+            ${!done ? `<select class="form-select" onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';" style="padding:2px 6px; font-size:11px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
               <option value="" disabled selected>m Move to…</option>
               <option value="open" ${st === 'open' ? 'disabled' : ''}>Open</option>
               <option value="in_progress" ${st === 'in_progress' ? 'disabled' : ''}>In progress</option>
               <option value="blocked" ${st === 'blocked' ? 'disabled' : ''}>Blocked</option></select>
-            <button class="btn sm" onclick="openResolveTaskModal('${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">x Done</button>` : `<button class="btn sm" onclick="moveTaskTo('open', '${escapeHtml(t.key)}', '${escapeHtml(t.title)}')">Reopen</button>`}
-            <button class="btn sm" onclick="openEditModal('${escapeHtml(t.key)}')">e Edit</button>
-            <button class="btn sm" onclick="openDiffForEntry('${escapeHtml(t.key)}')">d Diff</button>
-            <button class="btn sm" onclick="openHistoryForEntry('${escapeHtml(t.key)}')">h History</button>
+            <button class="btn sm" onclick="openResolveTaskModal(${jsArg(t.key)}, ${jsArg(t.title)})">x Done</button>` : `<button class="btn sm" onclick="moveTaskTo('open', ${jsArg(t.key)}, ${jsArg(t.title)})">Reopen</button>`}
+            <button class="btn sm" onclick="openEditModal(${jsArg(t.key)})">e Edit</button>
+            <button class="btn sm" onclick="openDiffForEntry(${jsArg(t.key)})">d Diff</button>
+            <button class="btn sm" onclick="openHistoryForEntry(${jsArg(t.key)})">h History</button>
           </div>` : '';
-        return `<div class="inc-r task ${cur ? 'cur' : ''}" onclick="App.taskCursor=${idx}; renderTasks();" ondblclick="handleCardClick(event, '${escapeHtml(t.key)}', 'knowledge')">
+        return `<div class="inc-r task ${cur ? 'cur' : ''}" onclick="App.taskCursor=${idx}; renderTasks();" ondblclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">
             <span class="n">${idx + 1}</span>
             <span class="dot ${dot}"></span>
             <div class="t"><b>${escapeHtml(t.title)}</b><span>${escapeHtml(t.key)}${pr && pr !== 'normal' && pr !== 'medium' ? ' · ' + escapeHtml(pr) : ''}</span></div>
@@ -4090,7 +4097,7 @@
         const agents = new Set(batch.map(b => b.ip)).size;
         if (!open) return `<div class="led-fold" onclick="ledToggleFold(${idx})">⋯ ${batch.length} search${batch.length > 1 ? 'es' : ''} by ${agents} agent${agents > 1 ? 's' : ''} · <span class="acc">show</span></div>`;
         return `<div class="led-fold" onclick="ledToggleFold(${idx})">⋯ ${batch.length} searches · <span class="acc">hide</span></div>` +
-          batch.map(b => `<div class="led-q"><span class="tm" style="font-family:var(--font-mono)">${ledTime(b.ts)}</span><span></span><span class="qq"><a href="#/search?q=${encodeURIComponent(b.q)}" onclick="handleSearchFeedClick(event, '${escapeHtml(b.q)}')">${escapeHtml(b.q)}</a></span><span>${escapeHtml(b.ip || '')}</span></div>`).join('');
+          batch.map(b => `<div class="led-q"><span class="tm" style="font-family:var(--font-mono)">${ledTime(b.ts)}</span><span></span><span class="qq"><a href="#/search?q=${encodeURIComponent(b.q)}" onclick="handleSearchFeedClick(event, ${jsArg(b.q)})">${escapeHtml(b.q)}</a></span><span>${escapeHtml(b.ip || '')}</span></div>`).join('');
       };
 
       html += foldSearches(Infinity, events[0].t, 0);
@@ -4100,11 +4107,11 @@
         const [verb, cls] = ledVerb(e);
         const dotCls = cls === 'open' ? 'open' : cls === 'res' ? 'res' : e.kind === 'task' ? 'task' : '';
         const sub = [e.key, e.kind !== 'knowledge' ? e.kind : null].filter(Boolean).join(' · ');
-        html += `<div class="led-ev">
+        html += `<div class="led-ev" data-i="${i}">
           <span class="tm">${ledTime(e.ts)}</span>
           <div class="ln"><span class="dot ${dotCls}"></span><i></i></div>
           <div class="what">
-            <div class="h"><span class="led-verb ${cls}">${verb}</span><b><a href="#/knowledge/${encodeURIComponent(e.key || '')}" onclick="handleCardClick(event, '${escapeHtml(e.key || '')}', 'knowledge')">${escapeHtml(e.title || e.key || e.message || '')}</a></b></div>
+            <div class="h"><span class="led-verb ${cls}">${verb}</span><b><a href="#/knowledge/${encodeURIComponent(e.key || '')}" onclick="handleCardClick(event, ${jsArg(e.key || '')}, 'knowledge')">${escapeHtml(e.title || e.key || e.message || '')}</a></b></div>
             <span class="sub">${escapeHtml(sub)}</span>
             ${ledDiffHtml(App.ledDiffs.get(e.sha))}
           </div>
@@ -4115,9 +4122,21 @@
       });
       body.innerHTML = html;
 
-      // pull the diffs we do not have yet, then draw once more
-      ledFetchDiffs(events.slice(0, 40)).then(got => { if (got) renderFeed(); });
+      App.ledEvents = events;
+      ledLoadVisible();
     }
+    // Diffs are fetched for the rows on screen, not for the whole feed and not
+    // while the ledger is hidden: every one of these requests lands in the audit log.
+    function ledLoadVisible() {
+      const body = document.getElementById('ledBody');
+      if (!body || !body.offsetParent || App.ledLoading) return;
+      const limit = window.innerHeight + 400;
+      const want = [...body.querySelectorAll('.led-ev')].filter(r => { const b = r.getBoundingClientRect(); return b.bottom > -400 && b.top < limit; })
+        .map(r => (App.ledEvents || [])[+r.dataset.i]).filter(Boolean);
+      App.ledLoading = true;
+      ledFetchDiffs(want).then(got => { App.ledLoading = false; if (got) renderFeed(); }, () => { App.ledLoading = false; });
+    }
+    document.addEventListener('scroll', () => { clearTimeout(App.ledScrollT); App.ledScrollT = setTimeout(ledLoadVisible, 150); }, true);
     function ledToggleFold(idx) {
       App.ledOpenFolds = App.ledOpenFolds || new Set();
       App.ledOpenFolds.has(idx) ? App.ledOpenFolds.delete(idx) : App.ledOpenFolds.add(idx);
@@ -5115,7 +5134,7 @@
 
       if (connNodes.length > 0) {
         linksEl.innerHTML = connNodes.map(c => `
-          <a href="#/graph/${encodeURIComponent(c.id)}" class="badge badge-tag" style="cursor:pointer; text-decoration:none;" onclick="handleGraphChipClick(event, '${escapeHtml(c.id)}')">
+          <a href="#/graph/${encodeURIComponent(c.id)}" class="badge badge-tag" style="cursor:pointer; text-decoration:none;" onclick="handleGraphChipClick(event, ${jsArg(c.id)})">
             ${escapeHtml(c.label)}
           </a>
         `).join('');
@@ -5690,6 +5709,7 @@
       document.querySelectorAll('.tab-content').forEach(c => {
         c.classList.toggle('active', c.id === `tab-${tabName}`);
       });
+      if (typeof ledLoadVisible === 'function') ledLoadVisible();
 
       if (updateHash) {
         let targetHash = `#/${tabName}`;
@@ -5722,7 +5742,13 @@
 
     function escapeHtml(str) {
       if (!str) return '';
-      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // A value as a JS string literal for an inline handler. HTML-escaping alone is
+    // not enough there: the attribute is decoded before the script is parsed.
+    function jsArg(v) {
+      return escapeHtml(JSON.stringify(String(v == null ? '' : v)));
     }
 
     // Keyboard Shortcuts & Events
