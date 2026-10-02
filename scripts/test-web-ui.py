@@ -335,6 +335,8 @@ def run(base, headed):
         page.evaluate("switchDetailTab('history')")
         check("Versions tab shows the version ledger", vis("detailBodyHistory") and not vis("detailBodyContent") and page.evaluate("App.detailTab") == "history")
         page.wait_for_function("document.querySelectorAll('#verList .ver-ev').length >= 2", timeout=8000)  # the edit above must show up: no stale cache
+        stale = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = prefetchEntry('{N}'); App.cacheGen++; await p; return App.detailCache.has('{N}'); }}""")
+        check("a prefetch that started before a write does not repopulate the cache", stale is False, stale)
         check("the edited entry has two versions, each with its change", page.locator("#verList .ver-ev").count() == 2 and page.locator("#verList .ver-fld, #verList .ver-dif, #verList .ver-note").count() >= 2)
         sha = page.evaluate("App.currentHistoryList[App.currentHistoryList.length - 1].sha")
         page.evaluate(f"verToggleText('{sha}')")
@@ -402,9 +404,11 @@ def run(base, headed):
         cnt = page.locator("#topoSearchCount").inner_text()
         check("topology search counts matching nodes", cnt.startswith(str(page.evaluate("App.graphNodes.filter(n => n.id.toLowerCase().includes('ui-test') || n.label.toLowerCase().includes('ui-test')).length"))), cnt)
         page.evaluate("setTopoSearch('')")
-        z0 = page.evaluate("(() => { zoomGraph(2); return 1; })()")
-        page.wait_for_timeout(600)
-        check("zoomGraph moves the camera", page.evaluate("Math.round(((window.__camZoom = (typeof camera !== 'undefined' ? camera.zoom : NaN)) || 0) * 100)") > 110 or True)  # camera is module-private; the call must at least not throw
+        z0 = page.evaluate("graphCamera().zoom")
+        page.evaluate("zoomGraph(2)")
+        check("zoomGraph aims the camera at twice the zoom", abs(page.evaluate("graphCamera().targetZoom") - min(3.2, z0 * 2)) < 1e-6, page.evaluate("graphCamera()"))
+        page.wait_for_function(f"graphCamera().zoom > {z0} * 1.5", timeout=5000)
+        check("and the camera gets there", True)
         page.evaluate("resetGraphCamera(); fitGraphCamera(); toggleGraphPhysics(); unpinAllGraphNodes(); reheatSimulation(0.5)")
         page.evaluate(f"navigateToGraphNode(new MouseEvent('click'), '{N}')")
         check("Topology link from a row deep-links to the node", page.evaluate("location.hash") == f"#/graph/{N}")

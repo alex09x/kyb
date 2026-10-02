@@ -27,17 +27,20 @@
       return list;
     }
 
-    // In-memory instant detail cache
+    // In-memory instant detail cache. A write bumps the generation and clears
+    // it; a read that started before the write must not put its stale answer back.
     App.detailCache = new Map();
+    App.cacheGen = 0;
 
     async function prefetchEntry(key) {
       if (!key || App.detailCache.has(key)) return;
+      const gen = App.cacheGen;
       try {
         const [entryData, historyData] = await Promise.all([
           apiFetch(`/knowledge/${encodeURIComponent(key)}`),
           apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
         ]);
-        if (entryData) {
+        if (entryData && gen === App.cacheGen) {
           const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
           App.detailCache.set(key, { entry: entryData, history: historyList });
         }
@@ -134,6 +137,7 @@
       }
 
       // 3. Network fetch in background
+      const gen = App.cacheGen;
       const [entryData, historyData] = await Promise.all([
         apiFetch(`/knowledge/${encodeURIComponent(key)}`),
         apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
@@ -145,7 +149,7 @@
       }
 
       const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
-      App.detailCache.set(key, { entry: entryData, history: historyList });
+      if (gen === App.cacheGen) App.detailCache.set(key, { entry: entryData, history: historyList });
       renderDetailView(entryData, historyList);
     }
 
