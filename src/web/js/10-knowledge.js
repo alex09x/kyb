@@ -149,8 +149,10 @@
       }
 
       const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
-      // A response from before a write, or for an entry no longer selected, is history: neither cached nor drawn.
-      if (gen !== App.cacheGen || App.selectedKey !== key) return;
+      // Someone else was selected while this was in flight: the answer is nobody's now.
+      if (App.selectedKey !== key) return;
+      // A write happened while this was in flight: the answer may be stale, so ask again rather than draw it.
+      if (gen !== App.cacheGen) return selectEntry(key, false);
       App.detailCache.set(key, { entry: entryData, history: historyList });
       renderDetailView(entryData, historyList);
     }
