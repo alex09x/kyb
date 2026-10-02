@@ -11,7 +11,7 @@ import time
 import json
 import socket
 import argparse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
 
@@ -173,7 +173,7 @@ def main():
 
     server_address = ("127.0.0.1", args.port)
     try:
-        httpd = HTTPServer(server_address, DevProxyHandler)
+        httpd = ThreadingHTTPServer(server_address, DevProxyHandler)
     except OSError as e:
         print(f"Error binding to 127.0.0.1:{args.port}: {e}")
         print("Try another port with --port <PORT>")
