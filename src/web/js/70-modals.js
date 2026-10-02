@@ -13,6 +13,8 @@
 
     // Modal Helpers
     function openModal(id) {
+      // One dialog at a time: a modal opened from inside another replaces it.
+      document.querySelectorAll('.modal-backdrop.open').forEach(m => { if (m.id !== id) m.classList.remove('open'); });
       document.getElementById(id).classList.add('open');
     }
     function closeModal(id) {
@@ -112,10 +114,11 @@
             <div class="form-group">
               <label class="form-label">Priority</label>
               <select class="form-select" id="newPriority">
-                <option value="normal">Normal</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
+                <option value="">Not ranked</option>
                 <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
               </select>
             </div>
             <div class="form-group">
@@ -185,7 +188,7 @@
           author: 'Alexander Panasenko <alex@prod.codes>'
         });
       } else if (App.newModalKind === 'task') {
-        const priority = document.getElementById('newPriority')?.value || 'normal';
+        const priority = document.getElementById('newPriority')?.value || '';
         const assignee = document.getElementById('newAssignee')?.value.trim() || 'Alexander Panasenko';
         res = await apiPost('/tasks', {
           key,
@@ -212,6 +215,10 @@
 
     let editingEntryKey = null;
     let editingEntryKind = 'knowledge';
+    // The entry as loaded: an upsert replaces the whole record, so every field
+    // the form does not show (status, blocked reason, refs, detection, ...) must
+    // go back exactly as it came, or saving a title edit silently reopens a task.
+    let editingEntry = null;
 
     async function openEditModal(key) {
       if (!key) {
@@ -228,6 +235,7 @@
         return;
       }
 
+      editingEntry = entry;
       editingEntryKind = entry.kind || 'knowledge';
       document.getElementById('editModalTitle').textContent = `Edit ${editingEntryKind.toUpperCase()}: ${entry.key}`;
 
@@ -279,10 +287,8 @@
             <div class="form-group">
               <label class="form-label">Priority</label>
               <select class="form-select" id="editPriority">
-                <option value="urgent" ${entry.priority === 'urgent' ? 'selected' : ''}>Urgent</option>
-                <option value="high" ${entry.priority === 'high' ? 'selected' : ''}>High</option>
-                <option value="normal" ${entry.priority === 'normal' || !entry.priority ? 'selected' : ''}>Normal</option>
-                <option value="low" ${entry.priority === 'low' ? 'selected' : ''}>Low</option>
+                ${[['', 'Not ranked'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']].map(([v, l]) =>
+                  `<option value="${v}" ${(entry.priority || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -324,6 +330,12 @@
       openModal('editModal');
     }
 
+    function editKeep(fields) {
+      const out = {};
+      for (const f of fields) if (editingEntry && editingEntry[f] != null) out[f] = editingEntry[f];
+      return out;
+    }
+
     async function submitEditModal() {
       const key = document.getElementById('editKey')?.value;
       const title = document.getElementById('editTitle')?.value.trim();
@@ -342,6 +354,7 @@
         const rawHosts = document.getElementById('editHosts')?.value || '';
         const hosts = rawHosts.split(',').map(s => s.trim()).filter(Boolean);
         res = await apiPost('/incidents', {
+          ...editKeep(['status', 'knowledge', 'resolution', 'detection', 'affected', 'started_at', 'detected_at', 'tags', 'refs']),
           key,
           title,
           service,
@@ -351,9 +364,10 @@
           author
         });
       } else if (editingEntryKind === 'task') {
-        const priority = document.getElementById('editPriority')?.value || 'normal';
+        const priority = document.getElementById('editPriority')?.value || '';
         const assignee = document.getElementById('editAssignee')?.value.trim() || 'Alexander Panasenko';
         res = await apiPost('/tasks', {
+          ...editKeep(['status', 'blocked_reason', 'parent_task', 'knowledge', 'resolution', 'tags', 'refs']),
           key,
           title,
           priority,
@@ -365,6 +379,7 @@
         const rawTags = document.getElementById('editTags')?.value || '';
         const tags = rawTags.split(',').map(s => s.trim()).filter(Boolean);
         res = await apiPost('/knowledge', {
+          ...editKeep(['refs']),
           key,
           title,
           tags,
