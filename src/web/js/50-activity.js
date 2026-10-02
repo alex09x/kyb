@@ -162,26 +162,5 @@
       }
     }
 
-    function toggleFeedPause() {
-      App.feedPaused = !App.feedPaused;
-      const btn = document.getElementById('feedPauseBtn');
-      if (!btn) { App.feedPaused = false; return; }
-      if (App.feedPaused) {
-        btn.textContent = '▶ Resume Stream';
-        btn.classList.add('primary');
-        showToast('Changelog stream paused', 'info');
-      } else {
-        btn.textContent = '⏸ Pause Stream';
-        btn.classList.remove('primary');
-        showToast('Changelog stream resumed', 'info');
-        refreshAll();
-      }
-    }
 
-    function clearFeedTable() {
-      App.activity = [];
-      App.audit = [];
-      renderFeed();
-      showToast('Activity stream view cleared', 'info');
-    }
 

@@ -10,20 +10,11 @@
       { id: 'older',label: 'older',     max: Infinity },
     ];
     function incWhen(i) { return new Date(i.detected_at || i.started_at || i.updated_at || 0).getTime(); }
-    function incBucket(i) {
-      const age = Date.now() - incWhen(i);
-      return (INC_BUCKETS.find(b => age < b.max) || INC_BUCKETS[INC_BUCKETS.length - 1]).id;
-    }
     function incAgeLabel(i) {
       const ms = Date.now() - incWhen(i);
       if (!isFinite(ms) || ms < 0) return '';
       const m = Math.floor(ms / 60e3), h = Math.floor(m / 60), d = Math.floor(h / 24);
       return d > 0 ? d + 'd' : h > 0 ? h + 'h' : m + 'm';
-    }
-    function incHeat(n, max) {
-      if (!n) return '';
-      const r = n / Math.max(max, 1);
-      return r > .75 ? 'l4' : r > .45 ? 'l3' : r > .2 ? 'l2' : 'l1';
     }
 
     // The three questions a person actually has to act on. Each is a filter and

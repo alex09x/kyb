@@ -46,15 +46,6 @@
       setGlobalSearchQuery(q);
     }
 
-    function handleRevisionClick(event, key, sha) {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
-      event.preventDefault();
-      const targetHash = `#/knowledge/${encodeURIComponent(key)}?rev=${encodeURIComponent(sha)}`;
-      if (window.location.hash !== targetHash) {
-        history.pushState(null, '', targetHash);
-      }
-      inspectRevision(key, sha);
-    }
 
     function highlightCard(tab, key) {
       if (!key) return false;

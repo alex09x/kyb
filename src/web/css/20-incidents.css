@@ -1,37 +1,7 @@
     /* ========================================================
        TAB 2: INCIDENTS CONTROL ROOM
        ======================================================== */
-    .incidents-container {
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-    }
-    .alert-banner {
-      background: var(--red-dim);
-      border: 1px solid var(--red);
-      border-radius: 8px;
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-    .alert-banner.healthy {
-      background: var(--green-dim);
-      border-color: var(--green);
-    }
-    .filter-bar-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .incident-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-      gap: 16px;
-    }
+
     .incident-card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -62,13 +32,5 @@
       color: var(--text-muted);
       margin-bottom: 4px;
       font-weight: 700;
-    }
-    .resolution-callout {
-      background: var(--green-dim);
-      border: 1px solid rgba(76, 195, 138, 0.3);
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 13px;
-      color: var(--green);
     }
 

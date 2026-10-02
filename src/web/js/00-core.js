@@ -34,10 +34,6 @@
       pendingHighlight: null,
       pendingGraphNode: null,
       isBackendSearchResults: false,
-      diffViewMode: 'split',
-      diffCurrentKey: null,
-      diffFromSha: null,
-      diffToSha: null,
       currentHistoryList: []
     };
 

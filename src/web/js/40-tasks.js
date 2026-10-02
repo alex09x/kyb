@@ -125,28 +125,6 @@
       else if (e.key === 'h') { claim(); openHistoryForEntry(cur.key); }
     }, true);
 
-    function handleDragStart(e, key) {
-      draggedTaskKey = key;
-      e.dataTransfer.setData('text/plain', key);
-      e.target.classList.add('dragging');
-    }
-    function handleDragOver(e) {
-      e.preventDefault();
-      e.currentTarget.classList.add('drag-over');
-    }
-    function handleDragLeave(e) {
-      e.currentTarget.classList.remove('drag-over');
-    }
-    function handleDrop(e, targetStatus) {
-      e.preventDefault();
-      e.currentTarget.classList.remove('drag-over');
-      document.querySelectorAll('.task-card.dragging').forEach(c => c.classList.remove('dragging'));
-      if (!draggedTaskKey) return;
-
-      const task = App.tasks.find(t => t.key === draggedTaskKey);
-      moveTaskTo(targetStatus, draggedTaskKey, task?.title || draggedTaskKey);
-      draggedTaskKey = null;
-    }
 
     function moveTaskTo(targetStatus, key, title) {
       if (!targetStatus) return;
