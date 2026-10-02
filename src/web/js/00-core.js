@@ -63,7 +63,7 @@
         .replace(/^### (.*$)/gim, '<h3>$1</h3>')
         .replace(/^## (.*$)/gim, '<h2>$1</h2>')
         .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-        .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
+        .replace(/^&gt; (.*$)/gim, '<blockquote>$1</blockquote>')  // '>' was escaped two lines up
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
         .replace(/\*([^*]+)\*/g, '<em>$1</em>')
         .replace(/- \[x\] (.*$)/gim, '<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><input type="checkbox" checked disabled> <span>$1</span></div>')

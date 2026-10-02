@@ -191,7 +191,10 @@
           const tag = params.get('tag') || '';
           const term = q || tag;
           if (App.activeTab !== 'search') switchTab('search', false);
-          if (term) {
+          if (tag && !q) {
+            // A tag link reloaded must show what the tag click showed: the tagged entries, not a text search for the word.
+            filterByTag(tag);
+          } else if (term) {
             if (searchEl) searchEl.value = term;
             App.searchQuery = term;
             apiFetch(`/search?q=${encodeURIComponent(term)}&limit=100`).then(data => {
