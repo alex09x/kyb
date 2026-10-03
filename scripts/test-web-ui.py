@@ -414,9 +414,8 @@ def run(base, headed):
         cnt = page.locator("#topoSearchCount").inner_text()
         check("topology search counts matching nodes", cnt.startswith(str(page.evaluate("App.graphNodes.filter(n => n.id.toLowerCase().includes('ui-test') || n.label.toLowerCase().includes('ui-test')).length"))), cnt)
         page.evaluate("setTopoSearch('')")
-        z0 = page.evaluate("graphCamera().zoom")
-        page.evaluate("zoomGraph(2)")
-        check("zoomGraph aims the camera at twice the zoom", abs(page.evaluate("graphCamera().targetZoom") - min(3.2, z0 * 2)) < 1e-6, page.evaluate("graphCamera()"))
+        z0, tz = page.evaluate("(() => { const z = graphCamera().zoom; zoomGraph(2); return [z, graphCamera().targetZoom]; })()")
+        check("zoomGraph aims the camera at twice the zoom", abs(tz - min(3.2, z0 * 2)) < 1e-6, (z0, tz))
         page.wait_for_function(f"graphCamera().zoom > {z0} * 1.5", timeout=5000)
         check("and the camera gets there", True)
         page.evaluate("resetGraphCamera(); fitGraphCamera(); toggleGraphPhysics(); unpinAllGraphNodes(); reheatSimulation(0.5)")
@@ -452,9 +451,9 @@ def run(base, headed):
         page.evaluate("manualRefresh()")
         page.wait_for_function(f"App.lastSyncTime > {t0}", timeout=8000)
         check("manual refresh re-syncs", True)
-        page.evaluate("prefetchEntry('kyb-service')")
-        page.wait_for_function("App.detailCache.has('kyb-service')", timeout=5000)
-        check("hovering a card prefetches it", True)
+        page.evaluate("App.entryPrefetch.clear(); prefetchEntry('kyb-service')")
+        page.wait_for_function("App.entryPrefetch.has('kyb-service')", timeout=5000)
+        check("hovering a card prefetches its document", True)
 
 
         # ------------------------------------------------------------------
@@ -704,6 +703,43 @@ def run(base, headed):
         check("a hub drawer hides entry-only actions", ev("document.getElementById('drawerOpenFullBtn').style.display") == "none" and ev("document.getElementById('drawerBadge').textContent") == "SERVICE HUB")
         ev("closeGraphDrawer()")
         check("highlightCard reports whether it found a card", ev("highlightCard('tasks', 'no-such-key')") is False)
+
+
+        # ------------------------------------------------------------------
+        # Usability fixes the owner asked for, held in place.
+        # ------------------------------------------------------------------
+        ev("switchTab('search'); setGlobalSearchQuery('')")
+        ev("const el = document.getElementById('globalSearch'); el.value = '#kyb'; el.dispatchEvent(new Event('input', {bubbles: true}))")
+        check("typing #tag in the search box filters by that tag", ev("App.tagFilter") == "kyb" and ev("[...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.dataset.key)") == ["kyb-service"])
+        ev("const el = document.getElementById('globalSearch'); el.value = 'kyb'; el.dispatchEvent(new Event('input', {bubbles: true}))")
+        check("dropping the # makes it a text search again", ev("App.tagFilter") is None and ev("App.searchQuery") == "kyb")
+        ev("setGlobalSearchQuery('')")
+        ev(f"selectEntry('{I}-seed')")
+        page.wait_for_function(f"App.selectedKey === '{I}-seed' && document.querySelector('.incident-hero-panel')", timeout=5000)
+        check("the incident card no longer offers a pointless 'Incidents View' button", "Incidents View" not in ev("document.getElementById('detailView').textContent") and "Kanban View" not in ev("document.getElementById('detailView').textContent"))
+        n_hist = ev("performance.getEntriesByType('resource').filter(r => r.name.includes('/history')).length")
+        ev("App.entryPrefetch.clear(); prefetchEntry('mentions-kyb')")
+        page.wait_for_function("App.entryPrefetch.has('mentions-kyb')", timeout=5000)
+        check("hovering a card fetches the entry but not its history", ev("performance.getEntriesByType('resource').filter(r => r.name.includes('/history')).length") == n_hist)
+        before = api(base, "GET", f"/knowledge/kyb-service/history")[1]["versions"]
+        api(base, "POST", "/knowledge", {"key": "kyb-service", "title": "KYB service edited twice", "body": "The registry.", "tags": ["kyb"], "refs": ["vault://kyb"]})
+        after = api(base, "GET", f"/knowledge/kyb-service/history")[1]["versions"]
+        check("the server's history cache is dropped by a write", len(after) == len(before) + 1, (len(before), len(after)))
+        for n in range(45):
+            api(base, "POST", "/incidents", {"key": f"inc-page-{stamp}-{n:02d}", "title": f"Paged incident {n}", "body": "b", "service": "pager", "severity": "low", "detection": "true"})
+        ev("refreshAll()")
+        page.wait_for_function("App.incidents.length >= 45", timeout=8000)
+        ev("switchTab('incidents'); filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentQueue = null; App.incidentCursor = 0; App.incidentShown = 40; renderIncidents()")
+        total = ev("incFiltered().length")
+        check("a long incident list shows 40 rows and says how many more", len(rows()) == 40 and ev("document.querySelector('#incidentRows .inc-more').textContent").startswith(f"{total - 40} more"), (len(rows()), total))
+        ev("document.querySelector('#incidentRows .inc-more').click()")
+        check("'show more' extends the page", len(rows()) == min(80, total))
+        ev("App.incidentShown = 40; App.incidentCursor = 39; renderIncidents()")
+        page.keyboard.press("j")
+        check("the cursor walking past the page extends it", ev("App.incidentCursor") == 40 and len(rows()) >= 41)
+        ev("filterIncidentsSeverity('low')")
+        check("changing a filter resets the page", ev("App.incidentShown") == 40)
+        ev("filterIncidentsSeverity('all')")
 
         check("no script errors in the per-function checks", not errors, "; ".join(errors[:3]))
         browser.close()

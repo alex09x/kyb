@@ -17,8 +17,9 @@
         flag: '--status open --unassigned',
         test: t => TASK_LIVE(t) && (t.status || 'open').toLowerCase() === 'open' && !(t.assignee || '').trim() },
     ];
-    function taskSelectQueue(id) { App.taskQueue = App.taskQueue === id ? null : id; App.taskCursor = 0; renderTasks(); }
-    function taskSetStatus(st) { App.taskStatusFilter = st; App.taskCursor = 0; renderTasks(); }
+    const TASK_PAGE = 40;
+    function taskSelectQueue(id) { App.taskShown = TASK_PAGE; App.taskQueue = App.taskQueue === id ? null : id; App.taskCursor = 0; renderTasks(); }
+    function taskSetStatus(st) { App.taskShown = TASK_PAGE; App.taskStatusFilter = st; App.taskCursor = 0; renderTasks(); }
     function taskFiltered() {
       let list = [...App.tasks];
       const f = App.taskStatusFilter || 'live';
@@ -69,7 +70,9 @@
       App.taskCursorKey = list.length ? list[App.taskCursor].key : null;
       const rows = document.getElementById('taskRows');
       if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the queue filter.</div>`; return; }
-      rows.innerHTML = list.map((t, idx) => {
+      App.taskShown = Math.max(App.taskShown || TASK_PAGE, App.taskCursor + 1);
+      const shown = list.slice(0, App.taskShown);
+      rows.innerHTML = shown.map((t, idx) => {
         const cur = idx === App.taskCursor;
         const st = (t.status || 'open').toLowerCase();
         const done = !TASK_LIVE(t);
@@ -101,7 +104,8 @@
             <span class="age">${age}d</span>
             ${note}${acts}
           </div>`;
-      }).join('');
+      }).join('') + (list.length > shown.length
+        ? `<div class="inc-more" onclick="App.taskShown += ${TASK_PAGE}; renderTasks();">${list.length - shown.length} more &middot; <span class="acc">show ${Math.min(TASK_PAGE, list.length - shown.length)}</span></div>` : '');
       const curEl = rows.querySelector('.inc-r.cur');
       if (curEl && App.taskKeyNav) { curEl.scrollIntoViewIfNeeded && curEl.scrollIntoViewIfNeeded(false); App.taskKeyNav = false; }
     }

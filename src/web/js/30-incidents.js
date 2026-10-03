@@ -33,8 +33,10 @@
         flag: '--open --stale 7d',
         test: i => i.status !== 'resolved' && (Date.now() - new Date(i.updated_at || 0).getTime()) > 7 * 86400e3 },
     ];
+    const INC_PAGE = 40;
     function incSelectQueue(id) {
       App.incidentQueue = App.incidentQueue === id ? null : id;
+      App.incidentShown = INC_PAGE;
       App.incidentCursor = 0;
       renderIncidents();
     }
@@ -98,7 +100,11 @@
       App.incidentCursorKey = list.length ? list[App.incidentCursor].key : null;
       const rows = document.getElementById('incidentRows');
       if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the queue filter.</div>`; return; }
-      rows.innerHTML = list.map((inc, idx) => {
+      // A long list is paged: the first screenfuls draw at once, the rest on request.
+      // The cursor keys walk the whole list; landing past the page extends it.
+      App.incidentShown = Math.max(App.incidentShown || INC_PAGE, App.incidentCursor + 1);
+      const shown = list.slice(0, App.incidentShown);
+      rows.innerHTML = shown.map((inc, idx) => {
         const cur = idx === App.incidentCursor;
         const sev = (inc.severity || 'medium').toLowerCase();
         let peek = '';
@@ -132,7 +138,8 @@
             <span class="age">${incAgeLabel(inc)}</span>
             ${note}
           </div>${peek}`;
-      }).join('');
+      }).join('') + (list.length > shown.length
+        ? `<div class="inc-more" onclick="App.incidentShown += ${INC_PAGE}; renderIncidents();">${list.length - shown.length} more &middot; <span class="acc">show ${Math.min(INC_PAGE, list.length - shown.length)}</span></div>` : '');
       const curEl = rows.querySelector('.inc-r.cur');
       if (curEl && App.incidentKeyNav) { curEl.scrollIntoViewIfNeeded ? curEl.scrollIntoViewIfNeeded(false) : null; App.incidentKeyNav = false; }
     }
@@ -159,11 +166,15 @@
 
     function filterIncidents(status) {
       App.incidentStatusFilter = status;
+      App.incidentShown = INC_PAGE;
+      App.incidentCursor = 0;  // a new filter is a new list; the cursor starts at its top
       renderIncidents();
     }
 
     function filterIncidentsSeverity(sev) {
       App.incidentSeverityFilter = sev;
+      App.incidentShown = INC_PAGE;
+      App.incidentCursor = 0;  // a new filter is a new list; the cursor starts at its top
       ['All', 'Critical', 'High', 'Medium', 'Low'].forEach(name => {
         const btn = document.getElementById(`sevChip${name}`);
         if (btn) btn.classList.toggle('active', name.toLowerCase() === sev);

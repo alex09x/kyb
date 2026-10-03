@@ -21,8 +21,10 @@
       // Global search
       const searchEl = document.getElementById('globalSearch');
       searchEl.addEventListener('input', (e) => {
-        App.searchQuery = e.target.value;
-        App.tagFilter = null;  // typing replaces a tag filter with a text search
+        const v = e.target.value;
+        const m = v.match(/^#([\w-]+)$/);  // "#postgres" filters by tag; anything else is a text search
+        App.tagFilter = m ? m[1] : null;
+        App.searchQuery = m ? '' : v;
         if (App.activeTab !== 'search') switchTab('search', false);
         renderKnowledgeList();
       });

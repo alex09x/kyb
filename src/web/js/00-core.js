@@ -122,7 +122,7 @@
         const data = await res.json().catch(() => ({}));
         // A write changes the record and its history, and possibly the entries
         // linked to it; whatever the detail pane cached is now a stale version.
-        if (res.ok) { App.cacheGen++; App.detailCache.clear(); }
+        if (res.ok) { App.cacheGen++; App.detailCache.clear(); if (App.entryPrefetch) App.entryPrefetch.clear(); }
         return { ok: res.ok, status: res.status, data };
       } catch (err) {
         console.error('API POST Error', endpoint, err);

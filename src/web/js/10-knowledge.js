@@ -36,18 +36,15 @@
     App.detailCache = new Map();
     App.cacheGen = 0;
 
+    // Hovering warms the document only: history walks git on the server and a
+    // mouse moving down a list must not fire fifty of those.
+    App.entryPrefetch = App.entryPrefetch || new Map();  // key -> entry
     async function prefetchEntry(key) {
-      if (!key || App.detailCache.has(key)) return;
+      if (!key || App.detailCache.has(key) || App.entryPrefetch.has(key)) return;
       const gen = App.cacheGen;
       try {
-        const [entryData, historyData] = await Promise.all([
-          apiFetch(`/knowledge/${encodeURIComponent(key)}`),
-          apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
-        ]);
-        if (entryData && gen === App.cacheGen) {
-          const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
-          App.detailCache.set(key, { entry: entryData, history: historyList });
-        }
+        const entryData = await apiFetch(`/knowledge/${encodeURIComponent(key)}`);
+        if (entryData && gen === App.cacheGen) App.entryPrefetch.set(key, entryData);
       } catch (_) {}
     }
 
@@ -140,22 +137,26 @@
         detailEl.innerHTML = `<div style="padding: 40px; text-align:center; color: var(--text-muted);">Loading ${key}...</div>`;
       }
 
-      // 3. Network fetch in background
+      // 3. Network fetch in background. The entry is quick; its history walks
+      // git and is not, so the document is drawn the moment it arrives and the
+      // version count fills in after.
       const gen = App.cacheGen;
-      const [entryData, historyData] = await Promise.all([
-        apiFetch(`/knowledge/${encodeURIComponent(key)}`),
-        apiFetch(`/knowledge/${encodeURIComponent(key)}/history`)
-      ]);
+      const historyP = apiFetch(`/knowledge/${encodeURIComponent(key)}/history`);
+      const entryData = App.entryPrefetch.get(key) || await apiFetch(`/knowledge/${encodeURIComponent(key)}`);
 
       if (!entryData) {
         if (!known) detailEl.innerHTML = `<div class="detail-empty">Error loading entry ${key}</div>`;
         return;
       }
-
-      const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
       // Someone else was selected while this was in flight: the answer is nobody's now.
       if (App.selectedKey !== key) return;
       // A write happened while this was in flight: the answer may be stale, so ask again rather than draw it.
+      if (gen !== App.cacheGen) return selectEntry(key, false);
+      renderDetailView(entryData, [], true);
+
+      const historyData = await historyP;
+      const historyList = (historyData && (historyData.versions || historyData.history)) ? (historyData.versions || historyData.history) : [];
+      if (App.selectedKey !== key) return;
       if (gen !== App.cacheGen) return selectEntry(key, false);
       App.detailCache.set(key, { entry: entryData, history: historyList });
       renderDetailView(entryData, historyList);
@@ -210,7 +211,6 @@
                 ${isDone ? `
                   <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Re-open Task</button>
                 ` : ''}
-                <a href="#/tasks/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, ${jsArg(e.key)}, 'tasks')">Kanban View →</a>
               </div>
             </div>
 
@@ -313,7 +313,6 @@
                 ${!isResolved ? `
                   <button class="btn sm success" onclick="openResolveIncidentModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Incident</button>
                 ` : ''}
-                <a href="#/incidents/${encodeURIComponent(e.key)}" class="btn sm" onclick="handleCardClick(event, ${jsArg(e.key)}, 'incidents')">Incidents View →</a>
               </div>
             </div>
 

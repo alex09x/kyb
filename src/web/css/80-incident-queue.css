@@ -54,3 +54,5 @@
     .inc-r .acts { grid-column:3 / -1; display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 2px; }
     .inc-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
 
+    .inc-more { padding:10px 16px 10px 56px; font-size:12px; color:var(--text-muted); cursor:pointer; border-bottom:1px solid var(--card-subtle); }
+    .inc-more .acc { color:var(--accent); } .inc-more:hover { background:var(--card); }
