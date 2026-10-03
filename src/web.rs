@@ -113,11 +113,13 @@ mod tests {
         assert!(UI_HTML.contains(r#"id="sortSelect""#));
         assert!(UI_HTML.contains(r#"id="topoCanvas""#));
         assert!(UI_HTML.contains(r#"id="nodeHud""#));
-        assert!(UI_HTML.contains(r#"id="feedTableBody""#));
-        assert!(UI_HTML.contains(r#"id="colOpenZone""#));
-        assert!(UI_HTML.contains(r#"id="colProgZone""#));
-        assert!(UI_HTML.contains(r#"id="colBlockZone""#));
-        assert!(UI_HTML.contains(r#"id="colDoneZone""#));
+        // the attention queues and the change ledger
+        assert!(UI_HTML.contains(r#"id="incQueue""#));
+        assert!(UI_HTML.contains(r#"id="incidentRows""#));
+        assert!(UI_HTML.contains(r#"id="taskQueue""#));
+        assert!(UI_HTML.contains(r#"id="taskRows""#));
+        assert!(UI_HTML.contains(r#"id="ledBody""#));
+        assert!(UI_HTML.contains(r#"id="blockTaskModal""#));
 
         // Scripts and essential functions
         assert_eq!(UI_HTML.matches("<script>").count(), 1);
@@ -133,7 +135,7 @@ mod tests {
             "function renderKnowledgeList",
             "function selectEntry",
             "function inspectRevision",
-            "function loadDiff",
+            "function renderVersions",
             "function renderIncidents",
             "function filterIncidents",
             "function filterIncidentsSeverity",
@@ -150,6 +152,7 @@ mod tests {
             "function openEditModal",
             "function submitEditModal",
             "function openShortcutsModal",
+            "function jsArg",
         ];
 
         for f in required_fns {
