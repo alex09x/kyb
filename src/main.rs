@@ -33,6 +33,27 @@ pub struct AppState {
     /// commits are strictly sequential anyway. Search takes no locks.
     writer: Mutex<IndexWriter>,
     pub(crate) audit_path: std::path::PathBuf,
+    /// An entry's history is a walk over every commit in the repository; with
+    /// thousands of them that is close to a second per request, and the UI asks
+    /// for it on every card. Each key's list is kept once computed and dropped
+    /// when that key is written again (the only way its history can change).
+    history_cache: std::sync::Mutex<std::collections::HashMap<String, Vec<store::VersionInfo>>>,
+}
+
+impl AppState {
+    fn history_cached(&self, key: &str) -> Result<Vec<store::VersionInfo>> {
+        if let Some(v) = self.history_cache.lock().unwrap().get(key) {
+            return Ok(v.clone());
+        }
+        let v = self.store.history(key)?;
+        if !v.is_empty() {
+            self.history_cache.lock().unwrap().insert(key.to_string(), v.clone());
+        }
+        Ok(v)
+    }
+    fn forget_history(&self, key: &str) {
+        self.history_cache.lock().unwrap().remove(key);
+    }
 }
 
 type St = State<Arc<AppState>>;
@@ -116,6 +137,7 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
         semantic,
         writer: Mutex::new(writer),
         audit_path: cfg.audit_path.clone(),
+        history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
     }))
 }
 
@@ -253,6 +275,7 @@ async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built
     };
     let closed = entry.is_closed();
     let key = entry.key.clone();
+    st.forget_history(&key);
     let (mut reply, committed) = commit_locked(st, &mut w, entry, extra);
     if closed {
         archive_locked(st, &mut w, &key, &mut reply);
@@ -1216,7 +1239,7 @@ async fn history(State(st): St, Path(key): Path<String>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
-    match st.store.history(&key) {
+    match st.history_cached(&key) {
         Err(e) => err500(e),
         Ok(v) if v.is_empty() => {
             (StatusCode::NOT_FOUND, Json(json!({"error": format!("no history for '{key}'")})))
@@ -1462,6 +1485,7 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         Ok(Some(e)) => e,
     };
     if entry.kind == model::KIND_KNOWLEDGE {
+        st.forget_history(&key);
         match st.store.delete(&key) {
             Err(e) => err500(e),
             Ok(None) => {
