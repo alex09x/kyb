@@ -303,6 +303,9 @@ async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built
     if closed {
         archive_locked(st, &mut w, &key, &mut reply);
     }
+    // again after git moved: a scan that began between the first forget and the
+    // commit read the old HEAD, and this bump keeps it from being cached
+    st.forget_history(&key);
     let pending = match (st.semantic.as_ref(), committed) {
         (Some(sem), Some(entry)) => {
             let ticket = sem.begin_upsert(&entry.key).await;
@@ -1507,31 +1510,43 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         }
         Ok(Some(e)) => e,
     };
-    // both branches change the key's git history: a deletion or an archive commit
+    // both branches change the key's git history: a deletion or an archive commit.
+    // Forgotten before (no stale answer is served meanwhile) and after (no scan
+    // that began meanwhile can cache the pre-commit history).
     st.forget_history(&key);
+    let reply = remove_committed(&st, &mut w, &key, &entry).await;
+    st.forget_history(&key);
+    reply
+}
+
+async fn remove_committed(
+    st: &Arc<AppState>,
+    w: &mut tokio::sync::MutexGuard<'_, IndexWriter>,
+    key: &str,
+    entry: &model::Entry,
+) -> Reply {
     if entry.kind == model::KIND_KNOWLEDGE {
-        match st.store.delete(&key) {
+        match st.store.delete(key) {
             Err(e) => err500(e),
             Ok(None) => {
                 (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
             }
             Ok(Some(sha)) => {
-                st.index.delete_head(&mut w, &key);
-                if let Err(e) = st.index.commit_and_reload(&mut w) {
+                st.index.delete_head(w, key);
+                if let Err(e) = st.index.commit_and_reload(w) {
                     return err500(
                         e.context("git committed but the index was not updated — run POST /reindex"),
                     );
                 }
                 if let Some(sem) = st.semantic.as_ref() {
-                    sem.invalidate(&key).await;
+                    sem.invalidate(key).await;
                 }
-                drop(w);
                 (StatusCode::OK, Json(json!({"key": key, "deleted": true, "sha": sha})))
             }
         }
     } else {
         // live index doc and vector stay: archived means findable
-        match st.store.archive(&key) {
+        match st.store.archive(key) {
             Err(e) => err500(e),
             Ok(None) => {
                 (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
