@@ -38,20 +38,36 @@ pub struct AppState {
     /// for it on every card. Each key's list is kept once computed and dropped
     /// when that key is written again (the only way its history can change).
     history_cache: std::sync::Mutex<std::collections::HashMap<String, Vec<store::VersionInfo>>>,
+    /// Bumped by every invalidation. A scan that began before a write must not
+    /// put its pre-write answer into the cache after the write dropped it.
+    history_gen: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
     fn history_cached(&self, key: &str) -> Result<Vec<store::VersionInfo>> {
+        use std::sync::atomic::Ordering;
         if let Some(v) = self.history_cache.lock().unwrap().get(key) {
             return Ok(v.clone());
         }
+        let gen = self.history_gen.load(Ordering::Acquire);
         let v = self.store.history(key)?;
-        if !v.is_empty() {
+        if !v.is_empty() && self.history_gen.load(Ordering::Acquire) == gen {
             self.history_cache.lock().unwrap().insert(key.to_string(), v.clone());
         }
         Ok(v)
     }
+    /// The content an archived key had just before its file was removed: the
+    /// cached history names the deletion commit, and the parent of that commit
+    /// still holds the file. One blob read instead of a walk over every commit.
+    fn archived_version(&self, key: &str) -> Result<Option<model::Entry>> {
+        let versions = self.history_cached(key)?;
+        match versions.iter().find(|v| v.change == "deleted") {
+            Some(del) => self.store.get_at(key, &format!("{}^", del.sha)),
+            None => self.store.latest_version(key),
+        }
+    }
     fn forget_history(&self, key: &str) {
+        self.history_gen.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.history_cache.lock().unwrap().remove(key);
     }
 }
@@ -138,6 +154,7 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
         writer: Mutex::new(writer),
         audit_path: cfg.audit_path.clone(),
         history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+        history_gen: std::sync::atomic::AtomicU64::new(0),
     }))
 }
 
@@ -1065,7 +1082,7 @@ async fn get_one(State(st): St, Path(key): Path<String>, Q(q): Q<GetQ>) -> Reply
         Ok(None) if q.at.is_none() => {
             // not in the tree — an archived incident/task is still readable
             // from history; deleted knowledge stays a 404 (retraction)
-            match st.store.latest_version(&key) {
+            match st.archived_version(&key) {
                 Err(e) => err500(e),
                 Ok(Some(e)) if e.kind != model::KIND_KNOWLEDGE => {
                     (StatusCode::OK, Json(entry_json(&e, true)))
@@ -1484,8 +1501,9 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         }
         Ok(Some(e)) => e,
     };
+    // both branches change the key's git history: a deletion or an archive commit
+    st.forget_history(&key);
     if entry.kind == model::KIND_KNOWLEDGE {
-        st.forget_history(&key);
         match st.store.delete(&key) {
             Err(e) => err500(e),
             Ok(None) => {
