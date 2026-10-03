@@ -52,7 +52,7 @@
       return list;
     }
 
-    function incClearCell() { App.incidentQueue = null; App.incidentCursor = 0; renderIncidents(); }
+    function incClearCell() { App.incidentQueue = null; App.incidentCursor = 0; App.incidentShown = INC_PAGE; renderIncidents(); }
 
     function renderIncidents(keepSelection) {
       const open = App.incidents.filter(i => i.status !== 'resolved');

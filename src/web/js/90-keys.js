@@ -22,7 +22,7 @@
       const searchEl = document.getElementById('globalSearch');
       searchEl.addEventListener('input', (e) => {
         const v = e.target.value;
-        const m = v.match(/^#([\w-]+)$/);  // "#postgres" filters by tag; anything else is a text search
+        const m = v.match(/^#(\S+)$/);  // "#postgres" filters by tag (any tag the server accepts); anything else is a text search
         App.tagFilter = m ? m[1] : null;
         App.searchQuery = m ? '' : v;
         if (App.activeTab !== 'search') switchTab('search', false);
