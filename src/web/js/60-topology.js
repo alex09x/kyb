@@ -997,6 +997,7 @@
     }
 
     function closeGraphDrawer() {
+      App.pendingGraphNode = null;  // closing is an answer; a rebuild must not reopen it
       const drawer = document.getElementById('graphDrawer');
       if (drawer) drawer.classList.remove('open');
       App.drawerNode = null;

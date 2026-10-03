@@ -181,9 +181,13 @@
           const nodeKey = paramKey || params.get('node') || params.get('key');
           if (App.activeTab !== 'graph') switchTab('graph', false);
           if (nodeKey) {
-            App.pendingGraphNode = nodeKey;
+            // Focus now if the graph exists, else leave it for the first build.
+            // Never both: a pending node left behind would re-open the drawer
+            // on every 4-second rebuild after the person closed it.
             if (App.graphNodes && App.graphNodes.length > 0) {
               focusNodeById(nodeKey);
+            } else {
+              App.pendingGraphNode = nodeKey;
             }
             document.title = `KYB — Graph: ${nodeKey}`;
           } else {
