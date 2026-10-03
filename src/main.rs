@@ -51,8 +51,14 @@ impl AppState {
         }
         let gen = self.history_gen.load(Ordering::Acquire);
         let v = self.store.history(key)?;
-        if !v.is_empty() && self.history_gen.load(Ordering::Acquire) == gen {
-            self.history_cache.lock().unwrap().insert(key.to_string(), v.clone());
+        if !v.is_empty() {
+            // The generation is re-read under the same lock the invalidation
+            // takes, and forget_history bumps it before taking that lock: a
+            // write that landed during the scan is therefore always seen here.
+            let mut cache = self.history_cache.lock().unwrap();
+            if self.history_gen.load(Ordering::Acquire) == gen {
+                cache.insert(key.to_string(), v.clone());
+            }
         }
         Ok(v)
     }
