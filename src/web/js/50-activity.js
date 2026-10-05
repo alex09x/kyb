@@ -141,10 +141,6 @@
 
     function setActivityFilter(filter) {
       App.activityFilter = filter;
-      ['All', 'Knowledge', 'Incidents', 'Tasks', 'Searches'].forEach(f => {
-        const btn = document.getElementById(`actFilter${f}`);
-        if (btn) btn.classList.toggle('active', f.toLowerCase() === filter || (filter === 'incident' && f === 'Incidents') || (filter === 'task' && f === 'Tasks') || (filter === 'search' && f === 'Searches'));
-      });
       renderFeed();
     }
 

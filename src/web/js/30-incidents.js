@@ -11,7 +11,9 @@
     ];
     function incWhen(i) { return new Date(i.detected_at || i.started_at || i.updated_at || 0).getTime(); }
     function incAgeLabel(i) {
-      const ms = Date.now() - incWhen(i);
+      const when = incWhen(i);
+      if (!when) return '';  // no date at all is not "since 1970"
+      const ms = Date.now() - when;
       if (!isFinite(ms) || ms < 0) return '';
       const m = Math.floor(ms / 60e3), h = Math.floor(m / 60), d = Math.floor(h / 24);
       return d > 0 ? d + 'd' : h > 0 ? h + 'h' : m + 'm';
@@ -175,10 +177,6 @@
       App.incidentSeverityFilter = sev;
       App.incidentShown = INC_PAGE;
       App.incidentCursor = 0;  // a new filter is a new list; the cursor starts at its top
-      ['All', 'Critical', 'High', 'Medium', 'Low'].forEach(name => {
-        const btn = document.getElementById(`sevChip${name}`);
-        if (btn) btn.classList.toggle('active', name.toLowerCase() === sev);
-      });
       renderIncidents();
     }
 
