@@ -30,7 +30,7 @@
       App.entries.forEach(e => {
         let svc = e.service;
         if (!svc && e.tags && e.tags.length) {
-          const t = e.tags.find(tag => !hostSet.has(tag.toLowerCase().trim()));
+          const t = e.tags.find(tag => typeof tag === 'string' && !hostSet.has(tag.toLowerCase().trim()));  // a tag an agent wrote as a number must not take the graph down
           if (t) svc = t;
         }
         if (svc) serviceSet.add(svc.toLowerCase().trim());
@@ -108,7 +108,7 @@
       App.entries.forEach(e => {
         const isInc = e.kind === 'incident';
         const isTask = e.kind === 'task';
-        const svc = (e.service || (e.tags && e.tags[0]) || 'system').toLowerCase();
+        const svc = String(e.service || (e.tags && e.tags.find(t => typeof t === 'string')) || 'system').toLowerCase();
         const prev = existingPosMap.get(e.key);
 
         let startX, startY;
@@ -154,7 +154,7 @@
         if (!srcNode) return;
 
         // Connect to Service Hub
-        const svc = (e.service || (e.tags && e.tags[0]) || '').toLowerCase();
+        const svc = String(e.service || (e.tags && e.tags.find(t => typeof t === 'string')) || '').toLowerCase();
         if (svc && nodeMap.has('svc:' + svc)) {
           const sHub = nodeMap.get('svc:' + svc);
           links.push({ source: srcNode, target: sHub });

@@ -115,6 +115,30 @@ window.__t = {
   set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); },
   wait(ms) { return new Promise(r => setTimeout(r, ms)); },
   open() { return [...document.querySelectorAll('.modal-backdrop.open')].map(m => m.id); },
+  // Every control a person can see must be the thing under the cursor at its own centre:
+  // a button that is drawn but covered by something else works in no browser.
+  covered(scope) {
+    const root = scope ? document.querySelector(scope) : document;
+    const out = [];
+    for (const el of root.querySelectorAll('button, a[href], a[onclick], select, input, textarea, .chip, .inc-r, .item-card, [onclick]')) {
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height || el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.pointerEvents === 'none' || +cs.opacity === 0) continue;
+      const x = b.left + b.width / 2, y = b.top + b.height / 2;
+      if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;   // scrolled out of view is reachable by scrolling
+      let clipped = false;                                                 // ...and so is a row scrolled out of its own pane
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const s = getComputedStyle(a); if (s.overflowY === 'visible' && s.overflowX === 'visible') continue;
+        const r = a.getBoundingClientRect(); if (x < r.left || x > r.right || y < r.top || y > r.bottom) { clipped = true; break; }
+      }
+      if (clipped) continue;
+      const top = document.elementFromPoint(x, y);
+      if (top && (top === el || el.contains(top) || top.contains(el))) continue;
+      out.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ' "' + el.textContent.trim().slice(0, 24) + '" under ' + (top ? (top.id ? '#' + top.id : top.tagName.toLowerCase() + '.' + String(top.className).split(' ')[0]) : 'nothing'));
+    }
+    return out;
+  },
 };
 """
 
@@ -238,7 +262,14 @@ def run(base, headed, coverage=None):
             cdp.send("Profiler.startPreciseCoverage", {"callCount": True, "detailed": True})
         errors = []
         page.on("pageerror", lambda e: errors.append(f"pageerror {e}"))
-        page.on("console", lambda m: errors.append(f"console.error {m.text} @ {m.location.get('url', '')[-70:]}") if m.type == "error" else None)
+        # Records the test invents (made-up keys and shas) have nothing on the server; a 404 for one of those is the test's doing.
+        synthetic = ("eeeeeeee", "ffffffff", "aaaaaaaa", "k-two-authors", "bare-incident", "inc-nodate", "g-plain")
+
+        def on_console(m):
+            url = m.location.get("url", "")
+            if m.type == "error" and not any(x in url for x in synthetic):
+                errors.append(f"console.error {m.text} @ {url[-70:]}")
+        page.on("console", on_console)
         page.goto(base + "/#/search", wait_until="networkidle")
         page.evaluate(HELPERS)
         page.wait_for_function("document.querySelectorAll('#knowledgeList .item-card').length > 0", timeout=10000)
@@ -1270,6 +1301,331 @@ def run(base, headed, coverage=None):
         ev("document.querySelector('.nav-tab[data-tab=\"incidents\"]').click()")
         check("a real click on a tab switches to it", ev("App.activeTab") == "incidents" and ev("location.hash") == "#/incidents")
         ev("setGlobalSearchQuery(''); location.hash = '#/search'")
+
+
+        # ------------------------------------------------------------------
+        # The graph, driven with a real mouse; and the last defaults.
+        # ------------------------------------------------------------------
+        ev("location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
+        ev("refreshAll()")
+        page.wait_for_timeout(700)
+        ev("""(() => { window.__t.xy = id => { const n = App.graphNodes.find(x => x.id === id); const r = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
+                 return [r.left + n.x * c.zoom + c.x, r.top + n.y * c.zoom + c.y]; };
+               window.__t.pinAll = () => App.graphNodes.forEach(n => { n.pinned = true; n.vx = 0; n.vy = 0; });
+               // a node the mouse can reach unambiguously: on screen, off the minimap, and nearer to the cursor than any other node's hit radius
+               window.__t.reachable = pred => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera(); const hit = n => n.width ? Math.max(n.width / 2, n.height / 2) + 6 : n.radius + 12;
+                 for (const n of App.graphNodes) { if (!pred(n)) continue; const sx = n.x * c.zoom + c.x, sy = n.y * c.zoom + c.y;
+                   if (sx < 60 || sx > b.width - 60 || sy < 60 || sy > b.height - 60) continue; if (sx < 190 && sy > b.height - 135) continue;
+                   if (App.graphNodes.every(o => o === n || Math.hypot(o.x - n.x, o.y - n.y) > hit(o) + 4)) return n.id; }
+                 return null; }; })()""")
+        for layout in ("radar", "hierarchy", "grid", "orbit"):
+            ev(f"setGraphLayout('{layout}')")
+            page.wait_for_timeout(250)
+            check(f"layout {layout}: every node has a finite target and position", ev("App.graphNodes.every(n => Number.isFinite(n.targetX) && Number.isFinite(n.targetY) && Number.isFinite(n.x) && Number.isFinite(n.y))") and ev("App.graphLayout") == layout)
+        ev("setGraphFilter('task')")
+        page.wait_for_timeout(250)
+        check("filter 'task' marks its button and is drawn without error", ev("document.getElementById('gFilterTasks').classList.contains('active')"))
+        ev("fitGraphCamera()")
+        check("fit with a filter aims at the visible nodes", ev("Number.isFinite(graphCamera().targetZoom)"))
+        # A hundred seeded nodes overlap; put four where the mouse can reach each unambiguously
+        # and park the rest far away. Positions and pins survive the 4-second rebuild.
+        ev("setGraphFilter('all')")
+        tgt, ent = N, "mentions-kyb"
+        hub = ev("App.graphNodes.find(n => n.type === 'host').id")
+        svc = ev("App.graphNodes.find(n => n.type === 'service').id")
+        ev(f"""(() => {{ window.__t.stage = () => {{ const c = graphCamera(); const w = (sx, sy) => [(sx - c.x) / c.zoom, (sy - c.y) / c.zoom];
+            const spot = {{'{tgt}': [420, 200], '{hub}': [760, 200], '{svc}': [760, 440], '{ent}': [420, 440]}};
+            App.graphNodes.forEach((n, i) => {{ const p = spot[n.id] ? w(...spot[n.id]) : w(20000 + (i % 10) * 900, 20000 + Math.floor(i / 10) * 900); n.x = n.targetX = p[0]; n.y = n.targetY = p[1]; n.vx = n.vy = 0; n.pinned = true; }}); }}; }})()""")
+        page.wait_for_timeout(1800)  # let the camera settle; it is not touched again while the mouse works
+        ev("__t.stage()")
+        page.wait_for_timeout(300)
+
+        # hover, press, drag, release, double-click - on the canvas, with the mouse
+        x, y = ev(f"__t.xy('{tgt}')")
+        page.mouse.move(x, y)
+        page.wait_for_timeout(200)
+        check("hovering a node turns the cursor into a pointer", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
+        page.mouse.down()
+        check("pressing a node opens its drawer", ev("document.getElementById('graphDrawer').classList.contains('open')") and ev("document.getElementById('drawerKey').textContent") == tgt, ev("document.getElementById('drawerKey').textContent"))
+        page.mouse.move(x + 40, y + 30, steps=4)
+        page.mouse.up()
+        page.wait_for_timeout(200)
+        check("dragging a node moves and pins it", ev(f"App.graphNodes.find(n => n.id === '{tgt}').pinned") and ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Pinned'))"))
+        check("a pinned node says so in its drawer", "PINNED" in ev(f"(openGraphDrawer(App.graphNodes.find(n => n.id === '{tgt}')), document.getElementById('drawerMeta').textContent)"))
+        x, y = ev(f"__t.xy('{tgt}')")
+        page.mouse.dblclick(x, y)
+        page.wait_for_timeout(200)
+        check("double-clicking a pinned node unpins it", ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Unpinned'))"))
+        ev("closeGraphDrawer(); __t.pinAll()")
+        hx, hy = ev(f"__t.xy('{hub}')")
+        page.mouse.move(hx, hy)
+        page.wait_for_timeout(250)
+        check("hovering a host hub", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
+        page.mouse.click(hx, hy)
+        check("a host hub's drawer is labelled as a host", ev("document.getElementById('drawerBadge').textContent") == "HOST BLADE")
+        ev("closeGraphDrawer()")
+        # empty space: pan, wheel, minimap
+        r = ev("(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()")
+        page.wait_for_function("graphCamera().targetZoom === graphCamera().zoom", timeout=15000)  # pressing the hub re-aimed the camera
+        empty = ev("""(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
+          for (let px = 320; px < 940; px += 40) for (let py = 90; py < b.height - 160; py += 40) {
+            const gx = (px - c.x) / c.zoom, gy = (py - c.y) / c.zoom;
+            if (App.graphNodes.every(n => Math.hypot(n.x - gx, n.y - gy) > 160)) return [b.left + px, b.top + py]; }
+          return null; })()""")
+        check("there is empty canvas to pan on", empty is not None)
+        c0 = ev("graphCamera()")
+        page.mouse.move(empty[0], empty[1]); page.mouse.down(); page.mouse.move(empty[0] - 60, empty[1] + 40, steps=3)
+        c1 = ev("graphCamera()")
+        page.mouse.up()
+        check("dragging empty space pans the camera", ((c1["x"] - c0["x"]) ** 2 + (c1["y"] - c0["y"]) ** 2) ** 0.5 > 40 and c1["zoom"] == c0["zoom"], (c0, c1))
+        check("releasing restores the grab cursor", ev("document.getElementById('topoCanvas').style.cursor") == "grab")
+        page.mouse.move(empty[0] - 60, empty[1] + 40)
+        z0 = ev("graphCamera().zoom")
+        page.mouse.wheel(0, -200)
+        page.wait_for_timeout(100)
+        z1 = ev("graphCamera().zoom")
+        page.mouse.wheel(0, 200)
+        page.wait_for_timeout(100)
+        check("the wheel zooms in and out", z1 > z0 and ev("graphCamera().zoom") < z1, (z0, z1))
+        page.mouse.click(r[0] + 18 + 75, r[1] + r[3] - 18 - 45)
+        check("clicking the minimap aims the camera there", ev("graphCamera().targetZoom") == ev("graphCamera().zoom"))
+        page.wait_for_timeout(1800)
+        ev("__t.stage()")
+        page.wait_for_timeout(300)
+        # double-click on a hub searches by it; on an entry opens it
+        ev("closeGraphDrawer()")
+        ev(f"App.graphNodes.find(n => n.id === '{svc}').pinned = false")  # pinned would mean 'unpin', not 'search'
+        sx, sy = ev(f"__t.xy('{svc}')")
+        page.mouse.dblclick(sx, sy)
+        page.wait_for_function("App.activeTab === 'search'", timeout=5000)
+        check("double-clicking a hub searches for its service", ev("document.getElementById('globalSearch').value") == svc.split(":", 1)[1])
+        ev("setGlobalSearchQuery(''); location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph'", timeout=5000)
+        page.wait_for_timeout(600)
+        ev("closeGraphDrawer()")
+        page.wait_for_timeout(1800)
+        ev("__t.stage()")
+        page.wait_for_timeout(300)
+        ev(f"App.graphNodes.find(n => n.id === '{ent}').pinned = false")  # a pinned node would be unpinned by the double-click instead of opened
+        x, y = ev(f"__t.xy('{ent}')")
+        page.mouse.dblclick(x, y)
+        page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{ent}'", timeout=5000)
+        check("double-clicking an entry opens it", True)
+
+        # drawer buttons, pressed
+        ev("location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph'", timeout=5000)
+        ev(f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
+        page.click("#drawerCopyBtn")
+        page.wait_for_timeout(150)
+        check("drawer: Copy copies the key", ev("navigator.clipboard.readText()") == N)
+        page.click("#drawerCopyLinkBtn")
+        page.wait_for_timeout(150)
+        check("drawer: Link copies a graph link", ev("navigator.clipboard.readText()") == f"{base}/#/graph/{N}")
+        page.click("#drawerCenterBtn")
+        check("drawer: Center aims the camera at the node", ev("graphCamera().targetZoom") >= 1.3)
+        page.click("#drawerEditBtn")
+        page.wait_for_function("document.querySelector('#editModal.open')", timeout=5000)
+        check("drawer: Edit opens the editor on the node", ev("document.getElementById('editKey').value") == N)
+        page.keyboard.press("Escape")
+        page.click("#drawerOpenFullBtn")
+        page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{N}'", timeout=5000)
+        check("drawer: Open full lands on the entry", True)
+
+        # drawer and graph over data of every shape
+        gs = ev("""__t.swap({entries: [{key: 'g-plain'}, {key: 'g-hosttag', tags: ['host-zeta', 'api'], title: 'Host by tag'}, {key: 'task-g-child', kind: 'task', parent_task: 'g-plain', tags: [7]},
+                                     {key: 'inc-g', kind: 'incident', hosts: ['alpha', '', 5], service: 'api', knowledge: ['g-plain', 'missing']}]}, () => {
+          const out = {}; const saveNodes = App.graphNodes, saveLinks = App.graphLinks; App.graphNodes = null; buildTopology();
+          const id = n => typeof n === 'string' ? n : n.id; const has = (a, b) => App.graphLinks.some(l => (id(l.source) === a && id(l.target) === b));
+          out.hosts = App.graphNodes.filter(n => n.type === 'host').map(n => n.label).sort(); out.label = App.graphNodes.find(n => n.id === 'g-plain').label;
+          out.links = [has('task-g-child', 'g-plain'), has('inc-g', 'g-plain'), has('inc-g', 'host:alpha'), has('g-hosttag', 'host:host-zeta'), has('inc-g', 'missing')];
+          openGraphDrawer(App.graphNodes.find(n => n.id === 'g-plain')); out.loading = document.getElementById('drawerContent').textContent;
+          const lonely = {id: 'lonely', type: 'knowledge', data: {body: 'has body'}}; openGraphDrawer(lonely); out.noLinks = document.getElementById('drawerLinks').textContent; out.title = document.title;
+          for (const mode of ['orbit', 'radar', 'hierarchy', 'grid']) calculateLayoutTargets(mode);
+          App.entries = []; App.graphNodes = null; buildTopology(); out.empty = App.graphNodes.length;
+          for (const mode of ['orbit', 'radar', 'hierarchy', 'grid']) calculateLayoutTargets(mode);
+          App.graphNodes = null; calculateLayoutTargets('orbit'); unpinAllGraphNodes(); reheatSimulation(0.5); focusNodeById(null); focusNodeById('nobody'); setTopoSearch('x'); setTopoSearch(''); fitGraphCamera();
+          const saveFilter = App.graphFilter; App.graphNodes = [{id: 'only', type: 'knowledge', label: 'only', x: 0, y: 0}]; App.graphFilter = 'incident'; fitGraphCamera(); App.graphFilter = saveFilter;
+          const lay = App.graphLayout; App.graphLayout = ''; App.graphNodes = saveNodes; App.graphLinks = saveLinks; closeGraphDrawer(); App.graphLayout = lay; return out; })""")
+        errors[:] = [e for e in errors if "g-plain" not in e]
+        check("hosts come from hosts[] and host-* tags; non-string values are ignored", gs["hosts"] == ["alpha", "host-zeta"], gs["hosts"])
+        check("links: task to parent, incident to knowledge and host, entry to its host tag; nothing to a missing key", gs["links"] == [True, True, True, True, False], gs["links"])
+        check("a node without a title is labelled by its key; a body-less node says it is loading; a node without links says so", gs["label"] == "g-plain" and "Loading document body" in gs["loading"] and "No active links" in gs["noLinks"] and "lonely" in gs["title"], gs)
+        check("an empty base builds an empty graph and every layout tolerates it", gs["empty"] == 0)
+        ev("buildTopology()")
+        hid = ev("""(() => { const c = document.getElementById('graphContainer'); const d = c.style.display; c.style.display = 'none'; const n = App.graphNodes[0];
+          focusNode(n); const a = graphCamera().targetZoom; zoomGraph(1.1); fitGraphCamera(); c.style.display = d;
+          const noCanvas = __t.without('topoCanvas', () => { fitGraphCamera(); focusNode(n); zoomGraph(1.1); initCanvasGraph(); return true; }); return [a >= 1.3, noCanvas]; })()""")
+        check("the camera math survives a hidden container and a missing canvas", hid == [True, True], hid)
+        page.wait_for_function("graphCamera().targetZoom === graphCamera().zoom", timeout=15000)
+        check("a settled camera reports its own zoom as the target", True)
+
+        # the last defaults in lists, forms and routes
+        ev("switchTab('incidents'); filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentCursor = 0; renderIncidents()")
+        page.mouse.click(5, 400); page.keyboard.press("k")
+        check("k at the top stays at the top", ev("App.incidentCursor") == 0)
+        ev("switchTab('tasks'); taskSetStatus('live'); App.taskCursor = 0; renderTasks()")
+        page.keyboard.press("k")
+        check("tasks: k at the top stays at the top", ev("App.taskCursor") == 0)
+        tk2 = ev("""__t.swap({tasks: [{key: 't-prog', title: 'In progress, undated', status: 'in_progress'}, {key: 't-blk', title: 'Blocked', status: 'blocked'}], taskStatusFilter: 'live', taskQueue: null, taskCursor: 0}, () => {
+          const out = {}; renderTasks(); out.first = [...document.querySelectorAll('#taskRows .inc-r.cur option')].map(o => o.value + (o.disabled ? '!' : ''));
+          App.taskCursor = 1; renderTasks(); out.second = [...document.querySelectorAll('#taskRows .inc-r.cur option')].map(o => o.value + (o.disabled ? '!' : '')); out.stalled = App.tasks.filter(TASK_QUEUES[1].test).length; return out; })""")
+        check("the Move menu disables 'blocked' on a blocked task and 'in_progress' on one in progress; an undated task in progress counts as stalled", "blocked!" in tk2["first"] and "in_progress!" in tk2["second"] and tk2["stalled"] == 1, tk2)
+        ev("renderTasks(true)")
+        sub = ev(f"""async () => {{ const real = window.fetch; const sent = []; window.fetch = (u, o) => o && o.method === 'POST' ? (sent.push([String(u), JSON.parse(o.body)]), Promise.resolve(new Response('{{}}', {{status: 200}}))) : real(u, o);
+          const rr = window.refreshAll; window.refreshAll = async () => {{}};
+          openResolveIncidentModal('inc-x', 't'); __t.set('resolveIncidentOutcome', 'o'); __t.set('resolveIncidentAuthor', ''); await submitResolveIncident();
+          openResolveTaskModal('task-x', 't'); __t.set('resolveTaskOutcome', 'o'); __t.set('resolveTaskAuthor', ''); await submitResolveTask();
+          promptBlockTask('task-x', 't'); __t.set('blockTaskReason', 'r'); __t.set('blockTaskAuthor', ''); await submitBlockTask();
+          App.activeBlockKey = 'task-y'; const noEls = __t.without('blockTaskReason', () => __t.without('blockTaskAuthor', () => submitBlockTask())); await noEls;
+          __t.without('blockTaskTargetText', () => __t.without('blockTaskReason', () => promptBlockTask('task-z', 't'))); closeModal('blockTaskModal');
+          window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('offline')) : real(u, o);
+          await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
+          window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
+        errors[:] = [e for e in errors if "API POST Error" not in e]
+        check("resolve, done and block go out with the default author when none is typed", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
+        check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
+        dv = ev("""(() => { const out = {};
+          renderDetailView({key: 'inc-nodate', kind: 'incident', resolution: 'fixed', title: 'No dates'}, []); out.inc = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
+          const t = new Date().toISOString(); renderDetailView({key: 'k-two-authors', title: 'Two'}, [{sha: 'e'.repeat(40), author: 'Second <s>', committed_at: t}, {sha: 'f'.repeat(40), author: 'First <f>', committed_at: t}]);
+          out.know = document.getElementById('detailView').textContent.replace(/\\s+/g, ' '); return out; })()""")
+        page.wait_for_timeout(400)
+        errors[:] = [e for e in errors if "k-two-authors" not in e and "inc-nodate" not in e and "eeeeeeee" not in e and "ffffffff" not in e]
+        check("an undated incident is 'recent', open by default, and shows a resolution without a resolved date", "recent" in dv["inc"] and "OPEN" in dv["inc"].upper() and "fixed" in dv["inc"] and "Resolved:" not in dv["inc"], dv["inc"][:300])
+        check("an entry last changed by someone other than its author names both", "Authored by First" in dv["know"] and "Last updated by Second" in dv["know"], dv["know"][:300])
+        nh = ev("""async () => { const real = window.fetch; const body = o => Promise.resolve(new Response(JSON.stringify(o), {status: 200}));
+          window.fetch = u => String(u).includes('/history') ? Promise.resolve(new Response('{}', {status: 404})) : String(u).includes('?at=') ? body({key: 'nh', title: 'NH'}) : body({key: 'nh', title: 'NH', body: 'b'});
+          App.detailCache.clear(); App.entryPrefetch.clear(); await selectEntry('nh', false); const h = App.detailCache.get('nh').history.length;
+          App.verDiffs.clear(); App.verSnaps.clear(); App.verKey = 'nh'; App.currentHistoryList = [{sha: '9'.repeat(40), committed_at: new Date().toISOString()}]; await verLoadDiffs();
+          const d = App.verDiffs.get('nh@' + '9'.repeat(40)); window.fetch = real; return [h, d]; }""")
+        errors[:] = [e for e in errors if "404" not in e]
+        check("an entry with no history has none; a first version whose snapshot has no body counts zero lines", nh[0] == 0 and nh[1] == {"created": True, "lines": 0}, nh)
+        led2 = ev("""__t.swap({activity: null, audit: null, ledEvents: null, ledOpenFolds: undefined}, () => { renderFeed(); const a = document.getElementById('ledBody').textContent; ledLoadVisible();
+          App.activity = [{ts: new Date().toISOString(), action: 'updated', kind: 'knowledge', key: 'k', title: 'K'}]; App.audit = [{ts: new Date(Date.now() + 5e3).toISOString(), path: '/search', query: 'q=a', ip: '1'}, {ts: new Date(Date.now() + 6e3).toISOString(), path: '/search', query: 'q=b', ip: '2'}];
+          const real = window.ledLoadVisible; window.ledLoadVisible = () => {}; renderFeed(); window.ledLoadVisible = real; return [a, document.querySelector('#ledBody .led-fold').textContent.replace(/\\s+/g, ' ')]; })""")
+        check("a ledger with no data says so; two searches by two agents are plural", "No changes recorded yet" in led2[0] and "2 searches by 2 agents" in led2[1], led2)
+        ev("renderFeed()")
+        rt2 = ev(f"""async () => {{ const out = {{}}; switchTab('tasks'); history.replaceState(null, '', location.pathname); window.dispatchEvent(new HashChangeEvent('hashchange')); await __t.wait(150); out.bare = App.activeTab;
+          switchTab('feed'); location.hash = '#/?x=1'; await __t.wait(150); out.rootless = App.activeTab; return out; }}""")
+        check("no hash at all, and a hash with only a query, both mean Knowledge", rt2 == {"bare": "search", "rootless": "search"}, rt2)
+        ev(f"location.hash = '#/search'; selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)
+
+
+        # ------------------------------------------------------------------
+        # Nothing a person can see is covered by something else, in any state.
+        # ------------------------------------------------------------------
+        ev("document.querySelectorAll('#toastContainer .toast').forEach(t => t.remove())")
+        states = [("knowledge list and card", f"location.hash = '#/knowledge/{N}'", f"App.selectedKey === '{N}' && document.getElementById('verList')"),
+                  ("card: Versions", "switchDetailTab('history')", "App.detailTab === 'history'"),
+                  ("card: Raw", "switchDetailTab('raw')", "App.detailTab === 'raw'"),
+                  ("incident card", f"switchDetailTab('content'); location.hash = '#/knowledge/{I}-open0'", f"App.selectedKey === '{I}-open0' && document.querySelector('.incident-hero-panel')"),
+                  ("task card", f"location.hash = '#/knowledge/{K}'", f"App.selectedKey === '{K}' && document.querySelector('.task-hero-panel')"),
+                  ("incidents", "location.hash = '#/incidents'", "App.activeTab === 'incidents' && document.querySelector('#incidentRows .inc-r')"),
+                  ("incidents: a queue selected", "incSelectQueue('unverifiable')", "App.incidentQueue === 'unverifiable'"),
+                  ("tasks", "incClearCell(); location.hash = '#/tasks'", "App.activeTab === 'tasks' && document.querySelector('#taskRows .inc-r')"),
+                  ("ledger", "location.hash = '#/feed'", "App.activeTab === 'feed' && document.querySelector('#ledBody .led-ev')"),
+                  ("graph", "location.hash = '#/graph'; closeGraphDrawer()", "App.activeTab === 'graph'"),
+                  ("graph with the drawer open", f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))", "document.getElementById('graphDrawer').classList.contains('open')"),
+                  ("new-entry dialog: knowledge", "closeGraphDrawer(); location.hash = '#/search'; openNewModal('knowledge')", "document.querySelector('#newModal.open')"),
+                  ("new-entry dialog: incident", "switchNewModalType('incident')", "App.newModalKind === 'incident'"),
+                  ("new-entry dialog: task", "switchNewModalType('task')", "App.newModalKind === 'task'"),
+                  ("edit dialog", f"closeModal('newModal'); openEditModal('{K}')", "document.querySelector('#editModal.open')"),
+                  ("resolve-incident dialog", f"closeModal('editModal'); openResolveIncidentModal('{I}-open0', 't')", "document.querySelector('#resolveIncidentModal.open')"),
+                  ("done dialog", f"openResolveTaskModal('{K}', 't')", "document.querySelector('#resolveTaskModal.open')"),
+                  ("block dialog", f"promptBlockTask('{K}', 't')", "document.querySelector('#blockTaskModal.open')"),
+                  ("shortcuts dialog", "openShortcutsModal()", "document.querySelector('#shortcutsModal.open')")]
+        for name, act, ready in states:
+            ev(act)
+            page.wait_for_function(ready, timeout=8000)
+            page.wait_for_timeout(450)  # slide-in transitions
+            scope = ".modal-backdrop.open" if "dialog" in name else None
+            cov = ev(f"__t.covered({scope!r})" if scope else "__t.covered()")
+            check(f"nothing is covered: {name}", cov == [], cov[:6])
+        ev("[...document.querySelectorAll('.modal-backdrop.open')].forEach(m => m.classList.remove('open'))")
+
+        # and the controls are pressed for real: Playwright refuses to click what is hidden, disabled or covered
+        ev(f"location.hash = '#/graph'; openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
+        page.wait_for_timeout(450)
+        for label in ("Stabilize", "Fit to View", "+ Zoom", "- Zoom", "Unpin All", "Reset"):
+            page.click(f".graph-controls-bar button:text-is('{label}')")
+        check("graph bar: all six controls can be pressed with the drawer open", True)
+        for btn in ("layoutRadarBtn", "layoutHierarchyBtn", "layoutGridBtn", "layoutOrbitBtn", "gFilterKnowledge", "gFilterIncidents", "gFilterTasks", "gFilterAll"):
+            page.click(f"#{btn}")
+        check("graph panel: layout and filter buttons pressed", ev("App.graphLayout") == "orbit" and ev("App.graphFilter") == "all")
+        page.click("#graphDrawer button[onclick='closeGraphDrawer()']")
+        check("drawer: its close button closes it", not ev("document.getElementById('graphDrawer').classList.contains('open')"))
+        for tab in ("incidents", "tasks", "graph", "feed", "search"):
+            page.click(f".nav-tab[data-tab='{tab}']")
+            check(f"nav: pressing {tab}", ev("App.activeTab") == tab)
+        page.click("#refreshBtn")
+        page.click("#btnOpenNew")
+        page.wait_for_function("document.querySelector('#newModal.open')", timeout=5000)
+        page.click("#modalTypeTask"); page.click("#modalTypeIncident"); page.click("#modalTypeKnowledge")
+        page.fill("#newTitle", "Typed By Hand")
+        check("typing a title fills the key as you type", page.input_value("#newKey") == "typed-by-hand")
+        page.fill("#newKey", f"typed-{stamp}")
+        page.fill("#newBody", "Typed and clicked.")
+        page.fill("#newTags", "typed, clicked")
+        page.click("#newModalSubmitBtn")
+        page.wait_for_function(f"App.selectedKey === 'typed-{stamp}' && !document.querySelector('#newModal.open')", timeout=8000)
+        s, e = api(base, "GET", f"/knowledge/typed-{stamp}")
+        check("an entry created with keyboard and mouse only", s == 200 and e.get("title") == "Typed By Hand" and e.get("tags") == ["typed", "clicked"], (s, e))
+        page.click("#btnEditEntry")
+        page.wait_for_function("document.querySelector('#editModal.open')", timeout=5000)
+        page.fill("#editTitle", "Typed By Hand, Edited")
+        page.click("#editModalSubmitBtn")
+        page.wait_for_function("!document.querySelector('#editModal.open')", timeout=8000)
+        s, e = api(base, "GET", f"/knowledge/typed-{stamp}")
+        check("and edited the same way", e.get("title") == "Typed By Hand, Edited" and e.get("tags") == ["typed", "clicked"], e)
+        page.click(".detail-tab:text('Versions')")
+        page.wait_for_function("document.querySelectorAll('#verList .ver-ev').length === 2", timeout=8000)
+        page.click("#verList .ver-ev >> nth=0 >> a.tx")
+        page.wait_for_function("document.querySelectorAll('#verList .ver-text').length === 1", timeout=5000)
+        check("Versions: 'text at v2' pressed shows the text", True)
+        page.click(".detail-tab:text('Raw')"); page.click(".detail-tab:text('Document')")
+        page.click("#btnCopyDirectLink")
+        page.wait_for_timeout(150)
+        check("Link pressed copies this entry's link", ev("navigator.clipboard.readText()") == f"{base}/#/knowledge/typed-{stamp}")
+        page.click(f"#knowledgeList .item-card[data-key='kyb-service']")
+        page.wait_for_function("App.selectedKey === 'kyb-service'", timeout=5000)
+        check("a list card pressed opens it", True)
+        page.click("#tagPills .badge-tag >> nth=0")
+        check("a tag pill pressed filters by it", ev("App.tagFilter") is not None)
+        page.fill("#globalSearch", "")
+        page.select_option("#sortSelect", "az")
+        check("the sort menu sorts", ev("getFilteredEntries().map(e => (e.title || e.key).toLowerCase())") == sorted(ev("getFilteredEntries().map(e => (e.title || e.key).toLowerCase())")))
+        page.select_option("#sortSelect", "newest")
+        page.click(".chip[data-filter='task']"); page.click(".chip[data-filter='all']")
+        page.click(".nav-tab[data-tab='incidents']")
+        page.click("#incQueue .b >> nth=1")
+        check("incident queue pressed", ev("App.incidentQueue") == "unverifiable")
+        page.click("#incQueue .b >> nth=1")
+        page.click("#incTop .chip:text-is('resolved')"); page.click("#incTop .chip:text-is('open + mitigated')")
+        page.click("#incTop .chip:text-is('high')"); page.click("#incTop .chip:text-is('any severity')")
+        page.click("#incidentRows .inc-r >> nth=1")
+        check("an incident row pressed takes the cursor", ev("App.incidentCursor") == 1)
+        page.click("#incidentRows .inc-peek button:text('Resolve')")
+        page.wait_for_function("document.querySelector('#resolveIncidentModal.open')", timeout=5000)
+        page.fill("#resolveIncidentOutcome", "Resolved by pressing the button.")
+        rkey = ev("App.activeResolveKey")
+        page.click("#resolveIncidentModal button[onclick='submitResolveIncident()']")
+        page.wait_for_function("!document.querySelector('#resolveIncidentModal.open')", timeout=8000)
+        s, e = api(base, "GET", f"/knowledge/{rkey}")
+        check("an incident resolved by pressing Resolve", e.get("status") == "resolved" and "pressing" in e.get("resolution", ""), e.get("status"))
+        page.click(".nav-tab[data-tab='tasks']")
+        page.click("#taskQueue .b >> nth=0"); page.click("#taskQueue .b >> nth=0")
+        page.click("#taskTop .chip:text-is('blocked')"); page.click("#taskTop .chip:text-is('live')")
+        page.click("#taskRows .inc-r >> nth=0")
+        tkey = ev("taskFiltered()[App.taskCursor].key")
+        page.select_option("#taskRows .inc-r.cur select", "in_progress")
+        page.wait_for_function(f"App.tasks.find(t => t.key === '{tkey}').status === 'in_progress'", timeout=8000)
+        check("a task moved with its Move menu", api(base, "GET", f"/knowledge/{tkey}")[1].get("status") == "in_progress")
+        page.click(".nav-tab[data-tab='feed']")
+        page.click("#ledTop .chip:text-is('tasks')"); page.click("#ledTop .chip:text-is('everything')")
+        check("ledger chips pressed", ev("App.activityFilter") == "all")
+        page.click(".nav-tab[data-tab='search']")
 
         check("no script errors in the per-function checks", not errors, "; ".join(errors[:3]))
         if cdp:
