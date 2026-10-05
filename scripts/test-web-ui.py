@@ -301,10 +301,12 @@ def run(base, headed, coverage=None):
             errors.append(f"console.error {m.text} @ {url[-70:]}")
         page.on("console", on_console)
 
-        def forgive_console(since):
-            """After a step that made the server fail on purpose: drop the two messages the UI logs for a failed request.
-            Anything else it logged, and any exception, still fails the run."""
-            errors[since:] = [e for e in errors[since:] if not (e.startswith("console.error API GET Error") or e.startswith("console.error API POST Error"))]
+        def forgive_console(since, *expected):
+            """After a step that made requests fail on purpose: drop the UI's own log line for each request named in
+            `expected` ("GET /path" or "POST /path" - method and exact endpoint). A failed request the step did not
+            plan, anything else logged, and any exception still fail the run."""
+            want = {f"console.error API {m} Error {path} " for m, path in (e.split(" ", 1) for e in expected)}
+            errors[since:] = [e for e in errors[since:] if not any(e.startswith(w) for w in want)]
         page.goto(base + "/#/search", wait_until="networkidle")
         page.evaluate(HELPERS)
         page.evaluate("__t.capture()")
@@ -1023,7 +1025,7 @@ def run(base, headed, coverage=None):
           App.ledDiffs.clear(); await ledFetchDiffs([{key: 'k', sha: 'deadbeef', action: 'updated'}]); out.ledNull = App.ledDiffs.get('deadbeef');
           App.verDiffs.clear(); App.verKey = 'k'; App.currentHistoryList = [{sha: 'b'.repeat(40), committed_at: new Date().toISOString()}]; await verLoadDiffs(); out.verKept = App.verDiffs.size;
           out.toasts = toasts(); window.fetch = real; return out; }""")
-        forgive_console(n_err)  # the failures above were the point
+        forgive_console(n_err, "GET /x", "POST /x")  # the only two requests that were made to reject; the rest returned 500, which the UI does not log
         check("apiFetch returns null and apiPost reports not-ok when the server is down or errors", down["get"] is None and down["get500"] is None and down["post"]["ok"] is False and down["post500"]["ok"] is False, down)
         check("a card that cannot load says so", "Error loading entry no-such-key" in down["detail"], down["detail"][:80])
         check("a failed prefetch caches nothing", down["prefetched"] is False)
@@ -1041,7 +1043,7 @@ def run(base, headed, coverage=None):
           await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); window.fetch = real;
           const open = __t.open(); __t.set('editTitle', ''); await submitEditModal();
           const t2 = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); closeModal('editModal'); return [t, open, t2]; }}""")
-        forgive_console(n_err)
+        forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
         check("a rejected edit shows the server's reason and keeps the dialog", any("boom" in t for t in ed[0]) and ed[1] == ["editModal"], ed)
         check("an edit without a title is refused before it is sent", any("Title and body are required" in t for t in ed[2]), ed[2])
         check("editing with nothing selected says so", ev("(async () => { const k = App.selectedKey; App.selectedKey = null; await openEditModal(); App.selectedKey = k; return [...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('No entry selected')); })()"))
@@ -1317,7 +1319,7 @@ def run(base, headed, coverage=None):
         n_err = len(errors)
         rej = ev("""async () => { const real = window.ledFetchDiffs; window.ledFetchDiffs = () => Promise.reject(new Error('x')); switchTab('feed'); App.ledLoading = false; ledLoadVisible(); await __t.wait(50); window.ledFetchDiffs = real; const r = App.ledLoading;
           const rf = window.apiFetch; window.apiFetch = () => { throw new Error('sync'); }; App.ledDiffs.delete('zz'); await ledFetchDiffs([{key: 'k', sha: 'zz', action: 'updated'}]); window.apiFetch = rf; return [r, App.ledDiffs.get('zz')]; }""")
-        forgive_console(n_err)
+        forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
         check("a failed diff load releases the loading flag and records the diff as absent", rej == [False, None], rej)
         ev("renderFeed()")
 
@@ -1362,7 +1364,7 @@ def run(base, headed, coverage=None):
           CSS.escape = () => {{ throw new Error('no'); }}; location.hash = '#/knowledge/kyb-service'; await __t.wait(200); CSS.escape = realEsc; out.survivedEscape = App.selectedKey === 'kyb-service';
           const real = window.fetch; window.fetch = (u, o) => String(u).includes('/search?q=') ? Promise.reject(new Error('down')) : real(u, o);
           location.hash = '#/search?q=whatever'; await __t.wait(300); window.fetch = real; out.searchDown = App.activeTab === 'search'; return out; }}""")
-        errors[:] = [e for e in errors if e.startswith("pageerror") or "API GET Error" not in e]
+        forgive_console(0, "GET /search?q=whatever&limit=100")
         check("a graph deep-link before the graph exists waits for the first build", rt["pending"] == N and rt["consumed"], rt)
         check("routes survive an unusable CSS.escape and a search that cannot be reached", rt["survivedEscape"] and rt["searchDown"], rt)
         ev("document.querySelector('.nav-tab[data-tab=\"incidents\"]').click()")
@@ -1558,7 +1560,7 @@ def run(base, headed, coverage=None):
           window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('offline')) : real(u, o);
           await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
           window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
-        errors[:] = [e for e in errors if e.startswith("pageerror") or "API POST Error" not in e]
+        forgive_console(0, "POST /knowledge")
         check("resolve, done and block go out with the default author when none is typed", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
         check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
         dv = ev("""(() => { const out = {};
@@ -1740,7 +1742,7 @@ def run(base, headed, coverage=None):
         n_err = len(errors)
         se = ev(f"""async () => {{ await openEditModal('{N}'); await __t.wait(200); const real = window.fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response('{{}}', {{status: 500}})) : real(u, o);
           await submitEditModal(); window.fetch = real; const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal'); return t; }}""")
-        forgive_console(n_err)
+        forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
         check("a server error with no message is still named", "Server error" in se, se)
         ev(f"location.hash = '#/search'; selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)
