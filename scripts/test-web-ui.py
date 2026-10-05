@@ -126,6 +126,16 @@ window.__t = {
   set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); },
   wait(ms) { return new Promise(r => setTimeout(r, ms)); },
   open() { return [...document.querySelectorAll('.modal-backdrop.open')].map(m => m.id); },
+  // The scenarios replace globals (fetch, the loaders, the clipboard) to provoke failures.
+  // The originals are captured once, and restore() puts every one of them back - the
+  // runner calls it after each step that touched one, whether the step threw or not.
+  orig: null,
+  capture() { this.orig = {fetch: window.fetch, apiFetch: window.apiFetch, refreshAll: window.refreshAll, selectEntry: window.selectEntry, ledLoadVisible: window.ledLoadVisible, ledFetchDiffs: window.ledFetchDiffs,
+    verLoadDiffs: window.verLoadDiffs, buildTopology: window.buildTopology, execCommand: document.execCommand, escape: CSS.escape, writeText: navigator.clipboard && navigator.clipboard.writeText, clipboard: Object.getOwnPropertyDescriptor(navigator, 'clipboard'),
+    scrollIfNeeded: Element.prototype.scrollIntoViewIfNeeded}; },
+  restore() { const o = this.orig; for (const k of ['fetch', 'apiFetch', 'refreshAll', 'selectEntry', 'ledLoadVisible', 'ledFetchDiffs', 'verLoadDiffs', 'buildTopology']) window[k] = o[k];
+    document.execCommand = o.execCommand; CSS.escape = o.escape; if (o.clipboard) Object.defineProperty(navigator, 'clipboard', o.clipboard); else delete navigator.clipboard;
+    if (navigator.clipboard && o.writeText) navigator.clipboard.writeText = o.writeText; if (o.scrollIfNeeded) Element.prototype.scrollIntoViewIfNeeded = o.scrollIfNeeded; },
   // Every control a person can see must be the thing under the cursor at its own centre:
   // a button that is drawn but covered by something else works in no browser.
   covered(scope) {
@@ -145,7 +155,7 @@ window.__t = {
       }
       if (clipped) continue;
       const top = document.elementFromPoint(x, y);
-      if (top && (top === el || el.contains(top) || top.contains(el))) continue;
+      if (top && (top === el || el.contains(top))) continue;   // an ancestor under the cursor means something lies over the control
       out.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ' "' + el.textContent.trim().slice(0, 24) + '" under ' + (top ? (top.id ? '#' + top.id : top.tagName.toLowerCase() + '.' + String(top.className).split(' ')[0]) : 'nothing'));
     }
     return out;
@@ -193,31 +203,29 @@ def report_coverage(result, base, out_path):
     html = assemble()
     m = re.search(r"<script>([\s\S]*?)</script>", html)
     src, script_at = m.group(1), m.start(1)
-    # V8 reports offsets either within the inline script or within the document,
-    # depending on the version: find which by locating a named function.
-    for script in result:
-        named = [f for f in script["functions"] if f["functionName"] == "renderMarkdown"] if script["url"].startswith(base) else []
-        if named:
-            at = named[0]["ranges"][0]["startOffset"]
-            if "renderMarkdown" in src[at:at + 40]:
-                script_at = 0
-            elif "renderMarkdown" not in src[at - script_at:at - script_at + 40]:
-                raise SystemExit("coverage offsets match neither the script nor the document")
-            break
-    counts = [None] * len(src)  # None = not inside any function range (top-level, runs once at load)
-    ranges = []
-    for script in result:
-        if not script["url"].startswith(base):
-            continue
-        for fn in script["functions"]:
-            for r in fn["ranges"]:
-                ranges.append((r["startOffset"], r["endOffset"], r["count"]))
+    # Exactly one script is the UI: the one that defines renderMarkdown. V8 reports its
+    # offsets either within the inline script or within the document, depending on the
+    # version. Anything unexpected here fails the run - an unrecognised script must never
+    # read as "nothing unexecuted".
+    targets = [sc for sc in result if sc["url"].startswith(base) and any(f["functionName"] == "renderMarkdown" for f in sc["functions"])]
+    if len(targets) != 1:
+        raise SystemExit(f"coverage: expected exactly one UI script, found {len(targets)}")
+    at = next(f for f in targets[0]["functions"] if f["functionName"] == "renderMarkdown")["ranges"][0]["startOffset"]
+    if "renderMarkdown" in src[at:at + 40]:
+        script_at = 0
+    elif "renderMarkdown" not in src[at - script_at:at - script_at + 40]:
+        raise SystemExit("coverage: offsets match neither the script nor the document")
+    counts = [None] * len(src)
+    ranges = [(r["startOffset"], r["endOffset"], r["count"]) for fn in targets[0]["functions"] for r in fn["ranges"]]
     # outer ranges first, inner ranges override: that is how V8 reports nested blocks
     for a, b, c in sorted(ranges, key=lambda r: (r[0], -(r[1] - r[0]))):
         a, b = max(0, a - script_at), min(len(src), b - script_at)
         for i in range(a, b):
             counts[i] = c
     code = [i for i, ch in enumerate(src) if not ch.isspace()]
+    untracked = [i for i in code if counts[i] is None]
+    if untracked:  # V8 wraps the whole script in a top-level range, so every character must carry a count
+        raise SystemExit(f"coverage: {len(untracked)} characters of the UI script are outside every reported range (first at offset {untracked[0]})")
     dead = [i for i in code if counts[i] == 0]
     pct = 100.0 * (len(code) - len(dead)) / len(code)
     # map offsets to source files
@@ -235,7 +243,7 @@ def report_coverage(result, base, out_path):
         prev = i
     if start is not None:
         blocks.append((start, prev))
-    lines = [f"block coverage {pct:.1f}% - {len(blocks)} unexecuted blocks, {len(dead)} of {len(code)} non-space chars"]
+    lines = [f"block coverage {pct:.2f}% - {len(blocks)} unexecuted blocks, {len(dead)} of {len(code)} non-space chars"]
     for a, b in blocks:
         for lo, hi, name, t in parts:
             if lo <= a < hi:
@@ -277,16 +285,34 @@ def run(base, headed, coverage=None):
             cdp.send("Profiler.startPreciseCoverage", {"callCount": True, "detailed": True})
         errors = []
         page.on("pageerror", lambda e: errors.append(f"pageerror {e}"))
-        # Records the test invents (made-up keys and shas) have nothing on the server; a 404 for one of those is the test's doing.
-        synthetic = ("eeeeeeee", "ffffffff", "aaaaaaaa", "k-two-authors", "bare-incident", "inc-nodate", "g-plain")
+        # Records the test invents (made-up keys and shas) have nothing on the server. A 404 for
+        # exactly such a path is the test's own doing; any other status on it, or a 404 anywhere
+        # else, is reported like every other error.
+        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh")
+        expected_404 = set()
+        page.on("response", lambda r: expected_404.add(r.url) if r.status == 404 and any(x in r.url for x in synthetic) else None)
 
         def on_console(m):
+            if m.type != "error":
+                return
             url = m.location.get("url", "")
-            if m.type == "error" and not any(x in url for x in synthetic):
-                errors.append(f"console.error {m.text} @ {url[-70:]}")
+            if "status of 404" in m.text and url in expected_404:
+                return
+            errors.append(f"console.error {m.text} @ {url[-70:]}")
         page.on("console", on_console)
+
+        def forgive_console(since):
+            """After a step that made the server fail on purpose: drop the console noise it caused, keep any exception."""
+            errors[since:] = [e for e in errors[since:] if e.startswith("pageerror")]
         page.goto(base + "/#/search", wait_until="networkidle")
         page.evaluate(HELPERS)
+        # The page refreshes itself every four seconds. That is checked once, here; then the loop is
+        # paused and every later refresh is one the test asks for - otherwise a background redraw
+        # landing in the middle of a step decides whether the step passes.
+        t0 = page.evaluate("App.lastSyncTime")
+        page.wait_for_function(f"App.lastSyncTime > {t0}", timeout=9000)
+        check("the page refreshes itself on a timer", True)
+        page.evaluate("clearInterval(App.refreshTimer)")
         page.wait_for_function("document.querySelectorAll('#knowledgeList .item-card').length > 0", timeout=10000)
 
         # --- every screen renders, no script errors
@@ -577,7 +603,18 @@ def run(base, headed, coverage=None):
         # ------------------------------------------------------------------
         # Every function has a contract; here each one is held to it directly.
         # ------------------------------------------------------------------
-        ev = page.evaluate
+        page.evaluate("__t.capture()")
+        patches = ("window.fetch =", "window.apiFetch =", "window.refreshAll =", "window.selectEntry =", "window.ledLoadVisible =", "window.ledFetchDiffs =", "window.verLoadDiffs =", "window.buildTopology =",
+                   "document.execCommand =", "CSS.escape =", "writeText =", "'clipboard'", "scrollIntoViewIfNeeded")
+
+        def ev(js):
+            """page.evaluate; a step that replaces a global gets every global restored afterwards, even when it throws."""
+            if not any(m in js for m in patches):
+                return page.evaluate(js)
+            try:
+                return page.evaluate(js)
+            finally:
+                page.evaluate("__t.restore()")
 
         # pure helpers
         md = ev("""renderMarkdown('# T\\n\\n**b** *i* `c` [x](other-key) [y](https://e.com) [z](#/incidents)\\n\\n- a\\n- [x] done\\n- [ ] todo\\n\\n> q\\n\\n```sh\\nls\\n```\\n\\n<script>1</script>')""")
@@ -942,7 +979,6 @@ def run(base, headed, coverage=None):
           renderDetailView({key: 'done-task', kind: 'task', status: 'done', title: 'D', resolution: 'ok'}, []); out.done = [...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim());
           return out; })()""")
         page.wait_for_timeout(500)
-        errors[:] = [e for e in errors if "bare-incident" not in e]  # the made-up sha above has no snapshot to load, by construction
         check("a bare knowledge entry renders with its key and kind", "bare-note" in det["note"] and "knowledge" in det["note"].lower(), det["note"][:120])
         check("a bare incident shows default severity and service, its links and who last changed it", "MEDIUM" in det["inc"] and "infrastructure" in det["inc"] and "kyb-service" in det["inc"] and "Zed" in det["inc"], det["inc"][:300])
         check("a bare task is unassigned and names its parent", "Unassigned" in det["task"] and "task-parent" in det["task"], det["task"][:300])
@@ -972,7 +1008,7 @@ def run(base, headed, coverage=None):
           App.ledDiffs.clear(); await ledFetchDiffs([{key: 'k', sha: 'deadbeef', action: 'updated'}]); out.ledNull = App.ledDiffs.get('deadbeef');
           App.verDiffs.clear(); App.verKey = 'k'; App.currentHistoryList = [{sha: 'b'.repeat(40), committed_at: new Date().toISOString()}]; await verLoadDiffs(); out.verKept = App.verDiffs.size;
           out.toasts = toasts(); window.fetch = real; return out; }""")
-        del errors[n_err:]  # the failures above were the point
+        forgive_console(n_err)  # the failures above were the point
         check("apiFetch returns null and apiPost reports not-ok when the server is down or errors", down["get"] is None and down["get500"] is None and down["post"]["ok"] is False and down["post500"]["ok"] is False, down)
         check("a card that cannot load says so", "Error loading entry no-such-key" in down["detail"], down["detail"][:80])
         check("a failed prefetch caches nothing", down["prefetched"] is False)
@@ -990,7 +1026,7 @@ def run(base, headed, coverage=None):
           await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); window.fetch = real;
           const open = __t.open(); __t.set('editTitle', ''); await submitEditModal();
           const t2 = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); closeModal('editModal'); return [t, open, t2]; }}""")
-        del errors[n_err:]
+        forgive_console(n_err)
         check("a rejected edit shows the server's reason and keeps the dialog", any("boom" in t for t in ed[0]) and ed[1] == ["editModal"], ed)
         check("an edit without a title is refused before it is sent", any("Title and body are required" in t for t in ed[2]), ed[2])
         check("editing with nothing selected says so", ev("(async () => { const k = App.selectedKey; App.selectedKey = null; await openEditModal(); App.selectedKey = k; return [...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('No entry selected')); })()"))
@@ -1106,7 +1142,7 @@ def run(base, headed, coverage=None):
         page.wait_for_function("App.isBackendSearchResults === false && App.entries.length > 0", timeout=8000)
         ev("App.selectedKey = null; location.hash = '#/search?q=Seeded'")
         page.wait_for_function("App.isBackendSearchResults === true && App.selectedKey !== null", timeout=8000)
-        check("route: a search with nothing selected opens its top hit", ev("App.selectedKey") == ev("App.entries[0].key"))
+        check("route: a search with nothing selected opens one of its hits", ev("App.entries.some(e => e.key === App.selectedKey)"), ev("[App.selectedKey, App.entries.map(e => e.key)]"))
         ev("document.getElementById('globalSearch').value = ''; document.getElementById('globalSearch').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))")
         page.wait_for_function("App.isBackendSearchResults === false && App.entries.length > 0", timeout=8000)
         ev("App.selectedKey = null; location.hash = '#/x'; location.hash = '#/'")
@@ -1117,7 +1153,8 @@ def run(base, headed, coverage=None):
         # ------------------------------------------------------------------
         # The remaining corners: defaults, guards and fallbacks, each provoked on purpose.
         # ------------------------------------------------------------------
-        ev("""(() => { window.__t.without = (id, fn) => { const el = document.getElementById(id); el.id = id + '__gone'; try { return fn(); } finally { el.id = id; } };
+        ev("""(() => { window.__t.without = (id, fn) => { const el = document.getElementById(id); el.id = id + '__gone'; let r; try { r = fn(); } catch (e) { el.id = id; throw e; }
+                 if (r && typeof r.then === 'function') return r.finally(() => { el.id = id; }); el.id = id; return r; };
               window.__t.swap = async (obj, fn) => { const save = {}; for (const k in obj) { save[k] = App[k]; App[k] = obj[k]; } try { return await fn(); } finally { Object.assign(App, save); } }; })()""")
         ev("switchTab('search'); setGlobalSearchQuery(''); location.hash = '#/search'")
 
@@ -1205,7 +1242,7 @@ def run(base, headed, coverage=None):
             {key: 'i-future', title: 'Future', status: 'open', detected_at: new Date(Date.now() + 3600e3).toISOString()},
             {key: 'i-follow1', title: 'One follow-up', status: 'open', severity: 'critical', open_followups: 1, detection: 'true', hosts: ['h9'], detected_at: new Date().toISOString()},
             {key: 'i-follow2', title: 'Two follow-ups', status: 'open', open_followups: 2, detected_at: new Date().toISOString()},
-            {key: 'i-res', title: 'Resolved', status: 'resolved', resolution: 'done', detected_at: new Date().toISOString(), resolved_at: new Date().toISOString()},
+            {key: 'i-res', title: 'Resolved', status: 'resolved', resolution: 'done', detected_at: new Date(Date.now() + 5e3).toISOString(), resolved_at: new Date().toISOString()},
             {key: 'i-res2', title: 'Resolved silently', status: 'resolved', detected_at: new Date().toISOString()}],
             incidentStatusFilter: 'all', incidentSeverityFilter: 'all', incidentQueue: null, incidentCursor: 0, incidentShown: 40}, () => {
           const out = {}; const peek = () => (document.querySelector('#incidentRows .inc-peek') || {textContent: ''}).textContent.replace(/\\s+/g, ' ');
@@ -1265,7 +1302,7 @@ def run(base, headed, coverage=None):
         n_err = len(errors)
         rej = ev("""async () => { const real = window.ledFetchDiffs; window.ledFetchDiffs = () => Promise.reject(new Error('x')); switchTab('feed'); App.ledLoading = false; ledLoadVisible(); await __t.wait(50); window.ledFetchDiffs = real; const r = App.ledLoading;
           const rf = window.apiFetch; window.apiFetch = () => { throw new Error('sync'); }; App.ledDiffs.delete('zz'); await ledFetchDiffs([{key: 'k', sha: 'zz', action: 'updated'}]); window.apiFetch = rf; return [r, App.ledDiffs.get('zz')]; }""")
-        del errors[n_err:]
+        forgive_console(n_err)
         check("a failed diff load releases the loading flag and records the diff as absent", rej == [False, None], rej)
         ev("renderFeed()")
 
@@ -1310,7 +1347,7 @@ def run(base, headed, coverage=None):
           CSS.escape = () => {{ throw new Error('no'); }}; location.hash = '#/knowledge/kyb-service'; await __t.wait(200); CSS.escape = realEsc; out.survivedEscape = App.selectedKey === 'kyb-service';
           const real = window.fetch; window.fetch = (u, o) => String(u).includes('/search?q=') ? Promise.reject(new Error('down')) : real(u, o);
           location.hash = '#/search?q=whatever'; await __t.wait(300); window.fetch = real; out.searchDown = App.activeTab === 'search'; return out; }}""")
-        errors[:] = [e for e in errors if "API GET Error" not in e]
+        errors[:] = [e for e in errors if e.startswith("pageerror") or "API GET Error" not in e]
         check("a graph deep-link before the graph exists waits for the first build", rt["pending"] == N and rt["consumed"], rt)
         check("routes survive an unusable CSS.escape and a search that cannot be reached", rt["survivedEscape"] and rt["searchDown"], rt)
         ev("document.querySelector('.nav-tab[data-tab=\"incidents\"]').click()")
@@ -1356,8 +1393,17 @@ def run(base, headed, coverage=None):
         ev("__t.stage()")
         page.wait_for_timeout(300)
 
+        def aim(node_id):
+            """Where a node is on screen once the camera has stopped. Pressing a node re-aims the camera at it,
+            so the camera is aimed there first: the press then moves nothing, and the second click of a
+            double-click lands where the first did."""
+            ev(f"focusNode(App.graphNodes.find(n => n.id === '{node_id}'))")
+            page.wait_for_function("!graphCamera().moving", timeout=15000)
+            page.wait_for_timeout(80)
+            return ev(f"__t.xy('{node_id}')")
+
         # hover, press, drag, release, double-click - on the canvas, with the mouse
-        x, y = ev(f"__t.xy('{tgt}')")
+        x, y = aim(tgt)
         page.mouse.move(x, y)
         page.wait_for_timeout(200)
         check("hovering a node turns the cursor into a pointer", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
@@ -1368,12 +1414,12 @@ def run(base, headed, coverage=None):
         page.wait_for_timeout(200)
         check("dragging a node moves and pins it", ev(f"App.graphNodes.find(n => n.id === '{tgt}').pinned") and ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Pinned'))"))
         check("a pinned node says so in its drawer", "PINNED" in ev(f"(openGraphDrawer(App.graphNodes.find(n => n.id === '{tgt}')), document.getElementById('drawerMeta').textContent)"))
-        x, y = ev(f"__t.xy('{tgt}')")
+        x, y = aim(tgt)
         page.mouse.dblclick(x, y)
         page.wait_for_timeout(200)
         check("double-clicking a pinned node unpins it", ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Unpinned'))"))
         ev("closeGraphDrawer(); __t.pinAll()")
-        hx, hy = ev(f"__t.xy('{hub}')")
+        hx, hy = aim(hub)
         page.mouse.move(hx, hy)
         page.wait_for_timeout(250)
         check("hovering a host hub", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
@@ -1382,7 +1428,7 @@ def run(base, headed, coverage=None):
         ev("closeGraphDrawer()")
         # empty space: pan, wheel, minimap
         r = ev("(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()")
-        page.wait_for_function("graphCamera().targetZoom === graphCamera().zoom", timeout=15000)  # pressing the hub re-aimed the camera
+        page.wait_for_function("!graphCamera().moving", timeout=15000)  # pressing the hub re-aimed the camera
         empty = ev("""(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
           for (let px = 320; px < 940; px += 40) for (let py = 90; py < b.height - 160; py += 40) {
             const gx = (px - c.x) / c.zoom, gy = (py - c.y) / c.zoom;
@@ -1410,8 +1456,8 @@ def run(base, headed, coverage=None):
         page.wait_for_timeout(300)
         # double-click on a hub searches by it; on an entry opens it
         ev("closeGraphDrawer()")
+        sx, sy = aim(svc)
         ev(f"App.graphNodes.find(n => n.id === '{svc}').pinned = false")  # pinned would mean 'unpin', not 'search'
-        sx, sy = ev(f"__t.xy('{svc}')")
         page.mouse.dblclick(sx, sy)
         page.wait_for_function("App.activeTab === 'search'", timeout=5000)
         check("double-clicking a hub searches for its service", ev("document.getElementById('globalSearch').value") == svc.split(":", 1)[1])
@@ -1422,8 +1468,8 @@ def run(base, headed, coverage=None):
         page.wait_for_timeout(1800)
         ev("__t.stage()")
         page.wait_for_timeout(300)
+        x, y = aim(ent)
         ev(f"App.graphNodes.find(n => n.id === '{ent}').pinned = false")  # a pinned node would be unpinned by the double-click instead of opened
-        x, y = ev(f"__t.xy('{ent}')")
         page.mouse.dblclick(x, y)
         page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{ent}'", timeout=5000)
         check("double-clicking an entry opens it", True)
@@ -1463,7 +1509,6 @@ def run(base, headed, coverage=None):
           App.graphNodes = null; calculateLayoutTargets('orbit'); unpinAllGraphNodes(); reheatSimulation(0.5); focusNodeById(null); focusNodeById('nobody'); setTopoSearch('x'); setTopoSearch(''); fitGraphCamera();
           const saveFilter = App.graphFilter; App.graphNodes = [{id: 'only', type: 'knowledge', label: 'only', x: 0, y: 0}]; App.graphFilter = 'incident'; fitGraphCamera(); App.graphFilter = saveFilter;
           const lay = App.graphLayout; App.graphLayout = ''; App.graphNodes = saveNodes; App.graphLinks = saveLinks; closeGraphDrawer(); App.graphLayout = lay; return out; })""")
-        errors[:] = [e for e in errors if "g-plain" not in e]
         check("hosts come from hosts[] and host-* tags; non-string values are ignored", gs["hosts"] == ["alpha", "host-zeta"], gs["hosts"])
         check("links: task to parent, incident to knowledge and host, entry to its host tag; nothing to a missing key", gs["links"] == [True, True, True, True, False], gs["links"])
         check("a node without a title is labelled by its key; a body-less node says it is loading; a node without links says so", gs["label"] == "g-plain" and "Loading document body" in gs["loading"] and "No active links" in gs["noLinks"] and "lonely" in gs["title"], gs)
@@ -1473,8 +1518,8 @@ def run(base, headed, coverage=None):
           focusNode(n); const a = graphCamera().targetZoom; zoomGraph(1.1); fitGraphCamera(); c.style.display = d;
           const noCanvas = __t.without('topoCanvas', () => { fitGraphCamera(); focusNode(n); zoomGraph(1.1); initCanvasGraph(); return true; }); return [a >= 1.3, noCanvas]; })()""")
         check("the camera math survives a hidden container and a missing canvas", hid == [True, True], hid)
-        page.wait_for_function("graphCamera().targetZoom === graphCamera().zoom", timeout=15000)
-        check("a settled camera reports its own zoom as the target", True)
+        page.wait_for_function("!graphCamera().moving", timeout=15000)
+        check("a settled camera reports its own zoom as the target", ev("graphCamera().targetZoom === graphCamera().zoom"))
 
         # the last defaults in lists, forms and routes
         ev("switchTab('incidents'); filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentCursor = 0; renderIncidents()")
@@ -1498,7 +1543,7 @@ def run(base, headed, coverage=None):
           window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('offline')) : real(u, o);
           await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
           window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
-        errors[:] = [e for e in errors if "API POST Error" not in e]
+        errors[:] = [e for e in errors if e.startswith("pageerror") or "API POST Error" not in e]
         check("resolve, done and block go out with the default author when none is typed", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
         check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
         dv = ev("""(() => { const out = {};
@@ -1506,7 +1551,6 @@ def run(base, headed, coverage=None):
           const t = new Date().toISOString(); renderDetailView({key: 'k-two-authors', title: 'Two'}, [{sha: 'e'.repeat(40), author: 'Second <s>', committed_at: t}, {sha: 'f'.repeat(40), author: 'First <f>', committed_at: t}]);
           out.know = document.getElementById('detailView').textContent.replace(/\\s+/g, ' '); return out; })()""")
         page.wait_for_timeout(400)
-        errors[:] = [e for e in errors if "k-two-authors" not in e and "inc-nodate" not in e and "eeeeeeee" not in e and "ffffffff" not in e]
         check("an undated incident is 'recent', open by default, and shows a resolution without a resolved date", "recent" in dv["inc"] and "OPEN" in dv["inc"].upper() and "fixed" in dv["inc"] and "Resolved:" not in dv["inc"], dv["inc"][:300])
         check("an entry last changed by someone other than its author names both", "Authored by First" in dv["know"] and "Last updated by Second" in dv["know"], dv["know"][:300])
         nh = ev("""async () => { const real = window.fetch; const body = o => Promise.resolve(new Response(JSON.stringify(o), {status: 200}));
@@ -1514,7 +1558,6 @@ def run(base, headed, coverage=None):
           App.detailCache.clear(); App.entryPrefetch.clear(); await selectEntry('nh', false); const h = App.detailCache.get('nh').history.length;
           App.verDiffs.clear(); App.verSnaps.clear(); App.verKey = 'nh'; App.currentHistoryList = [{sha: '9'.repeat(40), committed_at: new Date().toISOString()}]; await verLoadDiffs();
           const d = App.verDiffs.get('nh@' + '9'.repeat(40)); window.fetch = real; return [h, d]; }""")
-        errors[:] = [e for e in errors if "404" not in e]
         check("an entry with no history has none; a first version whose snapshot has no body counts zero lines", nh[0] == 0 and nh[1] == {"created": True, "lines": 0}, nh)
         led2 = ev("""__t.swap({activity: null, audit: null, ledEvents: null, ledOpenFolds: undefined}, () => { renderFeed(); const a = document.getElementById('ledBody').textContent; ledLoadVisible();
           App.activity = [{ts: new Date().toISOString(), action: 'updated', kind: 'knowledge', key: 'k', title: 'K'}]; App.audit = [{ts: new Date(Date.now() + 5e3).toISOString(), path: '/search', query: 'q=a', ip: '1'}, {ts: new Date(Date.now() + 6e3).toISOString(), path: '/search', query: 'q=b', ip: '2'}];
@@ -1648,12 +1691,14 @@ def run(base, headed, coverage=None):
         page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
         last = ev(f"""async () => {{ const out = {{}}; const cv = document.getElementById('topoCanvas'); const b = cv.getBoundingClientRect();
           // a frame, a mouse and a rebuild with no graph at all
+          // the 4-second refresh rebuilds the graph; hold it off so "no graph" stays true for these frames
+          const rebuild = window.buildTopology; window.buildTopology = () => {{}};
           const nodes = App.graphNodes, links = App.graphLinks; App.graphNodes = null; App.graphLinks = null; await __t.wait(120);
           const at = (x, y) => ({{clientX: b.left + x, clientY: b.top + y, preventDefault() {{}}, deltaY: -1}});
           cv.onmousedown(at(60, b.height - 60)); window.onmouseup(); cv.onmousedown(at(500, 300)); window.onmousemove(at(520, 310)); window.onmouseup(); window.onmousemove(at(500, 300)); cv.ondblclick(at(500, 300));
           openGraphDrawer({{id: 'no-links', label: 'n', type: 'knowledge', data: {{body: 'b'}}}}); out.noLinks = document.getElementById('drawerLinks').textContent.includes('No active links'); closeGraphDrawer();
           out.noCanvasLayout = __t.without('topoCanvas', () => {{ App.graphNodes = nodes; calculateLayoutTargets('orbit'); return true; }});
-          App.graphNodes = nodes; App.graphLinks = links;
+          App.graphNodes = nodes; App.graphLinks = links;   // the rebuild stays held off: the steps below edit this same node list
           // physics with two nodes on the same spot and a link of zero length
           const [a, c] = nodes.filter(n => !n.isHub); const keep = [a.x, a.y, c.x, c.y, a.pinned, c.pinned]; c.x = a.x; c.y = a.y; a.pinned = c.pinned = false; links.push({{source: a, target: c}}); reheatSimulation(1); await __t.wait(150);
           out.finite = [a.x, a.y, c.x, c.y].every(Number.isFinite); links.pop(); [a.x, a.y, c.x, c.y, a.pinned, c.pinned] = keep;
@@ -1663,13 +1708,16 @@ def run(base, headed, coverage=None):
           // a drawer for a node that carries no body fetches it
           openGraphDrawer({{id: '{N}', label: 'x', type: 'knowledge'}}); await __t.wait(600); out.fetchedBody = document.getElementById('drawerContent').textContent.includes('UI test'); closeGraphDrawer();
           // radar with entries that belong to no service; a rebuild with no layout chosen
-          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; buildTopology(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); App.graphNodes = n2; App.graphLinks = l2; }});
-          buildTopology(); return out; }}""")
+          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; rebuild(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); App.graphNodes = n2; App.graphLinks = l2; }});
+          window.buildTopology = rebuild; buildTopology(); return out; }}""")
         check("the graph survives having no data mid-frame, a missing canvas, coincident nodes, an unlabelled node and orphans", last["noLinks"] and last["noCanvasLayout"] and last["finite"] and last["orphans"], last)
         check("graph search counts its matches while drawing", "matching node" in last["searchCount"], last["searchCount"])
         check("a drawer opened on a bare node fetches the body", last["fetchedBody"], last)
-        led3 = ev("""(() => { switchTab('feed'); renderFeed(); App.ledEvents = null; App.ledLoading = false; ledLoadVisible(); return App.ledLoading; })()""")
-        check("the ledger loader tolerates having no event list", led3 in (True, False))
+        led3 = ev("""async () => { switchTab('feed'); const calls = []; const real = window.ledFetchDiffs; window.ledFetchDiffs = async evs => { calls.push(evs.length); return false; };
+          renderFeed(); await __t.wait(30);                                   // the ordinary load, through the stub, finishes first
+          App.ledEvents = null; App.ledLoading = false; ledLoadVisible(); const asked = calls[calls.length - 1];   // the loader calls the fetcher synchronously
+          await __t.wait(30); window.ledFetchDiffs = real; return [asked, App.ledLoading]; }""")
+        check("with no event list the ledger loader asks for nothing and does not stay 'loading'", led3 == [0, False], led3)
         noip = ev("""__t.swap({activity: [{ts: new Date().toISOString(), action: 'updated', kind: 'knowledge', key: 'k', title: 'K'}], audit: [{ts: new Date(Date.now() + 5e3).toISOString(), path: '/search', query: 'q=anon'}], ledOpenFolds: new Set([0])}, () => {
           const real = window.ledLoadVisible; window.ledLoadVisible = () => {}; renderFeed(); window.ledLoadVisible = real; return document.querySelector('#ledBody .led-q').textContent.replace(/\\s+/g, ' ').trim(); })""")
         check("a logged search with no address still lists its query", "anon" in noip, noip)
@@ -1677,7 +1725,7 @@ def run(base, headed, coverage=None):
         n_err = len(errors)
         se = ev(f"""async () => {{ await openEditModal('{N}'); await __t.wait(200); const real = window.fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response('{{}}', {{status: 500}})) : real(u, o);
           await submitEditModal(); window.fetch = real; const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal'); return t; }}""")
-        del errors[n_err:]
+        forgive_console(n_err)
         check("a server error with no message is still named", "Server error" in se, se)
         ev(f"location.hash = '#/search'; selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)

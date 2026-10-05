@@ -237,5 +237,5 @@
       refreshAll().then(() => {
         applyRoute();
       });
-      setInterval(refreshAll, 4000);
+      App.refreshTimer = setInterval(refreshAll, 4000);  // kept so the loop can be paused (the UI test drives refreshes itself)
     });

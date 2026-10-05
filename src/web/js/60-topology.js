@@ -216,7 +216,7 @@
     let graphAnimId = null;
     let camera = { x: 0, y: 0, zoom: 1 };
     // Read-only view of the camera for tests and the HUD; the state itself stays private.
-    function graphCamera() { return { ...camera, targetZoom: (typeof targetCamera !== 'undefined' && targetCamera) ? targetCamera.zoom : camera.zoom }; }
+    function graphCamera() { return { ...camera, targetZoom: targetCamera ? targetCamera.zoom : camera.zoom, moving: !!targetCamera }; }
     let targetCamera = null;
     let draggedNode = null;
     let dragStartPos = { x: 0, y: 0 };
