@@ -8,6 +8,17 @@ The edit checks are the ones that bit: an upsert replaces the whole record,
 so saving a title must not reopen a blocked task or drop an incident's
 detection.
 
+Three layers, all in this one run:
+  - behaviour: every function, shortcut, route and filter is held to its result;
+  - reach: every control visible in every screen and dialog is checked for being
+    covered by something else, and the main flows are typed and pressed with a
+    real keyboard and mouse (the canvas included);
+  - coverage: `--coverage FILE` records which blocks of the UI script ran and
+    lists the ones that did not; `--min-coverage 100` makes a gap a failure.
+    New UI code therefore arrives with its test or the run goes red.
+What it does not prove: how anything looks. Colours, spacing and overlap of
+text are for eyes.
+
 How it runs:
 
     python3 scripts/test-web-ui.py                 # own sandbox server
@@ -149,6 +160,7 @@ def main():
     ap.add_argument("--allow-writes", action="store_true", help="allow the write flows against a non-loopback --base")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--coverage", metavar="FILE", help="record which UI code ran (Chrome precise coverage) and write the unexecuted blocks to FILE")
+    ap.add_argument("--min-coverage", type=float, metavar="PCT", help="with --coverage: fail when block coverage of the UI script is below PCT")
     args = ap.parse_args()
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="kyb-ui-test-"))
@@ -162,7 +174,9 @@ def main():
         else:
             proc, base = start_sandbox(tmp)
         print(f"== web UI against {base}")
-        run(base, args.headed, args.coverage)
+        pct = run(base, args.headed, args.coverage)
+        if args.min_coverage is not None and (pct is None or pct < args.min_coverage):
+            FAILED.append(f"block coverage {pct}% is below the required {args.min_coverage}% - see {args.coverage}")
     finally:
         if proc:
             proc.kill()
@@ -231,6 +245,7 @@ def report_coverage(result, base, out_path):
                 break
     pathlib.Path(out_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\n{lines[0]} -> {out_path}")
+    return pct
 
 
 def run(base, headed, coverage=None):
@@ -1627,10 +1642,50 @@ def run(base, headed, coverage=None):
         check("ledger chips pressed", ev("App.activityFilter") == "all")
         page.click(".nav-tab[data-tab='search']")
 
+
+        # the last two dozen blocks
+        ev("location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
+        last = ev(f"""async () => {{ const out = {{}}; const cv = document.getElementById('topoCanvas'); const b = cv.getBoundingClientRect();
+          // a frame, a mouse and a rebuild with no graph at all
+          const nodes = App.graphNodes, links = App.graphLinks; App.graphNodes = null; App.graphLinks = null; await __t.wait(120);
+          const at = (x, y) => ({{clientX: b.left + x, clientY: b.top + y, preventDefault() {{}}, deltaY: -1}});
+          cv.onmousedown(at(60, b.height - 60)); window.onmouseup(); cv.onmousedown(at(500, 300)); window.onmousemove(at(520, 310)); window.onmouseup(); window.onmousemove(at(500, 300)); cv.ondblclick(at(500, 300));
+          openGraphDrawer({{id: 'no-links', label: 'n', type: 'knowledge', data: {{body: 'b'}}}}); out.noLinks = document.getElementById('drawerLinks').textContent.includes('No active links'); closeGraphDrawer();
+          out.noCanvasLayout = __t.without('topoCanvas', () => {{ App.graphNodes = nodes; calculateLayoutTargets('orbit'); return true; }});
+          App.graphNodes = nodes; App.graphLinks = links;
+          // physics with two nodes on the same spot and a link of zero length
+          const [a, c] = nodes.filter(n => !n.isHub); const keep = [a.x, a.y, c.x, c.y, a.pinned, c.pinned]; c.x = a.x; c.y = a.y; a.pinned = c.pinned = false; links.push({{source: a, target: c}}); reheatSimulation(1); await __t.wait(150);
+          out.finite = [a.x, a.y, c.x, c.y].every(Number.isFinite); links.pop(); [a.x, a.y, c.x, c.y, a.pinned, c.pinned] = keep;
+          // a node with no label is drawn, a search dims the rest
+          nodes.push({{id: 'nolabel', type: 'knowledge', x: 300, y: 300, vx: 0, vy: 0, radius: 9, pinned: true}}); await __t.wait(120); nodes.pop();
+          setTopoSearch('kyb'); await __t.wait(200); out.searchCount = document.getElementById('topoSearchCount').textContent; setTopoSearch('');
+          // a drawer for a node that carries no body fetches it
+          openGraphDrawer({{id: '{N}', label: 'x', type: 'knowledge'}}); await __t.wait(600); out.fetchedBody = document.getElementById('drawerContent').textContent.includes('UI test'); closeGraphDrawer();
+          // radar with entries that belong to no service; a rebuild with no layout chosen
+          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; buildTopology(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); App.graphNodes = n2; App.graphLinks = l2; }});
+          buildTopology(); return out; }}""")
+        check("the graph survives having no data mid-frame, a missing canvas, coincident nodes, an unlabelled node and orphans", last["noLinks"] and last["noCanvasLayout"] and last["finite"] and last["orphans"], last)
+        check("graph search counts its matches while drawing", "matching node" in last["searchCount"], last["searchCount"])
+        check("a drawer opened on a bare node fetches the body", last["fetchedBody"], last)
+        led3 = ev("""(() => { switchTab('feed'); renderFeed(); App.ledEvents = null; App.ledLoading = false; ledLoadVisible(); return App.ledLoading; })()""")
+        check("the ledger loader tolerates having no event list", led3 in (True, False))
+        noip = ev("""__t.swap({activity: [{ts: new Date().toISOString(), action: 'updated', kind: 'knowledge', key: 'k', title: 'K'}], audit: [{ts: new Date(Date.now() + 5e3).toISOString(), path: '/search', query: 'q=anon'}], ledOpenFolds: new Set([0])}, () => {
+          const real = window.ledLoadVisible; window.ledLoadVisible = () => {}; renderFeed(); window.ledLoadVisible = real; return document.querySelector('#ledBody .led-q').textContent.replace(/\\s+/g, ' ').trim(); })""")
+        check("a logged search with no address still lists its query", "anon" in noip, noip)
+        ev("renderFeed()")
+        n_err = len(errors)
+        se = ev(f"""async () => {{ await openEditModal('{N}'); await __t.wait(200); const real = window.fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response('{{}}', {{status: 500}})) : real(u, o);
+          await submitEditModal(); window.fetch = real; const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal'); return t; }}""")
+        del errors[n_err:]
+        check("a server error with no message is still named", "Server error" in se, se)
+        ev(f"location.hash = '#/search'; selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)
+
         check("no script errors in the per-function checks", not errors, "; ".join(errors[:3]))
-        if cdp:
-            report_coverage(cdp.send("Profiler.takePreciseCoverage")["result"], base, coverage)
+        pct = report_coverage(cdp.send("Profiler.takePreciseCoverage")["result"], base, coverage) if cdp else None
         browser.close()
+    return pct
 
 
 if __name__ == "__main__":

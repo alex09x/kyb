@@ -150,8 +150,7 @@
 
       // 5. Connect Links & Calculate Satellite Counts
       App.entries.forEach(e => {
-        const srcNode = nodeMap.get(e.key);
-        if (!srcNode) return;
+        const srcNode = nodeMap.get(e.key);  // step 4 added a node for every entry
 
         // Connect to Service Hub
         const svc = String(e.service || (e.tags && e.tags.find(t => typeof t === 'string')) || '').toLowerCase();
@@ -390,7 +389,6 @@
 
       function checkResize() {
         const parent = canvas.parentElement;
-        if (!parent) return;
         const w = parent.clientWidth;
         const h = parent.clientHeight;
         if (w > 0 && h > 0) {
@@ -696,7 +694,7 @@
             ctx.font = '10px -apple-system, sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(n.label.slice(0, 16), rx + 18, n.y);
+            ctx.fillText((n.label || '').slice(0, 16), rx + 18, n.y);
           }
 
           // Pinned indicator
@@ -794,8 +792,8 @@
 
         // Check Mini-Map Click Navigation
         const parent = canvas.parentElement;
-        const width = parent ? parent.clientWidth : 960;
-        const height = parent ? parent.clientHeight : 640;
+        const width = parent.clientWidth;
+        const height = parent.clientHeight;
         const mmW = 150, mmH = 95, mmX = 18, mmY = height - mmH - 18;
 
         if (mx >= mmX && mx <= mmX + mmW && my >= mmY && my <= mmY + mmH) {
@@ -862,7 +860,7 @@
           }
         }
         hoveredNode = found;
-        canvas.style.cursor = found ? 'pointer' : (isPanning ? 'grabbing' : 'grab');
+        canvas.style.cursor = found ? 'pointer' : 'grab';  // while panning this line is never reached
       };
 
       window.onmouseup = () => {
