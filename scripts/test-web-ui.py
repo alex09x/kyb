@@ -302,10 +302,12 @@ def run(base, headed, coverage=None):
         page.on("console", on_console)
 
         def forgive_console(since):
-            """After a step that made the server fail on purpose: drop the console noise it caused, keep any exception."""
-            errors[since:] = [e for e in errors[since:] if e.startswith("pageerror")]
+            """After a step that made the server fail on purpose: drop the two messages the UI logs for a failed request.
+            Anything else it logged, and any exception, still fails the run."""
+            errors[since:] = [e for e in errors[since:] if not (e.startswith("console.error API GET Error") or e.startswith("console.error API POST Error"))]
         page.goto(base + "/#/search", wait_until="networkidle")
         page.evaluate(HELPERS)
+        page.evaluate("__t.capture()")
         # The page refreshes itself every four seconds. That is checked once, here; then the loop is
         # paused and every later refresh is one the test asks for - otherwise a background redraw
         # landing in the middle of a step decides whether the step passes.
@@ -407,6 +409,20 @@ def run(base, headed, coverage=None):
           App.incidents = [{key: 'zz-new', title: 'new', status: 'open', severity: 'critical', detected_at: new Date().toISOString(), updated_at: new Date().toISOString()}, ...save];
           renderIncidents(true); const r = [k, App.incidentCursorKey, App.incidentCursor]; App.incidents = save; renderIncidents(true); return r; }""")
         check("incident selection follows the entry across a refresh", kept[0] == kept[1] and kept[2] == 2, kept)
+        # ...and through refreshAll itself, with the server's answer changed under it
+        through = page.evaluate("""async () => { const real = window.fetch; try {
+          switchTab('incidents'); await refreshAll(); App.incidentStatusFilter = 'all'; App.incidentSeverityFilter = 'all'; App.incidentQueue = null; App.incidentCursor = 1; renderIncidents(); const ik = App.incidentCursorKey;
+          App.taskStatusFilter = 'live'; App.taskQueue = null; App.taskCursor = 1; renderTasks(); const tk = App.taskCursorKey;
+          window.fetch = async (u, o) => { const r = await real(u, o); const url = String(u);
+            if (url.startsWith('/incidents')) { const d = await r.json(); d.incidents.unshift({key: 'zz-new-critical', title: 'Arrived meanwhile', status: 'open', severity: 'critical', detected_at: new Date().toISOString(), updated_at: new Date().toISOString()}); return new Response(JSON.stringify(d), {status: 200}); }
+            if (url.startsWith('/tasks')) { const d = await r.json(); d.tasks.unshift({key: 'task-zz-new-blocked', title: 'Arrived meanwhile', status: 'blocked', priority: 'critical', blocked_reason: 'x', updated_at: new Date().toISOString()}); return new Response(JSON.stringify(d), {status: 200}); }
+            return r; };
+          await refreshAll();
+          return {ik, ikAfter: App.incidentCursorKey, iIdx: App.incidentCursor, iFirst: incFiltered()[0].key, iCur: document.querySelector('#incidentRows .inc-r.cur .t span').textContent,
+                  tk, tkAfter: App.taskCursorKey, tIdx: App.taskCursor, tFirst: taskFiltered()[0].key};
+        } finally { window.fetch = real; await refreshAll(); } }""")
+        check("refreshAll keeps the incident under the cursor when a new critical arrives above it", through["iFirst"] == "zz-new-critical" and through["ik"] == through["ikAfter"] == through["iCur"] and through["iIdx"] == 2, through)
+        check("refreshAll keeps the task under the cursor when a new blocked task arrives above it", through["tFirst"] == "task-zz-new-blocked" and through["tk"] == through["tkAfter"] and through["tIdx"] == 2, through)
 
         # --- the ledger shows a change in full
         page.evaluate("switchTab('feed')")
@@ -581,9 +597,9 @@ def run(base, headed, coverage=None):
         page.evaluate(f"openDiffForEntry('{K}')")
         page.wait_for_function(f"App.selectedKey === '{K}' && App.detailTab === 'history'", timeout=5000)
         check("d/Diff from a row opens the same Versions ledger", True)
-        copied = page.evaluate("""() => { const real = navigator.clipboard; Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
-          let got = null; const ex = document.execCommand; document.execCommand = (c) => { if (c === 'copy') got = document.activeElement && document.activeElement.value; return true; };
-          copyToClipboard('fallback text', 'x'); document.execCommand = ex; Object.defineProperty(navigator, 'clipboard', {value: real, configurable: true}); return got; }""")
+        copied = page.evaluate("""() => { let got = null; try { Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
+          document.execCommand = (c) => { if (c === 'copy') got = document.activeElement && document.activeElement.value; return true; };
+          copyToClipboard('fallback text', 'x'); } finally { __t.restore(); } return got; }""")
         check("without the clipboard API the copy falls back to execCommand", copied == "fallback text", copied)
 
         # modals and refresh
@@ -603,7 +619,6 @@ def run(base, headed, coverage=None):
         # ------------------------------------------------------------------
         # Every function has a contract; here each one is held to it directly.
         # ------------------------------------------------------------------
-        page.evaluate("__t.capture()")
         patches = ("window.fetch =", "window.apiFetch =", "window.refreshAll =", "window.selectEntry =", "window.ledLoadVisible =", "window.ledFetchDiffs =", "window.verLoadDiffs =", "window.buildTopology =",
                    "document.execCommand =", "CSS.escape =", "writeText =", "'clipboard'", "scrollIntoViewIfNeeded")
 
@@ -1641,7 +1656,7 @@ def run(base, headed, coverage=None):
         page.wait_for_function("document.querySelectorAll('#verList .ver-ev').length === 2", timeout=8000)
         page.click("#verList .ver-ev >> nth=0 >> a.tx")
         page.wait_for_function("document.querySelectorAll('#verList .ver-text').length === 1", timeout=5000)
-        check("Versions: 'text at v2' pressed shows the text", True)
+        check("Versions: 'text at v2' pressed shows that version's text", "Typed and clicked." in page.locator("#verList .ver-text").inner_text() and "Typed By Hand, Edited" in page.locator("#verList .ver-text").inner_text(), page.locator("#verList .ver-text").inner_text()[:120])
         page.click(".detail-tab:text('Raw')"); page.click(".detail-tab:text('Document')")
         page.click("#btnCopyDirectLink")
         page.wait_for_timeout(150)
@@ -1708,7 +1723,7 @@ def run(base, headed, coverage=None):
           // a drawer for a node that carries no body fetches it
           openGraphDrawer({{id: '{N}', label: 'x', type: 'knowledge'}}); await __t.wait(600); out.fetchedBody = document.getElementById('drawerContent').textContent.includes('UI test'); closeGraphDrawer();
           // radar with entries that belong to no service; a rebuild with no layout chosen
-          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; rebuild(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); App.graphNodes = n2; App.graphLinks = l2; }});
+          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; try {{ rebuild(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); }} finally {{ App.graphNodes = n2; App.graphLinks = l2; }} }});
           window.buildTopology = rebuild; buildTopology(); return out; }}""")
         check("the graph survives having no data mid-frame, a missing canvas, coincident nodes, an unlabelled node and orphans", last["noLinks"] and last["noCanvasLayout"] and last["finite"] and last["orphans"], last)
         check("graph search counts its matches while drawing", "matching node" in last["searchCount"], last["searchCount"])
