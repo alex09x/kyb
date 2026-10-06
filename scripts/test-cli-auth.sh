@@ -80,7 +80,10 @@ expect "a reader cannot read the request log" "$("$cli" tags >/dev/null 2>&1; cu
 "$bin" auth add --id par-a --name A --role read >"$tmp/par-a" 2>&1 & apid=$!
 "$bin" auth add --id par-b --name B --role read >"$tmp/par-b" 2>&1; wait "$apid"   # not a bare wait: that would wait for the server too
 expect "two overlapping adds both land" "$("$bin" auth list | grep -c '^par-')" "2"
-[ -z "$(ls "$tmp"/auth.json.*.tmp "$tmp"/auth.json.lock 2>/dev/null)" ] && ok "no temp or lock file is left" || fail "no temp or lock file is left" "$(ls "$tmp")"
+[ -z "$(ls "$tmp"/auth.json.*.tmp 2>/dev/null)" ] && ok "no temp file is left" || fail "no temp file is left" "$(ls "$tmp")"
+# the book configured through a link into the canon is refused too
+mkdir -p "$tmp/data/kyb-data/sub"; ln -s "$tmp/data/kyb-data/sub" "$tmp/linked"
+expect "a book behind a symlink into the canon refuses to start" "$(KYB_AUTH=required KYB_AUTH_FILE="$tmp/linked/auth.json" KYB_DATA="$tmp/data/kyb-data" KYB_INDEX="$tmp/idx3" KYB_AUDIT="$tmp/a3" KYB_MODEL="$tmp/no-model" KYB_ADDR=127.0.0.1:0 "$bin" 2>&1)" "inside the git canon"
 expect "a book inside the canon refuses to start" "$(KYB_AUTH=required KYB_AUTH_FILE="$tmp/data/auth.json" KYB_DATA="$tmp/data" KYB_INDEX="$tmp/idx2" KYB_AUDIT="$tmp/a2" KYB_MODEL="$tmp/no-model" KYB_ADDR=127.0.0.1:0 "$bin" 2>&1)" "inside the git canon"
 
 tok_id="$("$bin" auth list | awk '/ci$/ {print $1}')"

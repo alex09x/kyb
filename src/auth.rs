@@ -212,38 +212,24 @@ impl Book {
     }
 
     /// Read, change, write - under a lock, so two commands editing the book at
-    /// the same time do not lose each other's change. The lock is a sibling
-    /// file created exclusively; one left behind by a killed process is taken
-    /// over after a few seconds.
+    /// the same time do not lose each other's change. The lock is the operating
+    /// system's advisory lock on a sibling file that is never removed: it is
+    /// released when the holder closes it or dies, so a paused writer cannot be
+    /// evicted and a dead one leaves nothing to clean up.
     pub fn update<T>(path: &Path, change: impl FnOnce(&mut Book) -> anyhow::Result<T>) -> anyhow::Result<T> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir)?;
         }
-        let lock = path.with_file_name(format!("{}.lock", path.file_name().and_then(|n| n.to_str()).unwrap_or("auth.json")));
-        let stale = std::time::Duration::from_secs(5);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
-                Ok(_) => break,
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let age = std::fs::metadata(&lock).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
-                    if age.map(|a| a > stale).unwrap_or(true) {
-                        let _ = std::fs::remove_file(&lock);
-                        continue;
-                    }
-                    anyhow::ensure!(std::time::Instant::now() < deadline, "the book {} is locked by another command ({})", path.display(), lock.display());
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
+        let lock_path = path.with_file_name(format!("{}.lock", path.file_name().and_then(|n| n.to_str()).unwrap_or("auth.json")));
+        let lock = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(&lock_path)?;
+        lock.lock().map_err(|e| anyhow::anyhow!("cannot lock {}: {e}", lock_path.display()))?;
         let result = (|| {
             let mut book = Book::load(path)?;
             let out = change(&mut book)?;
             book.save(path)?;
             Ok(out)
         })();
-        let _ = std::fs::remove_file(&lock);
+        let _ = lock.unlock();
         result
     }
 
@@ -459,22 +445,36 @@ impl Auth {
     }
 }
 
-/// Whether `path` is `dir` or under it, by the paths as given (both resolved
-/// against the same working directory), so the check needs neither to exist.
+/// Whether `path` is `dir` or under it - by where the directories really are.
+/// The nearest existing ancestor of each is canonicalised (symlinks followed),
+/// so a book configured through a link into the canon is still seen there,
+/// while a book file that does not exist yet is still checked.
 fn inside(path: &Path, dir: &Path) -> bool {
-    let norm = |p: &Path| -> PathBuf {
+    fn real(p: &Path) -> PathBuf {
         let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|c| c.join(p)).unwrap_or_else(|_| p.to_path_buf()) };
-        let mut out = PathBuf::new();
-        for c in abs.components() {
-            match c {
-                std::path::Component::CurDir => {}
-                std::path::Component::ParentDir => { out.pop(); }
-                other => out.push(other.as_os_str()),
+        // the longest existing prefix, resolved; the rest appended as written
+        let mut existing = abs.clone();
+        let mut rest: Vec<std::ffi::OsString> = vec![];
+        while !existing.exists() {
+            match (existing.file_name(), existing.parent()) {
+                (Some(name), Some(parent)) => {
+                    rest.push(name.to_os_string());
+                    existing = parent.to_path_buf();
+                }
+                _ => break,
+            }
+        }
+        let mut out = std::fs::canonicalize(&existing).unwrap_or(existing);
+        for part in rest.iter().rev() {
+            if part == ".." {
+                out.pop();
+            } else if part != "." {
+                out.push(part);
             }
         }
         out
-    };
-    norm(path).starts_with(norm(dir))
+    }
+    real(path).starts_with(real(dir))
 }
 
 pub fn book_path() -> PathBuf {
@@ -660,6 +660,21 @@ mod tests {
         assert!(!inside(Path::new("/data/auth.json"), Path::new("/data/kyb-data")));
         assert!(!inside(Path::new("./kyb-data-2/auth.json"), Path::new("./kyb-data")));
         assert!(inside(Path::new("./kyb-data/../kyb-data/auth.json"), Path::new("kyb-data")));
+        // a link whose target is in the canon is in the canon; a book not yet created is still checked
+        let dir = tempfile::tempdir().unwrap();
+        let canon = dir.path().join("kyb-data");
+        std::fs::create_dir_all(canon.join("deep")).unwrap();
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("elsewhere");
+            std::os::unix::fs::symlink(canon.join("deep"), &link).unwrap();
+            assert!(inside(&link.join("auth.json"), &canon), "through a symlinked parent");
+            assert!(inside(&link.join("not-yet").join("auth.json"), &canon), "below a symlinked parent, book not created");
+            let link2 = dir.path().join("canon-link");
+            std::os::unix::fs::symlink(&canon, &link2).unwrap();
+            assert!(inside(&canon.join("auth.json"), &link2), "the canon itself given through a link");
+        }
+        assert!(!inside(&dir.path().join("auth.json"), &canon));
     }
 
     #[test]
@@ -678,18 +693,22 @@ mod tests {
         for t in &tokens {
             assert!(book.lookup(t).is_some(), "every printed token works");
         }
-        assert!(!dir.path().join("auth.json.lock").exists(), "the lock is released");
         assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")), "no temp file is left behind");
-        // a lock left behind by a dead process is taken over
-        std::fs::write(dir.path().join("auth.json.lock"), "").unwrap();
-        let old = SystemTime::now() - std::time::Duration::from_secs(60);
-        std::fs::File::options().write(true).open(dir.path().join("auth.json.lock")).unwrap().set_modified(old).unwrap();
-        Book::update(&path, |b| b.add("late", "N", "", Role::Read, "")).unwrap();
+        // a writer that is paused keeps its lock: nobody steals it, the other waits
+        let lock_path = dir.path().join("auth.json.lock");
+        let held = std::fs::OpenOptions::new().write(true).open(&lock_path).unwrap();
+        held.lock().unwrap();
+        let p2 = path.clone();
+        let waiter = std::thread::spawn(move || Book::update(&p2, |b| b.add("late", "N", "", Role::Read, "")).unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!waiter.is_finished(), "the second writer waits for a live lock, however old");
+        held.unlock().unwrap();
+        waiter.join().unwrap();
         assert_eq!(Book::load(&path).unwrap().principals.len(), 9);
-        // a change that fails leaves the book as it was and the lock released
+        // a change that fails leaves the book as it was and the lock free
         assert!(Book::update(&path, |b| b.add("late", "N", "", Role::Read, "")).is_err());
         assert_eq!(Book::load(&path).unwrap().principals.len(), 9);
-        assert!(!dir.path().join("auth.json.lock").exists());
+        assert!(std::fs::OpenOptions::new().write(true).open(&lock_path).unwrap().try_lock().is_ok(), "the lock is free again");
     }
 
     #[test]
