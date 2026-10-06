@@ -102,11 +102,12 @@ impl AppState {
         // a write that landed while we were reading makes this answer stale: serve it once, do not keep it
         if self.history_gen.load(Ordering::Acquire) == gen {
             *self.links_cache.lock().unwrap() = Some(LinksCache { gen, index: index.clone(), archived });
-            // Only the notes this build acted on are taken: a key still in the tree
-            // when we looked (its archive commit not yet visible) keeps its note, and
-            // anything pushed meanwhile stays for the next build.
+            // Every note this build read is settled: a note is pushed only after its
+            // archive commit, so a key that is nonetheless in the tree was filed again
+            // since, and the live entry supersedes the archived one. Notes pushed while
+            // we were building stay for the next build.
             let mut since = self.archived_since.lock().unwrap();
-            for key in noted.iter().filter(|k| !head_kinds.contains(*k)) {
+            for key in &noted {
                 if let Some(at) = since.iter().position(|k| k == key) {
                     since.remove(at);
                 }
@@ -2101,23 +2102,23 @@ mod api_tests {
         let again = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-two").unwrap().clone();
         assert_eq!((again["archived"].clone(), again["live"].clone(), again["title"].clone()), (json!(false), json!(true), json!("Two again")));
 
-        // the pre-commit window, played by hand: a note for a key that is still in the tree
-        // must survive the build that saw it there, and be acted on by the next one
+        // archived and filed again before any build: the live entry wins and the note is settled, not kept forever
         let st = state_of(&app);
-        call(&app, "POST", "/incidents", Some(json!({"key": "inc-window", "title": "W", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
-        st.archived_since.lock().unwrap().push("inc-window".into());   // noted, but the file is still there
-        call(&app, "GET", "/places", None).await;                         // a build sees the key live and must keep the note
-        assert!(st.archived_since.lock().unwrap().contains(&"inc-window".to_string()), "a note for a key still in the tree is not consumed");
-        {
-            let mut w = st.writer.lock().await;
-            st.store.archive("inc-window").unwrap();                     // the commit lands without going through the handler
-            let _ = &mut w;
-        }
-        st.forget_history("inc-window");
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-refile", "title": "R", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        call(&app, "POST", "/incidents/inc-refile/resolve", Some(json!({"resolution": "ok"}))).await;
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-refile", "title": "R again", "service": "redis", "severity": "high", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        assert!(st.archived_since.lock().unwrap().contains(&"inc-refile".to_string()), "the archive was noted");
         let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
-        let win = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-window").cloned();
-        assert_eq!(win.map(|r| r["archived"].clone()), Some(json!(true)), "the next build archives it from the kept note");
-        assert!(!st.archived_since.lock().unwrap().contains(&"inc-window".to_string()), "and the note is consumed then");
+        let r = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-refile").cloned().unwrap();
+        assert_eq!((r["archived"].clone(), r["live"].clone(), r["title"].clone()), (json!(false), json!(true), json!("R again")));
+        assert!(!st.archived_since.lock().unwrap().contains(&"inc-refile".to_string()), "the note is settled by the build that saw the key live");
+        // a note pushed while a build runs is not lost: it is simply next
+        st.archived_since.lock().unwrap().push("inc-pushed-later".into());
+        call(&app, "GET", "/places", None).await;                                  // a cache hit: no build, the note waits
+        assert_eq!(st.archived_since.lock().unwrap().len(), 1);
+        st.forget_history("anything");                                              // the next write; the next build settles it
+        call(&app, "GET", "/places", None).await;
+        assert!(st.archived_since.lock().unwrap().is_empty(), "a note for a key nowhere in the tree is settled by the next build");
 
         for bad in ["/impact", "/impact?service=a&host=b", "/impact?service=%20", "/impact?host="] {
             let (st, v) = call(&app, "GET", bad, None).await;
