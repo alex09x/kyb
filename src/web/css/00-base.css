@@ -97,6 +97,8 @@
     }
     .system-status { white-space: nowrap; flex-shrink: 0; }
     .system-status .sync { color: var(--text-muted); }
+    @media (max-width: 1560px) { .system-status .sync { display: none; } }
+    @media (max-width: 1400px) { .nav-tab > span:not(.tab-badge) { display: none; } .nav-tab { padding-left: 10px; padding-right: 10px; } }   /* icons and counts only; the title attribute still names the tab */   /* the age is a nicety; the row must fit first */
     .status-dot {
       width: 6px;
       height: 6px;
@@ -154,8 +156,10 @@
     }
     .search-box {
       position: relative;
-      width: 260px;
+      flex: 0 1 260px;
+      min-width: 150px;
     }
+    .header-controls { min-width: 0; }
     .search-input {
       width: 100%;
       background: var(--card-subtle);
