@@ -65,18 +65,27 @@
       flex-direction: column;
       gap: 6px;
     }
-    .form-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-dim);
-    }
+    .form-label { font-size: 14px; font-weight: 500; color: var(--text); }
+    .form-hint { font-size: 13px; color: var(--text-muted); line-height: 1.45; }
+    .form-err { font-size: 13px; color: var(--red); }
+    .form-input.invalid, .form-textarea.invalid { border-color: var(--red); }
+    .form-input.mono { font-family: var(--font-mono); font-size: 13.5px; }
+    .form-group.key .form-input { color: var(--text-dim); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-row:has(.seg) { grid-template-columns: auto 1fr; }
+    .form-target { font-size: 14px; color: var(--text-dim); }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--card-subtle); }
+    .seg button { white-space: nowrap; background: transparent; border: 0; border-right: 1px solid var(--border); color: var(--text-dim); font-size: 14px; padding: 7px 14px; cursor: pointer; }
+    .seg button:last-child { border-right: 0; }
+    .seg button:hover { color: var(--text); }
+    .seg button.on { background: var(--border); color: var(--text); }
     .form-input, .form-textarea, .form-select {
       background: var(--card-subtle);
       border: 1px solid var(--border);
       color: var(--text);
       padding: 8px 12px;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 14px;
       outline: none;
       font-family: inherit;
     }
@@ -114,7 +123,7 @@
       padding: 12px 18px;
       border-radius: 6px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      font-size: 13px;
+      font-size: 14px;
       display: flex;
       align-items: center;
       gap: 10px;

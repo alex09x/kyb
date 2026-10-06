@@ -17,20 +17,4 @@
     .incident-card.mitigated { border-left: 4px solid var(--amber); }
     .incident-card.resolved { border-left: 4px solid var(--green); }
 
-    .block-box {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 12px;
-      font-size: 12px;
-      font-family: var(--font-mono);
-    }
-    .block-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
-      font-weight: 700;
-    }
 

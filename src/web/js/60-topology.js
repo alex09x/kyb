@@ -948,7 +948,7 @@
           </a>
         `).join('');
       } else {
-        linksEl.innerHTML = '<span style="font-size:11px; color:var(--text-muted);">No active links detected.</span>';
+        linksEl.innerHTML = '<span style="font-size: 12.5px; color:var(--text-muted);">No active links detected.</span>';
       }
 
       // Markdown preview

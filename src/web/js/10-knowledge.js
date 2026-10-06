@@ -162,256 +162,79 @@
       renderDetailView(entryData, historyList);
     }
 
+    // The state of an entry, read as one line: pills for what colour must say, words for the rest.
+    // Actions that make sense in this state sit at the right. Anything that needs more than a
+    // line - a blocked reason, a resolution, the detection check - is a callout below.
     function renderEntityHeroBanner(e, historyList = []) {
       const createdVer = (historyList && historyList.length) ? historyList[historyList.length - 1] : null;
       const lastVer = (historyList && historyList.length) ? historyList[0] : null;
       const creator = (createdVer && createdVer.author) || e.author || e.assignee || 'Alexander Panasenko <alex@prod.codes>';
       const createdAt = (createdVer && createdVer.committed_at) || e.created_at || e.detected_at || e.committed_at || e.updated_at;
+      const who = s => escapeHtml(String(s || '').replace(/\s*<[^>]*>/, '').trim() || s || '');
+      const when = createdAt ? timeAgo(createdAt) : 'recent';
+      const linked = (e.knowledge && e.knowledge.length)
+        ? `<div class="dh-links"><span>Related:</span>${e.knowledge.map(k => `<a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(k)}, 'knowledge')">${escapeHtml(k)}</a>`).join('')}</div>` : '';
+      const resolution = e.resolution
+        ? `<div class="callout good"><b>${e.kind === 'task' ? 'Done' : 'Resolved'}</b><span style="white-space:pre-wrap">${escapeHtml(e.resolution)}${e.resolved_at ? ` <span class="muted">· ${timeAgo(e.resolved_at)}</span>` : ''}</span></div>` : '';
 
       if (e.kind === 'task') {
-        const isDone = e.status === 'done' || e.status === 'closed' || e.status === 'dropped' || e.status === 'resolved' || e.archived;
-        const isBlocked = e.status === 'blocked';
-        const isProgress = e.status === 'in_progress';
-        const isOpen = !isDone && !isBlocked && !isProgress;
-
+        const st = (e.status || 'open').toLowerCase();
+        const isDone = ['done', 'closed', 'dropped', 'resolved'].includes(st) || e.archived;
+        const isBlocked = st === 'blocked', isProgress = st === 'in_progress', isOpen = !isDone && !isBlocked && !isProgress;
+        const pr = (e.priority || '').toLowerCase();
+        const acts = isOpen ? `
+            <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Start Progress</button>
+            <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
+            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>`
+          : isProgress ? `
+            <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
+            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
+            <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>`
+          : isBlocked ? `
+            <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock & Resume</button>
+            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
+            <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>`
+          : `<button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Re-open Task</button>`;
         return `
-          <div class="entity-hero-card task-hero-panel">
-            <div class="hero-top-bar">
-              <div class="hero-identity">
-                <span class="badge badge-task">TASK</span>
-                <span class="hero-key">${escapeHtml(e.key)}</span>
-                <span class="hero-attribution">
-                  <span>Created by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
-                  <span>•</span>
-                  <span>${createdAt ? timeAgo(createdAt) : 'recent'}</span>
-                </span>
-                ${e.parent_task ? `
-                  <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">
-                    ↳ Part of ${escapeHtml(e.parent_task)}
-                  </a>
-                ` : ''}
-              </div>
-
-              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                ${isOpen ? `
-                  <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Start Progress</button>
-                  <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
-                ` : ''}
-                ${isProgress ? `
-                  <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
-                  <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>
-                ` : ''}
-                ${isBlocked ? `
-                  <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock & Resume</button>
-                  <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
-                  <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>
-                ` : ''}
-                ${isDone ? `
-                  <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Re-open Task</button>
-                ` : ''}
-              </div>
+          <div class="dh-state task-hero-panel">
+            <div class="dh-pills">
+              <span class="pill ${isBlocked ? 'amber' : isProgress ? 'acc' : isDone ? 'ok' : ''}">${st === 'in_progress' ? 'in progress' : escapeHtml(st)}</span>
+              ${pr ? `<span class="pill ${pr === 'critical' ? 'crit' : pr === 'high' ? 'amber' : ''}">${escapeHtml(pr)}</span>` : ''}
+              <span class="dh-words">${escapeHtml(e.assignee || 'Unassigned')} · created ${when} by ${who(creator)}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}</span>
             </div>
-
-            <!-- Lifecycle Stepper -->
-            <div class="lifecycle-stepper">
-              <div class="step-item ${isOpen ? 'active' : (isProgress || isDone ? 'completed' : '')}" onclick="transitionTask(${jsArg(e.key)}, 'open')">
-                <div class="step-indicator">${isOpen ? '●' : (isProgress || isDone ? '✓' : '1')}</div>
-                <span>1. Backlog</span>
-              </div>
-              <div class="step-connector ${isProgress || isDone ? 'active' : ''}"></div>
-              <div class="step-item ${isProgress ? 'active' : (isDone ? 'completed' : '')}" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">
-                <div class="step-indicator">${isProgress ? '●' : (isDone ? '✓' : '2')}</div>
-                <span>2. In Progress</span>
-              </div>
-              <div class="step-connector ${isDone ? 'active' : ''}"></div>
-              <div class="step-item ${isDone ? 'active completed' : ''}" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">
-                <div class="step-indicator">${isDone ? '✓' : '3'}</div>
-                <span>3. Done / Resolved</span>
-              </div>
-              ${isBlocked ? `
-                <div style="margin-left:auto; display:flex; align-items:center; gap:6px;">
-                  <span class="badge badge-blocked" style="font-size:11.5px; font-weight:700; padding:3px 8px;">CURRENTLY BLOCKED</span>
-                </div>
-              ` : ''}
-            </div>
-
-            <!-- Executive Meta Grid -->
-            <div class="hero-meta-grid">
-              <div class="meta-cell">
-                <div class="meta-cell-label">Current Status</div>
-                <div class="meta-cell-value">
-                  <span class="badge badge-${(e.status || 'open').toLowerCase()}" style="font-size:12px; font-weight:700;">
-                    ${(e.status || 'open').toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              <div class="meta-cell">
-                <div class="meta-cell-label">Priority Level</div>
-                <div class="meta-cell-value">
-                  <span class="badge badge-${(e.priority || 'medium').toLowerCase()}" style="font-size:12px; font-weight:600;">
-                    ${(e.priority || 'normal').toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              <div class="meta-cell">
-                <div class="meta-cell-label">Assignee</div>
-                <div class="meta-cell-value" style="font-weight:600;">
-                  <span>${escapeHtml(e.assignee || 'Unassigned')}</span>
-                </div>
-              </div>
-              <div class="meta-cell">
-                <div class="meta-cell-label">Lifecycle Stage</div>
-                <div class="meta-cell-value" style="color:var(--text-dim); font-size:12px;">
-                  ${isDone ? 'Archived in Canon' : isBlocked ? 'Blocked in execution' : isProgress ? 'Active development' : 'Sprint Backlog queue'}
-                </div>
-              </div>
-            </div>
-
-            ${e.blocked_reason ? `
-              <div class="hero-callout hero-callout-warning">
-                <div class="callout-header">
-                  <strong>Blocked Reason:</strong>
-                  <button class="btn sm primary" style="padding:2px 8px; font-size:11px;" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock</button>
-                </div>
-                <div>${escapeHtml(e.blocked_reason)}</div>
-              </div>
-            ` : ''}
-
-            ${e.resolution ? `
-              <div class="hero-callout hero-callout-success">
-                <div class="callout-header">
-                  <strong>Resolution & Verification Outcome:</strong>
-                  ${e.resolved_at ? `<span style="font-size:11px; opacity:0.8;">Resolved: ${timeAgo(e.resolved_at)}</span>` : ''}
-                </div>
-                <div style="white-space:pre-wrap;">${escapeHtml(e.resolution)}</div>
-              </div>
-            ` : ''}
-
-            <div class="hero-section-divider">
-              <span>Task Acceptance Criteria & Work Specification</span>
-            </div>
+            <div class="dh-acts">${acts}</div>
           </div>
-        `;
-      } else if (e.kind === 'incident') {
-        const isResolved = e.status === 'resolved';
-        return `
-          <div class="entity-hero-card incident-hero-panel">
-            <div class="hero-top-bar">
-              <div class="hero-identity">
-                <span class="badge badge-incident">INCIDENT</span>
-                <span class="hero-key">${escapeHtml(e.key)}</span>
-                <span class="hero-attribution">
-                  <span>Reported by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
-                  <span>•</span>
-                  <span>${createdAt ? timeAgo(createdAt) : 'recent'}</span>
-                </span>
-              </div>
-
-              <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                ${!isResolved ? `
-                  <button class="btn sm success" onclick="openResolveIncidentModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Incident</button>
-                ` : ''}
-              </div>
-            </div>
-
-            <!-- Executive Incident Meta Grid -->
-            <div class="hero-meta-grid">
-              <div class="meta-cell">
-                <div class="meta-cell-label">Incident Severity</div>
-                <div class="meta-cell-value">
-                  <span class="badge badge-${(e.severity || 'medium').toLowerCase()}" style="font-size:12px; font-weight:700;">
-                    ${(e.severity || 'medium').toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              <div class="meta-cell">
-                <div class="meta-cell-label">Operational Status</div>
-                <div class="meta-cell-value">
-                  <span class="badge badge-${(e.status || 'open').toLowerCase()}" style="font-size:12px; font-weight:700;">
-                    ${(e.status || 'open').toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              <div class="meta-cell">
-                <div class="meta-cell-label">Affected Service</div>
-                <div class="meta-cell-value">
-                  <span class="service-chip">${escapeHtml(e.service || 'infrastructure')}</span>
-                </div>
-              </div>
-              <div class="meta-cell">
-                <div class="meta-cell-label">Fleet Blast Radius</div>
-                <div class="meta-cell-value">
-                  ${(e.hosts && e.hosts.length) ? e.hosts.map(h => `<span class="host-pill">${escapeHtml(h)}</span>`).join(' ') : '<span style="color:var(--text-muted); font-size:12px;">All fleet nodes</span>'}
-                </div>
-              </div>
-            </div>
-
-            ${(e.knowledge && e.knowledge.length) ? `
-              <div style="display:flex; align-items:center; gap:8px; margin: 10px 0; font-size:12px; flex-wrap:wrap;">
-                <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); font-weight:700;">Linked Runbooks:</span>
-                ${e.knowledge.map(k => `
-                  <a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(k)}, 'knowledge')">
-                    ${escapeHtml(k)}
-                  </a>
-                `).join(' ')}
-              </div>
-            ` : ''}
-
-            ${e.detection ? `
-              <div class="block-box" style="margin-bottom:12px;">
-                <div class="block-label" style="display:flex; justify-content:space-between; align-items:center;">
-                  <span>Executable Detection Check / Blast Radius Verification:</span>
-                  <button class="btn sm" style="padding:2px 6px; font-size:10.5px;" onclick="copyToClipboard(${jsArg(e.detection)}, 'Check command copied!')">Copy Command</button>
-                </div>
-                <code>${escapeHtml(e.detection)}</code>
-              </div>
-            ` : ''}
-
-            ${e.resolution ? `
-              <div class="hero-callout hero-callout-success">
-                <div class="callout-header">
-                  <strong>Resolution & Root Cause Post-Mortem:</strong>
-                  ${e.resolved_at ? `<span style="font-size:11px; opacity:0.8;">Resolved: ${timeAgo(e.resolved_at)}</span>` : ''}
-                </div>
-                <div style="white-space:pre-wrap;">${escapeHtml(e.resolution)}</div>
-              </div>
-            ` : ''}
-
-            <div class="hero-section-divider">
-              <span>Incident Description, Impact & Diagnostic Log</span>
-            </div>
-          </div>
-        `;
-      } else {
-        // Standard Knowledge Entry
-        return `
-          <div class="entity-hero-card" style="padding:12px 16px; margin-bottom:16px;">
-            <div class="hero-top-bar" style="padding-bottom:8px; border-bottom:none;">
-              <div class="hero-identity">
-                <span class="badge badge-knowledge">KNOWLEDGE</span>
-                <span class="hero-key">${escapeHtml(e.key)}</span>
-                <span class="hero-attribution">
-                  <span>Authored by <strong style="color:var(--text);">${escapeHtml(creator)}</strong></span>
-                  <span>•</span>
-                  <span>${createdAt ? timeAgo(createdAt) : 'recent'}</span>
-                  ${lastVer && lastVer.author !== creator ? `
-                    <span>• Last updated by <strong style="color:var(--text);">${escapeHtml(lastVer.author)}</strong></span>
-                  ` : ''}
-                </span>
-              </div>
-            </div>
-            ${(e.refs && e.refs.length) ? `
-              <div style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; flex-wrap:wrap;">
-                <span style="font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); font-weight:700;">Infrastructure Refs:</span>
-                ${e.refs.map(r => `<span class="host-pill">${escapeHtml(r)}</span>`).join(' ')}
-              </div>
-            ` : ''}
-          </div>
-        `;
+          ${e.blocked_reason ? `<div class="callout"><b>Blocked</b><span>${escapeHtml(e.blocked_reason)}</span><button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock</button></div>` : ''}
+          ${resolution}${linked}`;
       }
+
+      if (e.kind === 'incident') {
+        const st = (e.status || 'open').toLowerCase(), sev = (e.severity || 'medium').toLowerCase();
+        return `
+          <div class="dh-state incident-hero-panel">
+            <div class="dh-pills">
+              <span class="pill ${sev === 'critical' ? 'crit' : sev === 'high' ? 'amber' : ''}">${escapeHtml(sev)}</span>
+              <span class="pill ${st === 'resolved' ? 'ok' : st === 'mitigated' ? 'amber' : ''}">${escapeHtml(st)}</span>
+              <span class="dh-words"><span class="mono">${escapeHtml(e.service || 'infrastructure')}</span>${(e.hosts && e.hosts.length) ? ` on <span class="mono">${e.hosts.map(escapeHtml).join(', ')}</span>` : ''} · opened ${when} by ${who(creator)}</span>
+            </div>
+            <div class="dh-acts">${st !== 'resolved' ? `<button class="btn sm success" onclick="openResolveIncidentModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Incident</button>` : ''}</div>
+          </div>
+          ${e.detection
+            ? `<div class="detect"><span><span class="l">Is it still happening? </span><code>${escapeHtml(e.detection)}</code></span><button class="btn sm" onclick="copyToClipboard(${jsArg(e.detection)}, 'Check command copied!')">Copy</button></div>`
+            : (st !== 'resolved' ? `<div class="callout"><b>No detection</b><span>Nobody can tell whether this is still happening. Add a command and what a healthy answer looks like.</span><button class="btn sm" onclick="openEditModal(${jsArg(e.key)})">Add check</button></div>` : '')}
+          ${resolution}${linked}`;
+      }
+
+      // knowledge
+      const changed = lastVer && lastVer.author !== creator ? ` · last changed by ${who(lastVer.author)}` : '';
+      return `
+        <div class="dh-state">
+          <div class="dh-pills"><span class="dh-words">Written ${when} by ${who(creator)}${changed}${(e.refs && e.refs.length) ? ` · refs: ${e.refs.map(r => `<span class="mono">${escapeHtml(r)}</span>`).join(', ')}` : ''}</span></div>
+        </div>`;
     }
+
+    // The "More" menu closes on any click that is not its own toggle (the toggle stops propagation).
+    document.addEventListener('click', () => document.querySelectorAll('.more.open').forEach(m => m.classList.remove('open')));
 
     function renderDetailView(e, historyList = [], isSkeleton = false) {
       const detailEl = document.getElementById('detailView');
@@ -419,32 +242,32 @@
 
       detailEl.innerHTML = `
         <div class="detail-header">
-          <div>
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-              <span class="badge badge-${e.kind || 'knowledge'}">${e.kind || 'knowledge'}</span>
-              <span style="font-family:var(--font-mono); font-size:12px; color:var(--accent); font-weight:700;">${e.key}</span>
-              ${e.sha ? `<span style="font-family:var(--font-mono); font-size:11px; color:var(--text-muted);">${e.sha.slice(0,7)}</span>` : ''}
-            </div>
-            <h1 style="font-size:20px; font-weight:700; color:#fff;">${escapeHtml(e.title || e.key)}</h1>
-            <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-              ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" style="text-decoration:none;" onclick="handleTagClick(event, ${jsArg(t)})">#${escapeHtml(t)}</a>`).join('')}
-            </div>
-            ${historyList.length > 1 ? `<div class="ver-line" onclick="switchDetailTab('history')">${historyList.length} versions &middot; last change ${timeAgo(historyList[0].committed_at)} &middot; <span>see what moved &rarr;</span></div>` : ''}
+          <div class="dh-kind">
+            ${e.kind === 'incident' || e.kind === 'task' ? '' : `<span class="pill">${e.kind || 'knowledge'}</span>`}
+            <span class="mono dh-key">${escapeHtml(e.key)}</span>
+            ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" onclick="handleTagClick(event, ${jsArg(t)})">#${escapeHtml(t)}</a>`).join('')}
           </div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn sm" id="btnCopyDirectLink" onclick="copyDirectLink(${jsArg('#/knowledge/' + encodeURIComponent(e.key))})">Link</button>
-            <a href="#/graph/${encodeURIComponent(e.key)}" class="btn sm" onclick="navigateToGraphNode(event, ${jsArg(e.key)})">Graph</a>
-            <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit</button>
-            <button class="btn sm" onclick="copyToClipboard(${jsArg('kyb get ' + e.key)}, 'CLI command copied!')">CLI</button>
-            <button class="btn sm" onclick="copyEntryBody(${jsArg(e.key)})">Markdown</button>
-            <button class="btn sm" onclick="copyToClipboard(${jsArg(e.key)}, 'Key copied!')">Key</button>
+          <h1>${escapeHtml(e.title || e.key)}</h1>
+          <div class="dh-row">
+            <div class="detail-tabs">
+              <button class="detail-tab active" onclick="switchDetailTab('content')">${e.kind === 'incident' ? 'Report' : e.kind === 'task' ? 'Task' : 'Document'}</button>
+              <button class="detail-tab" onclick="switchDetailTab('history')">Versions${historyList.length ? ` · ${historyList.length}` : ''}</button>
+              <button class="detail-tab" onclick="switchDetailTab('raw')">Raw</button>
+            </div>
+            <div class="dh-acts">
+              <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit <kbd>e</kbd></button>
+              <div class="more">
+                <button class="btn sm ghost" onclick="this.parentElement.classList.toggle('open'); event.stopPropagation();">More ▾</button>
+                <div class="menu">
+                  <button id="btnCopyDirectLink" onclick="copyDirectLink(${jsArg('#/knowledge/' + encodeURIComponent(e.key))})">Copy link</button>
+                  <button onclick="copyToClipboard(${jsArg('kyb get ' + e.key)}, 'CLI command copied!')">Copy CLI command</button>
+                  <button onclick="copyEntryBody(${jsArg(e.key)})">Copy as Markdown</button>
+                  <button onclick="copyToClipboard(${jsArg(e.key)}, 'Key copied!')">Copy key</button>
+                  <a href="#/graph/${encodeURIComponent(e.key)}" onclick="navigateToGraphNode(event, ${jsArg(e.key)})">Show in Topology</a>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <div class="detail-tabs">
-          <button class="detail-tab active" onclick="switchDetailTab('content')">Document</button>
-          <button class="detail-tab" onclick="switchDetailTab('history')">Versions (${historyList.length})</button>
-          <button class="detail-tab" onclick="switchDetailTab('raw')">Raw</button>
         </div>
 
         <div class="detail-body" id="detailBodyContent">
@@ -457,7 +280,7 @@
         </div>
 
         <div class="detail-body" id="detailBodyRaw" style="display:none;">
-          <pre style="background:#06080c; border:1px solid var(--border); padding:16px; border-radius:6px; font-family:var(--font-mono); font-size:12px; color:var(--text); white-space:pre-wrap;">${escapeHtml(e.body)}</pre>
+          <pre style="background:#06080c; border:1px solid var(--border); padding:16px; border-radius:6px; font-family:var(--font-mono); font-size: 13px; color:var(--text); white-space:pre-wrap;">${escapeHtml(e.body)}</pre>
         </div>
       `;
 

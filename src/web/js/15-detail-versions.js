@@ -139,8 +139,8 @@
           <div style="background:var(--accent-dim); border:1px solid var(--accent); border-radius:6px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
             <div>
               <span style="font-weight:700; color:var(--accent);">Historical Snapshot:</span>
-              <span style="font-family:var(--font-mono); font-size:12px; margin-left:6px;">commit ${sha.slice(0, 7)}</span>
-              <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${escapeHtml(snap.author || '')}</span>
+              <span style="font-family:var(--font-mono); font-size: 13px; margin-left:6px;">commit ${sha.slice(0, 7)}</span>
+              <span style="font-size: 12.5px; color:var(--text-muted); margin-left:8px;">${escapeHtml(snap.author || '')}</span>
             </div>
             <button class="btn sm" onclick="selectEntry(${jsArg(key)})">Back to Head</button>
           </div>

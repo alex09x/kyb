@@ -15,10 +15,7 @@
   <header>
     <a href="#/search" class="brand">
       <div class="brand-logo">KYB</div>
-      <div>
-        <div class="brand-title">Know Your Business</div>
-        <div style="font-size: 11px; color: var(--text-muted);">Infrastructure Canon & Fleet Memory</div>
-      </div>
+      <div class="brand-title">Know Your Business</div>
     </a>
 
     <nav class="nav-tabs">
@@ -59,36 +56,12 @@
       <button class="btn sm icon-only" id="refreshBtn" title="Force Refresh (R)" onclick="manualRefresh()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg></button>
       <div class="system-status" title="Fleet connection active">
         <span class="status-dot"></span>
-        <span id="daemonLabel">Connected</span>
+        <span id="daemonLabel">Connected</span><span class="sync">· synced <span id="statLastSync">just now</span></span>
       </div>
     </div>
   </header>
 
   <!-- Metrics Subheader -->
-  <section class="stats-bar">
-    <div class="stat-item">
-      <span>Total entries:</span>
-      <span class="stat-val" id="statIndexed">0</span>
-    </div>
-    <div class="stat-dot"></div>
-    <div class="stat-item">
-      <span>Open incidents:</span>
-      <span class="stat-val" id="statIncidents">0</span>
-    </div>
-    <div class="stat-dot"></div>
-    <div class="stat-item">
-      <span>Active tasks:</span>
-      <span class="stat-val" id="statTasks">0</span>
-    </div>
-    <div class="stat-dot"></div>
-    <div class="stat-item">
-      <span>Canon:</span>
-      <span class="stat-val" id="statRev" style="font-family:var(--font-mono);">head</span>
-    </div>
-    <div class="stat-item" style="margin-left: auto;">
-      <span style="color: var(--text-muted); font-size:11.5px;">Last sync: <span id="statLastSync" style="color: var(--text-dim);">just now</span></span>
-    </div>
-  </section>
 
   <!-- Main Content Area -->
   <main>
@@ -140,13 +113,12 @@
       <div class="inc">
         <div class="inc-top" id="incTop"></div>
         <div class="inc-queue" id="incQueue"></div>
-        <div class="inc-cmd" id="incCmd" title="Click a grid cell to add a filter; Esc clears it"></div>
-        <div class="inc-hint">
-          <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> report</span><span><kbd>r</kbd> resolve</span>
-          <span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
-          <span style="margin-left:auto"><button class="btn sm" onclick="openNewModal('incident')">+ Report incident</button></span>
-        </div>
         <div id="incidentRows"></div>
+        <div class="inc-hint">
+          <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> open</span><span><kbd>r</kbd> resolve</span>
+          <span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
+          <span class="cnt" id="incCount"></span>
+        </div>
       </div>
     </div>
 
@@ -155,13 +127,12 @@
       <div class="inc">
         <div class="inc-top" id="taskTop"></div>
         <div class="inc-queue" id="taskQueue"></div>
-        <div class="inc-cmd" id="taskCmd"></div>
-        <div class="inc-hint">
-          <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> doc</span><span><kbd>m</kbd> move to&hellip;</span>
-          <span><kbd>x</kbd> done</span><span><kbd>e</kbd> edit</span><span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
-          <span style="margin-left:auto"><button class="btn sm" onclick="openNewModal('task')">+ Add task</button></span>
-        </div>
         <div id="taskRows"></div>
+        <div class="inc-hint">
+          <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> open</span><span><kbd>m</kbd> move to&hellip;</span>
+          <span><kbd>x</kbd> done</span><span><kbd>e</kbd> edit</span><span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
+          <span class="cnt" id="taskCount"></span>
+        </div>
       </div>
     </div>
 
@@ -266,7 +237,7 @@
   <div class="modal-backdrop" id="newModal" onclick="handleBackdropClick(event, 'newModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title" id="newModalTitle">Create Fleet Knowledge</div>
+        <div class="modal-title" id="newModalTitle">New note</div>
         <button class="modal-close" onclick="closeModal('newModal')">✕</button>
       </div>
 
@@ -291,23 +262,19 @@
   <div class="modal-backdrop" id="resolveIncidentModal" onclick="handleBackdropClick(event, 'resolveIncidentModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title">Resolve Incident</div>
+        <div class="modal-title">Resolve incident</div>
         <button class="modal-close" onclick="closeModal('resolveIncidentModal')">✕</button>
       </div>
       <div class="modal-body">
-        <div style="font-size:13px; color:var(--text-dim);" id="resolveIncidentTargetText"></div>
+        <div class="form-target" id="resolveIncidentTargetText"></div>
         <div class="form-group">
-          <label class="form-label">Post-Mortem & Resolution Outcome *</label>
-          <textarea class="form-textarea" id="resolveIncidentOutcome" placeholder="Explain what fixed the issue, root cause, or changes deployed..."></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Author Identity</label>
-          <input type="text" class="form-input" id="resolveIncidentAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
+          <label class="form-label">What fixed it</label>
+          <textarea class="form-textarea" id="resolveIncidentOutcome" placeholder="The cause and the change that fixed it. This is what the next person reads."></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal('resolveIncidentModal')">Cancel</button>
-        <button class="btn success" onclick="submitResolveIncident()">Confirm & Close Incident</button>
+        <button class="btn success" onclick="submitResolveIncident()">Resolve and archive</button>
       </div>
     </div>
   </div>
@@ -316,23 +283,19 @@
   <div class="modal-backdrop" id="resolveTaskModal" onclick="handleBackdropClick(event, 'resolveTaskModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title">Complete Task</div>
+        <div class="modal-title">Finish task</div>
         <button class="modal-close" onclick="closeModal('resolveTaskModal')">✕</button>
       </div>
       <div class="modal-body">
-        <div style="font-size:13px; color:var(--text-dim);" id="resolveTaskTargetText"></div>
+        <div class="form-target" id="resolveTaskTargetText"></div>
         <div class="form-group">
-          <label class="form-label">Completion Outcome *</label>
-          <textarea class="form-textarea" id="resolveTaskOutcome" placeholder="Summary of results, verification steps, or PR link..."></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Author Identity</label>
-          <input type="text" class="form-input" id="resolveTaskAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
+          <label class="form-label">What came out of it</label>
+          <textarea class="form-textarea" id="resolveTaskOutcome" placeholder="The result, how it was verified, a link if there is one."></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal('resolveTaskModal')">Cancel</button>
-        <button class="btn success" onclick="submitResolveTask()">Mark Task Done</button>
+        <button class="btn success" onclick="submitResolveTask()">Mark done</button>
       </div>
     </div>
   </div>
@@ -341,23 +304,19 @@
   <div class="modal-backdrop" id="blockTaskModal" onclick="handleBackdropClick(event, 'blockTaskModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title" style="color:var(--amber);">⚠️ Block Task</div>
+        <div class="modal-title">Block task</div>
         <button class="modal-close" onclick="closeModal('blockTaskModal')">✕</button>
       </div>
       <div class="modal-body">
-        <div style="font-size:13px; color:var(--text-dim);" id="blockTaskTargetText"></div>
+        <div class="form-target" id="blockTaskTargetText"></div>
         <div class="form-group">
-          <label class="form-label">Blocked Reason *</label>
-          <textarea class="form-textarea" id="blockTaskReason" placeholder="What is blocking this task? External dependency, credentials, waiting for review..."></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Author Identity</label>
-          <input type="text" class="form-input" id="blockTaskAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
+          <label class="form-label">What is blocking it</label>
+          <textarea class="form-textarea" id="blockTaskReason" placeholder="Who or what has to happen first."></textarea>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal('blockTaskModal')">Cancel</button>
-        <button class="btn warning" onclick="submitBlockTask()">Block Task</button>
+        <button class="btn warning" onclick="submitBlockTask()">Block</button>
       </div>
     </div>
   </div>

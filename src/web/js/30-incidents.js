@@ -74,6 +74,8 @@
           ${['all','open','mitigated','resolved'].map(st => `<button class="chip ${App.incidentStatusFilter === st ? 'active' : ''}" onclick="filterIncidents('${st}')">${st === 'all' ? 'open + mitigated' : st}</button>`).join('')}
           <span class="sep"></span>
           ${['all','critical','high','medium','low'].map(sv => `<button class="chip ${App.incidentSeverityFilter === sv ? 'active' : ''}" onclick="filterIncidentsSeverity('${sv}')">${sv === 'all' ? 'any severity' : sv}</button>`).join('')}
+          <span class="sep"></span>
+          <button class="btn sm primary" onclick="openNewModal('incident')">+ Report incident</button>
         </span>`;
 
       // ---- attention queue
@@ -85,15 +87,9 @@
           <div class="k">${escapeHtml(q.flag)}</div></div>`;
       }).join('');
 
-      // ---- command line: the filter, made literal
+      // ---- the count of what the filter left, in the footer
       const list = incFiltered();
-      const parts = ['incidents'];
-      if (App.incidentStatusFilter !== 'all') parts.push('<i>--status</i> ' + App.incidentStatusFilter);
-      if (App.incidentSeverityFilter !== 'all') parts.push('<i>--severity</i> ' + App.incidentSeverityFilter);
-      if (App.incidentQueue) parts.push(INC_QUEUES.find(q => q.id === App.incidentQueue).flag.replace(/--(\S+)/g, '<i>--$1</i>'));
-      document.getElementById('incCmd').innerHTML =
-        `<span class="p">kyb</span><span>${parts.join(' ')}</span><span class="cur"></span>
-         <span class="cnt">${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' &middot; open only' : ''}</span>`;
+      document.getElementById('incCount').textContent = `${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' · open and mitigated' : ''}`;
 
       // ---- rows + peek under the cursor
       // A background refresh may reorder the list; the selection is an incident, not a row number.
@@ -188,12 +184,11 @@
     }
 
     async function submitResolveIncident() {
-      const outcome = document.getElementById('resolveIncidentOutcome').value.trim();
-      const author = document.getElementById('resolveIncidentAuthor').value.trim() || 'Alexander Panasenko <alex@prod.codes>';
-      if (!outcome) {
-        showToast('Please provide a resolution outcome summary', 'error');
+      if (!markRequired(['resolveIncidentOutcome'])) {
+        showToast('Say what fixed it', 'error');
         return;
       }
+      const outcome = document.getElementById('resolveIncidentOutcome').value.trim();
 
       const res = await apiPost(`/incidents/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
         resolution: outcome
