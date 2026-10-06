@@ -1,0 +1,26 @@
+    /* ===== Relations: Related in the card, and the Services tab ===== */
+    .rel { margin-top: 28px; border-top: 1px solid var(--border); padding-top: 8px; max-width: 900px; }
+    .rel-h { font-size: 13px; font-weight: 600; color: var(--text-dim); margin: 18px 0 6px; }
+    .rel-h span { font-weight: 400; color: var(--text-muted); margin-left: 6px; }
+    .rel-none { font-size: 13.5px; color: var(--text-muted); padding: 6px 0; }
+    .rel-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto minmax(0, 220px); gap: 12px; align-items: center; padding: 9px 10px; margin: 0 -10px; border-radius: 6px; text-decoration: none; color: inherit; font-size: 14px; }
+    a.rel-row:hover { background: var(--card-hover); }
+    .rel-row .k { font-size: 12.5px; color: var(--text-muted); }
+    .rel-row .t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+    .rel-row .t b { font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rel-row .t .mono, .rel-row.missing .mono { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rel-row .why { font-size: 12.5px; color: var(--text-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rel-row.missing { grid-template-columns: minmax(0, 1fr) auto; }
+    .rel-row .pill { grid-column: 3; }
+    .places { display: grid; grid-template-columns: 320px minmax(0, 1fr); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; min-height: 60vh; }
+    .places-list { border-right: 1px solid var(--border); padding: 4px 12px 16px; overflow-y: auto; max-height: calc(100vh - 110px); }
+    .places-detail { padding: 22px 28px 32px; overflow-y: auto; max-height: calc(100vh - 110px); }
+    .places-detail h1 { font-size: 22px; font-weight: 600; margin: 8px 0 6px; color: var(--text); }
+    .place { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 6px; text-decoration: none; color: var(--text); font-size: 13.5px; }
+    .place:hover { background: var(--card-hover); }
+    .place.on { background: var(--card-hover); box-shadow: inset 3px 0 0 var(--accent); }
+    .place .mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .place .quiet { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+    .place-sum { font-size: 15px; color: var(--text-dim); margin-bottom: 6px; }
+    .place-sum.hot { color: var(--amber); }
+    @media (max-width: 900px) { .places { grid-template-columns: 1fr; } .places-list { border-right: 0; border-bottom: 1px solid var(--border); max-height: 240px; } .rel-row { grid-template-columns: 56px minmax(0, 1fr) auto; } .rel-row .why { display: none; } }

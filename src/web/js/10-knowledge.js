@@ -263,7 +263,6 @@
                   <button onclick="copyToClipboard(${jsArg('kyb get ' + e.key)}, 'CLI command copied!')">Copy CLI command</button>
                   <button onclick="copyEntryBody(${jsArg(e.key)})">Copy as Markdown</button>
                   <button onclick="copyToClipboard(${jsArg(e.key)}, 'Key copied!')">Copy key</button>
-                  <a href="#/graph/${encodeURIComponent(e.key)}" onclick="navigateToGraphNode(event, ${jsArg(e.key)})">Show in Topology</a>
                 </div>
               </div>
             </div>
@@ -273,6 +272,7 @@
         <div class="detail-body" id="detailBodyContent">
           ${renderEntityHeroBanner(e, historyList)}
           <div class="prose">${renderMarkdown(e.body)}</div>
+          <div id="relatedBox" data-key="${escapeHtml(e.key)}">${relatedHtml(e.key)}</div>
         </div>
 
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
@@ -286,6 +286,7 @@
 
       // The pane is rebuilt on every 4s refresh; the reader's tab must survive it.
       App.currentHistoryList = historyList;
+      if (!isSkeleton) loadRelated(e.key);
       const sameKey = App.verKey === e.key;
       if (!sameKey) { App.detailTab = 'content'; App.verTextOpen = new Set(); }
       App.verKey = e.key;

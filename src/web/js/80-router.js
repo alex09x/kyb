@@ -13,17 +13,15 @@
         let targetHash = `#/${tabName}`;
         if (tabName === 'search' && App.selectedKey) {
           targetHash = `#/knowledge/${encodeURIComponent(App.selectedKey)}`;
-        } else if (tabName === 'graph' && App.drawerNode) {
-          targetHash = `#/graph/${encodeURIComponent(App.drawerNode.id)}`;
+        } else if (tabName === 'services' && App.place) {
+          targetHash = placeHash(App.place);
         }
         if (window.location.hash !== targetHash) {
           history.pushState(null, '', targetHash);
         }
       }
 
-      if (tabName === 'graph') {
-        setTimeout(initCanvasGraph, 50);
-      }
+      if (tabName === 'services') renderPlaces();
     }
 
     // A tag is a filter, not a search term: only entries carrying exactly this tag.

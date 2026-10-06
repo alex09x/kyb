@@ -286,7 +286,8 @@ need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses 
 `kyb-server` embeds a zero-dependency, dark-mode Web UI served directly at `http://<host>:9310/`:
 
 * **Live Fleet Feed**: real-time activity stream of agent reads, writes, and tool executions from the audit log.
-* **Interactive Topology Graph**: 2D force-directed map visualizing services, hosts, dependencies, and linked incidents.
+* **Services and hosts**: for each service or host an incident names, what is open on it right now, the notes those incidents cite and the open tasks pointing at them. Every row says why it is listed.
+* **Related entries**: each card lists what it refers to and what refers to it, taken only from typed fields (`knowledge`, `parent_task`) and internal links in the text (`[[key]]`, `[text](key)`). Shared tags are a filter, not a relation.
 * **Incident Control Center**: status board (Open / Mitigated / Resolved), executable detection check commands, and mandatory post-mortem resolutions.
 * **Agent Task Kanban**: columns for Backlog, In Progress, Blocked (with reasons highlighted), and Closed tasks.
 * **Knowledge Explorer**: instant search, full Markdown document rendering, revision histories, and line-by-line visual git diffs.
@@ -300,6 +301,9 @@ need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses 
 | `GET` | `/` | Web UI & Control Room (zero-dependency single-page application) |
 | `GET` | `/api/audit` | `?limit=50` — recent operations from the JSONL audit log, newest first |
 | `GET` | `/knowledge/{key}/diff` | `?from=<sha>&to=<sha>` — unified git diff between two revisions |
+| `GET` | `/knowledge/{key}/related` | what the entry refers to and what refers to it, each with how (`knowledge`, `parent_task`, `link`) |
+| `GET` | `/places` | services and hosts named by incidents, with open and total counts |
+| `GET` | `/impact` | `?service=<name>` or `?host=<name>` — incidents on it, the notes they cite, the open tasks pointing at them |
 | `POST` | `/knowledge` | upsert by key. Body: `{key, title, body, tags?, refs?}` → `{key, sha, changed, action}`. Identical content = `changed:false`, no commit |
 | `GET` | `/knowledge/{key}` | the entry (kind-specific fields included); archived incidents/tasks come back with `archived:true`; `?at=<sha>` returns a version from history |
 | `GET` | `/knowledge/{key}/history` | `{key, versions:[{sha, committed_at, message, change}]}`, newest first |

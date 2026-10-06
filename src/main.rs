@@ -2,6 +2,7 @@ mod audit;
 mod config;
 mod embed;
 mod index;
+mod links;
 mod mcp;
 mod model;
 mod store;
@@ -41,9 +42,29 @@ pub struct AppState {
     /// Bumped by every invalidation. A scan that began before a write must not
     /// put its pre-write answer into the cache after the write dropped it.
     history_gen: std::sync::atomic::AtomicU64,
+    /// Relations between entries, derived from the repository. Kept until the
+    /// next write (the generation it was built at no longer matches).
+    links_cache: std::sync::Mutex<Option<(u64, Arc<links::LinkIndex>)>>,
 }
 
 impl AppState {
+    /// The link index for the current state of the repository.
+    fn links(&self) -> Result<Arc<links::LinkIndex>> {
+        use std::sync::atomic::Ordering;
+        let gen = self.history_gen.load(Ordering::Acquire);
+        if let Some((at, ix)) = self.links_cache.lock().unwrap().as_ref() {
+            if *at == gen {
+                return Ok(ix.clone());
+            }
+        }
+        let ix = Arc::new(links::LinkIndex::build(&self.store.list_head()?, &self.store.archived_latest()?));
+        // a write that landed while we were reading makes this answer stale: serve it once, do not keep it
+        if self.history_gen.load(Ordering::Acquire) == gen {
+            *self.links_cache.lock().unwrap() = Some((gen, ix.clone()));
+        }
+        Ok(ix)
+    }
+
     fn history_cached(&self, key: &str) -> Result<Vec<store::VersionInfo>> {
         use std::sync::atomic::Ordering;
         if let Some(v) = self.history_cache.lock().unwrap().get(key) {
@@ -161,6 +182,7 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
         audit_path: cfg.audit_path.clone(),
         history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         history_gen: std::sync::atomic::AtomicU64::new(0),
+        links_cache: std::sync::Mutex::new(None),
     }))
 }
 
@@ -182,6 +204,9 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/knowledge/{key}", get(get_one).delete(remove))
         .route("/knowledge/{key}/history", get(history))
         .route("/knowledge/{key}/diff", get(diff))
+        .route("/knowledge/{key}/related", get(related))
+        .route("/places", get(places))
+        .route("/impact", get(impact))
         .route("/incidents", post(upsert_incident).get(list_incidents))
         .route("/incidents/{key}/resolve", post(resolve_incident))
         .route("/tasks", post(upsert_task).get(list_tasks))
@@ -1274,6 +1299,45 @@ async fn history(State(st): St, Path(key): Path<String>) -> Reply {
     }
 }
 
+/// What an entry points at and what points at it.
+async fn related(State(st): St, Path(key): Path<String>) -> Reply {
+    if let Some(r) = bad_key(&key) {
+        return r;
+    }
+    match st.links() {
+        Err(e) => err500(e),
+        Ok(ix) => (StatusCode::OK, Json(ix.related(&key))),
+    }
+}
+
+/// Services and hosts named by incidents, the ones with open incidents first.
+async fn places(State(st): St) -> Reply {
+    match st.links() {
+        Err(e) => err500(e),
+        Ok(ix) => (StatusCode::OK, Json(ix.places())),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImpactQ {
+    service: Option<String>,
+    host: Option<String>,
+}
+
+/// What is affected on one service or host, each row with the reason it is listed.
+async fn impact(State(st): St, Q(q): Q<ImpactQ>) -> Reply {
+    let (by_host, name) = match (&q.service, &q.host) {
+        (Some(s), None) if !s.trim().is_empty() => (false, s.clone()),
+        (None, Some(h)) if !h.trim().is_empty() => (true, h.clone()),
+        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error": "pass exactly one of ?service= or ?host="}))),
+    };
+    match st.links() {
+        Err(e) => err500(e),
+        Ok(ix) => (StatusCode::OK, Json(ix.impact(by_host, &name))),
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchQ {
@@ -1757,6 +1821,53 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn relations_follow_the_repository() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("redis-runbook", "How to restart redis."))).await;
+        let (st, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!((v["known"].clone(), v["incoming"].as_array().unwrap().len()), (json!(true), 0));
+
+        // an incident citing the runbook appears as a backlink right after the write (the cached index is dropped)
+        let (st, _) = call(&app, "POST", "/incidents", Some(json!({
+            "key": "inc-redis-oom", "title": "Redis OOM", "service": "Redis", "hosts": ["cache-01"],
+            "severity": "high", "knowledge": ["redis-runbook"], "body": "See [[redis-runbook]]."
+        }))).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert_eq!(v["incoming"][0]["key"], "inc-redis-oom");
+        assert_eq!((v["incoming"][0]["via"].clone(), v["incoming"][0]["live"].clone()), (json!("knowledge"), json!(true)));
+
+        let (st, p) = call(&app, "GET", "/places", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!((p["services"][0]["name"].clone(), p["services"][0]["open"].clone(), p["hosts"][0]["name"].clone()), (json!("redis"), json!(1), json!("cache-01")));
+
+        let (st, i) = call(&app, "GET", "/impact?service=redis", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!((i["open"].clone(), i["incidents"][0]["key"].clone(), i["runbooks"][0]["key"].clone()), (json!(1), json!("inc-redis-oom"), json!("redis-runbook")));
+        assert_eq!(i["runbooks"][0]["because"], json!(["inc-redis-oom"]));
+        let (_, h) = call(&app, "GET", "/impact?host=cache-01", None).await;
+        assert_eq!((h["kind"].clone(), h["incidents"].as_array().unwrap().len()), (json!("host"), 1));
+
+        // resolved: archived, no longer open, still a backlink
+        let (st, _) = call(&app, "POST", "/incidents/inc-redis-oom/resolve", Some(json!({"resolution": "raised maxmemory"}))).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert_eq!((v["incoming"][0]["live"].clone(), v["incoming"][0]["archived"].clone()), (json!(false), json!(true)));
+        let (_, p) = call(&app, "GET", "/places", None).await;
+        assert_eq!((p["services"][0]["open"].clone(), p["services"][0]["total"].clone()), (json!(0), json!(1)));
+
+        for bad in ["/impact", "/impact?service=a&host=b", "/impact?service=%20", "/impact?host="] {
+            let (st, v) = call(&app, "GET", bad, None).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}: {v}");
+        }
+        let (st, _) = call(&app, "GET", "/knowledge/Bad_Key/related", None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, v) = call(&app, "GET", "/knowledge/never-written/related", None).await;
+        assert_eq!((st, v["known"].clone()), (StatusCode::OK, json!(false)));
     }
 
     #[tokio::test]
@@ -3532,7 +3643,7 @@ mod published_claims {
         let bytes = http_body_util::BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
         let body_str = String::from_utf8_lossy(&bytes);
         assert!(body_str.contains("KYB — Fleet Memory & Control Room"));
-        assert!(body_str.contains("topoCanvas"));
+        assert!(body_str.contains("placesList"));
     }
 
     #[tokio::test]

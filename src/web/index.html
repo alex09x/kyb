@@ -34,9 +34,10 @@
         <span>Tasks</span>
         <span class="tab-badge" id="badgeTasksCount">0</span>
       </a>
-      <a href="#/graph" class="nav-tab" data-tab="graph" title="Topology">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-        <span>Topology</span>
+      <a href="#/services" class="nav-tab" data-tab="services" title="Services">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><line x1="6" y1="6.5" x2="6.01" y2="6.5"></line><line x1="6" y1="17.5" x2="6.01" y2="17.5"></line></svg>
+        <span>Services</span>
+        <span class="tab-badge" id="badgeServicesCount">0</span>
       </a>
       <a href="#/feed" class="nav-tab" data-tab="feed" title="Activity">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -136,90 +137,11 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 4: TOPOLOGY GRAPH ==================== -->
-    <div id="tab-graph" class="tab-content">
-      <div class="graph-container" id="graphContainer">
-        <canvas id="topoCanvas"></canvas>
-        <div class="node-hud" id="nodeHud"></div>
-
-        <div class="graph-overlay">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-            <div style="font-weight: 600; color: var(--text); font-size:13px;">Fleet Architecture</div>
-            <span class="tab-badge teal" id="topoNodeCountBadge">0 nodes</span>
-          </div>
-
-          <div style="margin-bottom:8px;">
-            <input type="text" id="topoSearchInput" class="form-input" style="padding:5px 8px; font-size:13px; border-radius:5px; width:100%;" placeholder="Filter nodes in graph..." oninput="setTopoSearch(this.value)">
-            <div id="topoSearchCount" style="font-size:12.5px; color:var(--accent); margin-top:3px; display:none;"></div>
-          </div>
-
-          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
-            <div style="font-size:12.5px; font-weight:600; color:var(--text-muted); margin-bottom:5px;">Layout View</div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px;">
-              <button class="chip" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">Cluster</button>
-              <button class="chip" id="layoutRadarBtn" onclick="setGraphLayout('radar')">Concentric</button>
-              <button class="chip active" id="layoutHierarchyBtn" onclick="setGraphLayout('hierarchy')">Hierarchy</button>
-              <button class="chip" id="layoutGridBtn" onclick="setGraphLayout('grid')">Service Grid</button>
-            </div>
-          </div>
-
-          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px;">
-            <div style="font-size:12.5px; font-weight:600; color:var(--text-muted); margin-bottom:5px;">Filter Elements</div>
-            <div style="display:flex; gap:4px; flex-wrap:wrap;">
-              <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
-              <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">Docs</button>
-              <button class="chip" id="gFilterIncidents" onclick="setGraphFilter('incident')">Incidents</button>
-              <button class="chip" id="gFilterTasks" onclick="setGraphFilter('task')">Tasks</button>
-            </div>
-          </div>
-
-          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px; font-size:12.5px; display:flex; flex-direction:column; gap:4px;">
-            <div class="graph-legend-item"><span class="legend-color" style="background:#5e6ad2;"></span> Services</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#a78bfa;"></span> Fleet Hosts</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#94a3b8;"></span> Knowledge Base</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#f43f5e;"></span> Incidents</div>
-            <div class="graph-legend-item"><span class="legend-color" style="background:#fbbf24;"></span> Tasks</div>
-          </div>
-        </div>
-
-        <!-- Sliding Inspector Drawer -->
-        <div class="graph-drawer" id="graphDrawer">
-          <div class="graph-drawer-header">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span class="badge badge-knowledge" id="drawerBadge">KNOWLEDGE</span>
-              <span style="font-family:var(--font-mono); font-size:12.5px; color:var(--accent);" id="drawerKey">key</span>
-            </div>
-            <button class="modal-close" onclick="closeGraphDrawer()" style="font-size:16px;">✕</button>
-          </div>
-          <div class="graph-drawer-body" id="drawerBody">
-            <h2 id="drawerTitle" style="font-size:15px; font-weight:700; color:#fff; margin-bottom:8px;">Title</h2>
-            <div id="drawerMeta" style="font-size:13px; color:var(--text-muted); margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
-            <div style="border-top:1px solid var(--border); padding-top:10px; margin-bottom:12px;">
-              <div style="font-size:12.5px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Connected Infrastructure</div>
-              <div id="drawerLinks" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
-            </div>
-            <div style="border-top:1px solid var(--border); padding-top:10px;">
-              <div style="font-size:12.5px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Document Summary</div>
-              <div id="drawerContent" class="prose" style="font-size:13px; max-height:260px; overflow-y:auto; background:var(--card-subtle); padding:10px; border-radius:6px;"></div>
-            </div>
-          </div>
-          <div class="graph-drawer-footer" id="drawerFooter">
-            <a href="#" class="btn sm primary" id="drawerOpenFullBtn">Open Full Doc →</a>
-            <button class="btn sm" id="drawerEditBtn">Edit</button>
-            <button class="btn sm" id="drawerCenterBtn">Center</button>
-            <button class="btn sm" id="drawerCopyBtn">Copy Key</button>
-            <button class="btn sm" id="drawerCopyLinkBtn">Link</button>
-          </div>
-        </div>
-
-        <div class="graph-controls-bar">
-          <button class="btn sm" id="pausePhysicsBtn" onclick="toggleGraphPhysics()">Stabilize</button>
-          <button class="btn sm" onclick="fitGraphCamera()">Fit to View</button>
-          <button class="btn sm" onclick="zoomGraph(1.2)">+ Zoom</button>
-          <button class="btn sm" onclick="zoomGraph(0.8)">- Zoom</button>
-          <button class="btn sm" onclick="unpinAllGraphNodes()">Unpin All</button>
-          <button class="btn sm" onclick="resetGraphCamera()">Reset</button>
-        </div>
+    <!-- ==================== TAB 4: SERVICES AND HOSTS ==================== -->
+    <div id="tab-services" class="tab-content">
+      <div class="places">
+        <div class="places-list" id="placesList"></div>
+        <div class="places-detail" id="placeDetail"></div>
       </div>
     </div>
 
@@ -336,7 +258,7 @@
           </tr>
           <tr style="border-bottom:1px solid var(--border);">
             <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">1</kbd> .. <kbd class="kbd-shortcut" style="position:static;">5</kbd></td>
-            <td>Switch tabs (Knowledge, Incidents, Tasks, Graph, Feed)</td>
+            <td>Switch tabs (Knowledge, Incidents, Tasks, Services, Activity)</td>
           </tr>
           <tr style="border-bottom:1px solid var(--border);">
             <td style="padding:8px 0;"><kbd class="kbd-shortcut" style="position:static;">N</kbd></td>

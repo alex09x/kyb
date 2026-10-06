@@ -22,17 +22,14 @@
       incidentKeyNav: false,
       activityFilter: 'all',
       feedPaused: false,
-      graphLayout: 'hierarchy',
-      drawerNode: null,
-      graphNodes: [],
-      graphLinks: [],
-      graphFilter: 'all',
-      graphPhysics: true,
+      places: { services: [], hosts: [] },
+      place: null,          // {kind: 'service'|'host', name}
+      impact: null,
+      related: new Map(),   // key -> {outgoing, incoming}
       lastSyncTime: Date.now(),
       newModalKind: 'knowledge',
       activeResolveKey: null,
       pendingHighlight: null,
-      pendingGraphNode: null,
       isBackendSearchResults: false,
       currentHistoryList: []
     };
@@ -132,15 +129,17 @@
 
     // Full Refresh Loop
     async function refreshAll() {
-      const [searchData, incData, taskData, tagsData, healthData, actData, auditData] = await Promise.all([
+      const [searchData, incData, taskData, tagsData, healthData, actData, auditData, placesData] = await Promise.all([
         apiFetch('/search?limit=100'),
         apiFetch('/incidents?all=1&limit=500'),
         apiFetch('/tasks?all=1&limit=500'),
         apiFetch('/tags'),
         apiFetch('/healthz'),
         apiFetch('/api/activity'),
-        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=400')
+        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=400'),
+        apiFetch('/places')
       ]);
+      if (placesData && placesData.services) App.places = placesData;
 
       if (!App.isBackendSearchResults && searchData && searchData.hits) App.entries = searchData.hits;
       if (incData && incData.incidents) App.incidents = incData.incidents;
@@ -158,7 +157,7 @@
       renderIncidents(true);
       renderTasks(true);
       if (!App.feedPaused) renderFeed();
-      buildTopology();
+      renderPlaces();
     }
 
     function manualRefresh() {

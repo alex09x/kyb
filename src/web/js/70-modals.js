@@ -1,16 +1,3 @@
-    // Expose helpers globally
-    window.focusNode = focusNode;
-    window.focusNodeById = focusNodeById;
-    window.filterFleetByHub = filterFleetByHub;
-    window.fitGraphCamera = fitGraphCamera;
-    window.zoomGraph = zoomGraph;
-    window.resetGraphCamera = resetGraphCamera;
-    window.reheatSimulation = reheatSimulation;
-    window.setGraphLayout = setGraphLayout;
-    window.unpinAllGraphNodes = unpinAllGraphNodes;
-    window.openGraphDrawer = openGraphDrawer;
-    window.closeGraphDrawer = closeGraphDrawer;
-
     // Modal Helpers
     function openModal(id) {
       // One dialog at a time: a modal opened from inside another replaces it.
