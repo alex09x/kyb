@@ -205,6 +205,8 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
 
 fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppState>> {
     let store = store::Store::open(&cfg.data_dir)?;
+    // after the canon exists: a link into it is then seen leading there
+    auth.refuse_inside(&cfg.data_dir)?;
     let index = index::SearchIndex::open_or_create(&cfg.index_dir)?;
     let mut writer = index.writer()?;
     // the canon may have been hand-edited while the service was down —

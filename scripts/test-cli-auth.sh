@@ -83,6 +83,9 @@ expect "two overlapping adds both land" "$("$bin" auth list | grep -c '^par-')" 
 [ -z "$(ls "$tmp"/auth.json.*.tmp 2>/dev/null)" ] && ok "no temp file is left" || fail "no temp file is left" "$(ls "$tmp")"
 # the book configured through a link into the canon is refused too
 mkdir -p "$tmp/data/kyb-data/sub"; ln -s "$tmp/data/kyb-data/sub" "$tmp/linked"
+ln -s "$tmp/not-yet/kyb-data/sub" "$tmp/dangling"   # the canon does not exist until the server creates it
+expect "a book behind a dangling symlink into a canon not yet created refuses to start" "$(KYB_AUTH=required KYB_AUTH_FILE="$tmp/dangling/auth.json" KYB_DATA="$tmp/not-yet/kyb-data" KYB_INDEX="$tmp/idx4" KYB_AUDIT="$tmp/a4" KYB_MODEL="$tmp/no-model" KYB_ADDR=127.0.0.1:0 "$bin" 2>&1)" "inside the git canon"
+[ ! -e "$tmp/not-yet/kyb-data/sub/auth.json" ] && ok "and wrote no book there" || fail "and wrote no book there" "book written into the canon"
 expect "a book behind a symlink into the canon refuses to start" "$(KYB_AUTH=required KYB_AUTH_FILE="$tmp/linked/auth.json" KYB_DATA="$tmp/data/kyb-data" KYB_INDEX="$tmp/idx3" KYB_AUDIT="$tmp/a3" KYB_MODEL="$tmp/no-model" KYB_ADDR=127.0.0.1:0 "$bin" 2>&1)" "inside the git canon"
 expect "a book inside the canon refuses to start" "$(KYB_AUTH=required KYB_AUTH_FILE="$tmp/data/auth.json" KYB_DATA="$tmp/data" KYB_INDEX="$tmp/idx2" KYB_AUDIT="$tmp/a2" KYB_MODEL="$tmp/no-model" KYB_ADDR=127.0.0.1:0 "$bin" 2>&1)" "inside the git canon"
 

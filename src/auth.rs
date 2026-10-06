@@ -369,12 +369,16 @@ impl Auth {
             "read" => Some(Role::Read),
             other => anyhow::bail!("KYB_ANON can only be 'read', not '{other}': an anonymous writer is no author"),
         };
-        let path = book_path();
-        if mode != Mode::Off {
-            let canon = std::path::PathBuf::from(std::env::var("KYB_DATA").unwrap_or_else(|_| "./kyb-data".into()));
-            anyhow::ensure!(!inside(&path, &canon), "KYB_AUTH_FILE {} is inside the git canon {}: the book would be committed and shared; put it beside the data, not in it", path.display(), canon.display());
+        Ok(Auth::new(mode, anon, book_path()))
+    }
+
+    /// The book must not be inside the git canon. Checked once the canon
+    /// directory exists, so links into it resolve to where they really lead.
+    pub fn refuse_inside(&self, canon: &Path) -> anyhow::Result<()> {
+        if self.mode != Mode::Off {
+            anyhow::ensure!(!inside(&self.path, canon), "KYB_AUTH_FILE {} is inside the git canon {}: the book would be committed and shared; put it beside the data, not in it", self.path.display(), canon.display());
         }
-        Ok(Auth::new(mode, anon, path))
+        Ok(())
     }
 
     /// One line for the start-up log, so an operator sees what is in force
@@ -446,14 +450,45 @@ impl Auth {
 }
 
 /// Whether `path` is `dir` or under it - by where the directories really are.
-/// The nearest existing ancestor of each is canonicalised (symlinks followed),
-/// so a book configured through a link into the canon is still seen there,
-/// while a book file that does not exist yet is still checked.
-fn inside(path: &Path, dir: &Path) -> bool {
+/// Symlinks are followed even when their target does not exist yet (a link
+/// into a directory that is created later), and the nearest existing ancestor
+/// is canonicalised, so a book that does not exist yet is still checked.
+pub fn inside(path: &Path, dir: &Path) -> bool {
     fn real(p: &Path) -> PathBuf {
         let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|c| c.join(p)).unwrap_or_else(|_| p.to_path_buf()) };
-        // the longest existing prefix, resolved; the rest appended as written
-        let mut existing = abs.clone();
+        // every component in turn: a symlink is replaced by what it points at, dangling or not
+        let mut out = PathBuf::new();
+        let mut pending: Vec<std::ffi::OsString> = abs.components().map(|c| c.as_os_str().to_os_string()).collect();
+        pending.reverse();
+        let mut hops = 0;
+        while let Some(part) = pending.pop() {
+            if part == ".." {
+                out.pop();
+                continue;
+            }
+            if part == "." {
+                continue;
+            }
+            out.push(&part);
+            if hops < 40 {
+                if let Ok(meta) = std::fs::symlink_metadata(&out) {
+                    if meta.file_type().is_symlink() {
+                        if let Ok(target) = std::fs::read_link(&out) {
+                            hops += 1;
+                            out.pop();   // the link's own directory; a relative target continues from it
+                            if target.is_absolute() {
+                                out = PathBuf::new();
+                            }
+                            let mut again: Vec<std::ffi::OsString> = target.components().map(|c| c.as_os_str().to_os_string()).collect();
+                            again.reverse();
+                            pending.extend(again);
+                        }
+                    }
+                }
+            }
+        }
+        // what exists of it, by its real name
+        let mut existing = out.clone();
         let mut rest: Vec<std::ffi::OsString> = vec![];
         while !existing.exists() {
             match (existing.file_name(), existing.parent()) {
@@ -464,15 +499,11 @@ fn inside(path: &Path, dir: &Path) -> bool {
                 _ => break,
             }
         }
-        let mut out = std::fs::canonicalize(&existing).unwrap_or(existing);
+        let mut done = std::fs::canonicalize(&existing).unwrap_or(existing);
         for part in rest.iter().rev() {
-            if part == ".." {
-                out.pop();
-            } else if part != "." {
-                out.push(part);
-            }
+            done.push(part);
         }
-        out
+        done
     }
     real(path).starts_with(real(dir))
 }
@@ -675,6 +706,24 @@ mod tests {
             assert!(inside(&canon.join("auth.json"), &link2), "the canon itself given through a link");
         }
         assert!(!inside(&dir.path().join("auth.json"), &canon));
+        // a dangling link: its target is not there yet, it still leads into the canon
+        #[cfg(unix)]
+        {
+            let future = dir.path().join("future-root");
+            let dangling = dir.path().join("dangling");
+            std::os::unix::fs::symlink(future.join("kyb-data").join("sub"), &dangling).unwrap();
+            assert!(inside(&dangling.join("auth.json"), &future.join("kyb-data")), "through a dangling symlink, canon not created yet");
+            std::fs::create_dir_all(future.join("kyb-data")).unwrap();
+            assert!(inside(&dangling.join("auth.json"), &future.join("kyb-data")), "and once the canon exists");
+            // a relative link is resolved against its own directory
+            let rel = dir.path().join("rel-link");
+            std::os::unix::fs::symlink(Path::new("kyb-data").join("elsewhere"), &rel).unwrap();
+            assert!(inside(&rel.join("auth.json"), &canon));
+            // a link pointing away from the canon is fine
+            let away = dir.path().join("away");
+            std::os::unix::fs::symlink(dir.path().join("somewhere-else"), &away).unwrap();
+            assert!(!inside(&away.join("auth.json"), &canon));
+        }
     }
 
     #[test]
