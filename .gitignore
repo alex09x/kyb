@@ -2,6 +2,10 @@ target/
 kyb-data/
 index/
 audit.jsonl
+# the Docker Compose data directory and the token book (principals, roles, token hashes) - never in git
+data/
+auth.json
+auth.json.*.tmp
 .env
 *.log
 model/

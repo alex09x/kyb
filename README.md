@@ -299,7 +299,8 @@ serve anyone beyond it, put a TLS-terminating proxy in front and point clients a
 
 With Docker Compose the three settings are passed through from `.env` (`KYB_AUTH`, `KYB_ANON`,
 `KYB_AUTH_FILE`), and the book defaults to `/data/auth.json` - on the persistent volume, outside
-the git canon. Issue tokens with `docker compose exec kyb kyb-server auth add ...`. The server
+the git canon (`data/` and `auth.json` are in `.gitignore`; the server refuses to start with a
+book inside `KYB_DATA`). Issue tokens with `docker compose exec kyb kyb-server auth add ...`. The server
 prints the mode in force when it starts (`kyb: auth required - 3 principals in ...`); check that
 line, or `kyb whoami`, rather than assuming.
 

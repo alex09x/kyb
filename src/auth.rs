@@ -180,15 +180,17 @@ impl Book {
         }
     }
 
-    /// Written whole to a sibling file and renamed over the old one, readable
-    /// by its owner only.
+    /// Written whole to a temporary file of its own and renamed over the old
+    /// one, readable by its owner only. Callers that read, change and write
+    /// use `Book::update`, which holds the lock across all three.
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir)?;
         }
-        let tmp = path.with_extension("tmp");
+        // a name of its own per write: two writers never share a temp file
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let tmp = path.with_file_name(format!("{}.{}.{nanos}.tmp", path.file_name().and_then(|n| n.to_str()).unwrap_or("auth.json"), std::process::id()));
         // created owner-only from the first byte: the roster is private even before the rename
-        let _ = std::fs::remove_file(&tmp);
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
@@ -202,8 +204,47 @@ impl Book {
             f.write_all((serde_json::to_string_pretty(self)? + "\n").as_bytes())?;
             f.sync_all()?;
         }
-        std::fs::rename(&tmp, path)?;
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
         Ok(())
+    }
+
+    /// Read, change, write - under a lock, so two commands editing the book at
+    /// the same time do not lose each other's change. The lock is a sibling
+    /// file created exclusively; one left behind by a killed process is taken
+    /// over after a few seconds.
+    pub fn update<T>(path: &Path, change: impl FnOnce(&mut Book) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)?;
+        }
+        let lock = path.with_file_name(format!("{}.lock", path.file_name().and_then(|n| n.to_str()).unwrap_or("auth.json")));
+        let stale = std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+                Ok(_) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let age = std::fs::metadata(&lock).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+                    if age.map(|a| a > stale).unwrap_or(true) {
+                        let _ = std::fs::remove_file(&lock);
+                        continue;
+                    }
+                    anyhow::ensure!(std::time::Instant::now() < deadline, "the book {} is locked by another command ({})", path.display(), lock.display());
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let result = (|| {
+            let mut book = Book::load(path)?;
+            let out = change(&mut book)?;
+            book.save(path)?;
+            Ok(out)
+        })();
+        let _ = std::fs::remove_file(&lock);
+        result
     }
 
     fn new_token() -> anyhow::Result<(String, TokenRec)> {
@@ -342,7 +383,12 @@ impl Auth {
             "read" => Some(Role::Read),
             other => anyhow::bail!("KYB_ANON can only be 'read', not '{other}': an anonymous writer is no author"),
         };
-        Ok(Auth::new(mode, anon, book_path()))
+        let path = book_path();
+        if mode != Mode::Off {
+            let canon = std::path::PathBuf::from(std::env::var("KYB_DATA").unwrap_or_else(|_| "./kyb-data".into()));
+            anyhow::ensure!(!inside(&path, &canon), "KYB_AUTH_FILE {} is inside the git canon {}: the book would be committed and shared; put it beside the data, not in it", path.display(), canon.display());
+        }
+        Ok(Auth::new(mode, anon, path))
     }
 
     /// One line for the start-up log, so an operator sees what is in force
@@ -413,6 +459,24 @@ impl Auth {
     }
 }
 
+/// Whether `path` is `dir` or under it, by the paths as given (both resolved
+/// against the same working directory), so the check needs neither to exist.
+fn inside(path: &Path, dir: &Path) -> bool {
+    let norm = |p: &Path| -> PathBuf {
+        let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|c| c.join(p)).unwrap_or_else(|_| p.to_path_buf()) };
+        let mut out = PathBuf::new();
+        for c in abs.components() {
+            match c {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => { out.pop(); }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
+    };
+    norm(path).starts_with(norm(dir))
+}
+
 pub fn book_path() -> PathBuf {
     std::env::var("KYB_AUTH_FILE").unwrap_or_else(|_| "./auth.json".into()).into()
 }
@@ -468,38 +532,38 @@ pub async fn whoami(State(st): State<Arc<crate::AppState>>) -> Json<serde_json::
 pub fn cli(args: &[String]) -> anyhow::Result<String> {
     let path = book_path();
     let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
-    let mut book = Book::load(&path)?;
     match args.first().map(String::as_str) {
         Some("add") => {
             let id = flag("--id").ok_or_else(|| anyhow::anyhow!("--id is needed"))?;
             let name = flag("--name").ok_or_else(|| anyhow::anyhow!("--name is needed"))?;
             let role = flag("--role").as_deref().and_then(Role::parse).ok_or_else(|| anyhow::anyhow!("--role read|write|admin is needed"))?;
-            let token = book.add(&id, &name, &flag("--email").unwrap_or_default(), role, &flag("--label").unwrap_or_default())?;
-            book.save(&path)?;
+            let token = Book::update(&path, |book| book.add(&id, &name, &flag("--email").unwrap_or_default(), role, &flag("--label").unwrap_or_default()))?;
             Ok(format!("{token}\n(shown once; {} has the {} role; the book is {})", id, role.name(), path.display()))
         }
         Some("token") => {
             let id = flag("--id").ok_or_else(|| anyhow::anyhow!("--id is needed"))?;
-            let token = book.issue(&id, &flag("--label").unwrap_or_default())?;
-            book.save(&path)?;
+            let token = Book::update(&path, |book| book.issue(&id, &flag("--label").unwrap_or_default()))?;
             Ok(format!("{token}\n(shown once; earlier tokens of {id} keep working until revoked)"))
         }
         Some("revoke") => {
-            let out = match (flag("--token"), flag("--id")) {
-                (Some(t), None) => match book.revoke_token(&t) {
-                    0 => anyhow::bail!("no live token '{t}'"),
-                    _ => format!("token {t} revoked"),
-                },
-                (None, Some(id)) => {
-                    anyhow::ensure!(book.revoke_principal(&id), "no live principal '{id}'");
-                    format!("{id} revoked with all its tokens; its name stays in the history")
-                }
+            let which = match (flag("--token"), flag("--id")) {
+                (Some(t), None) => Ok(t),
+                (None, Some(id)) => Err(id),
                 _ => anyhow::bail!("pass exactly one of --token T_ID or --id ID"),
             };
-            book.save(&path)?;
-            Ok(out)
+            Book::update(&path, |book| match &which {
+                Ok(t) => match book.revoke_token(t) {
+                    0 => anyhow::bail!("no live token '{t}'"),
+                    _ => Ok(format!("token {t} revoked")),
+                },
+                Err(id) => {
+                    anyhow::ensure!(book.revoke_principal(id), "no live principal '{id}'");
+                    Ok(format!("{id} revoked with all its tokens; its name stays in the history"))
+                }
+            })
         }
         Some("list") => {
+            let book = Book::load(&path)?;
             let mut lines = vec![];
             for p in &book.principals {
                 lines.push(format!("{}  {}  {}{}", p.id, p.role.name(), p.name, if p.revoked { "  (revoked)" } else { "" }));
@@ -587,6 +651,45 @@ mod tests {
         assert_eq!(Book::load(&path).unwrap(), Book::default());
         std::fs::write(&path, "{not json").unwrap();
         assert!(Book::load(&path).is_err());
+    }
+
+    #[test]
+    fn the_book_is_never_allowed_inside_the_canon() {
+        assert!(inside(Path::new("./kyb-data/auth.json"), Path::new("./kyb-data")));
+        assert!(inside(Path::new("/data/kyb-data/x/auth.json"), Path::new("/data/kyb-data")));
+        assert!(!inside(Path::new("/data/auth.json"), Path::new("/data/kyb-data")));
+        assert!(!inside(Path::new("./kyb-data-2/auth.json"), Path::new("./kyb-data")));
+        assert!(inside(Path::new("./kyb-data/../kyb-data/auth.json"), Path::new("kyb-data")));
+    }
+
+    #[test]
+    fn concurrent_updates_do_not_lose_each_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || Book::update(&path, |b| b.add(&format!("p{i}"), "N", "", Role::Read, "")).unwrap())
+            })
+            .collect();
+        let tokens: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let book = Book::load(&path).unwrap();
+        assert_eq!(book.principals.len(), 8, "every add is in the book");
+        for t in &tokens {
+            assert!(book.lookup(t).is_some(), "every printed token works");
+        }
+        assert!(!dir.path().join("auth.json.lock").exists(), "the lock is released");
+        assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")), "no temp file is left behind");
+        // a lock left behind by a dead process is taken over
+        std::fs::write(dir.path().join("auth.json.lock"), "").unwrap();
+        let old = SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options().write(true).open(dir.path().join("auth.json.lock")).unwrap().set_modified(old).unwrap();
+        Book::update(&path, |b| b.add("late", "N", "", Role::Read, "")).unwrap();
+        assert_eq!(Book::load(&path).unwrap().principals.len(), 9);
+        // a change that fails leaves the book as it was and the lock released
+        assert!(Book::update(&path, |b| b.add("late", "N", "", Role::Read, "")).is_err());
+        assert_eq!(Book::load(&path).unwrap().principals.len(), 9);
+        assert!(!dir.path().join("auth.json.lock").exists());
     }
 
     #[test]

@@ -76,6 +76,13 @@ mode="$(stat -f '%Lp' "$KYB_AUTH_FILE" 2>/dev/null || stat -c '%a' "$KYB_AUTH_FI
 expect "the server says at start what is in force" "$(cat "$tmp/server.log")" "auth required - 2 principals"
 expect "a reader cannot read the request log" "$("$cli" tags >/dev/null 2>&1; curl -s -H "authorization: Bearer $t_read" "http://127.0.0.1:$port/api/audit")" "needs the admin role"
 
+# two commands at once: both tokens end up in the book
+"$bin" auth add --id par-a --name A --role read >"$tmp/par-a" 2>&1 & apid=$!
+"$bin" auth add --id par-b --name B --role read >"$tmp/par-b" 2>&1; wait "$apid"   # not a bare wait: that would wait for the server too
+expect "two overlapping adds both land" "$("$bin" auth list | grep -c '^par-')" "2"
+[ -z "$(ls "$tmp"/auth.json.*.tmp "$tmp"/auth.json.lock 2>/dev/null)" ] && ok "no temp or lock file is left" || fail "no temp or lock file is left" "$(ls "$tmp")"
+expect "a book inside the canon refuses to start" "$(KYB_AUTH=required KYB_AUTH_FILE="$tmp/data/auth.json" KYB_DATA="$tmp/data" KYB_INDEX="$tmp/idx2" KYB_AUDIT="$tmp/a2" KYB_MODEL="$tmp/no-model" KYB_ADDR=127.0.0.1:0 "$bin" 2>&1)" "inside the git canon"
+
 tok_id="$("$bin" auth list | awk '/ci$/ {print $1}')"
 expect "revoking by token id" "$("$bin" auth revoke --token "$tok_id")" "revoked"
 expect "a revoked token stops working without a restart" "$(KYB_TOKEN="$t_write" "$cli" tags 2>&1)" "not known here"
