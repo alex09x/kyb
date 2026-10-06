@@ -12,7 +12,8 @@ pub struct Config {
 
 impl Config {
     /// Everything has defaults; .env holds optional overrides.
-    /// No auth on purpose: the service listens on 127.0.0.1 only.
+    /// Access is configured separately (auth.rs: KYB_AUTH, KYB_AUTH_FILE, KYB_ANON);
+    /// by default nobody is asked for a token and the service listens on 127.0.0.1 only.
     pub fn from_env() -> Config {
         dotenvy::dotenv().ok();
         Config {

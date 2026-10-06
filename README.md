@@ -170,7 +170,10 @@ KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
 |---|---|---|
 | `KYB_DATA` | `./kyb-data` | git canon directory |
 | `KYB_INDEX` | `./index` | Tantivy cache (safe to delete) |
-| `KYB_ADDR` | `127.0.0.1:9310` | **no auth by design** — run on a private network |
+| `KYB_ADDR` | `127.0.0.1:9310` | where to listen; with `KYB_AUTH=off` anyone who can reach it can write |
+| `KYB_AUTH` | `off` | `off` trusts the network, `compat` honours a token but does not ask for one (for rollout, on a trusted bind — it protects nothing), `required` refuses callers without one |
+| `KYB_AUTH_FILE` | `./auth.json` | the token book; keep it beside the data, never inside `kyb-data` |
+| `KYB_ANON` | *(unset)* | `read`: with `KYB_AUTH=required`, callers without a token may read (a public demo) |
 | `KYB_PUBLISH_ADDR` | `127.0.0.1` | Docker Compose host interface; set one exact private IP for remote clients |
 | `KYB_MODEL` | *(unset)* | dir with `model.onnx` + `tokenizer.json`; absent = lexical-only |
 | `KYB_AUDIT` | `audit.jsonl` | JSONL request log |
@@ -265,7 +268,9 @@ any other write, and a route that changes changes here with it.
 It is stateless: no sessions, no server-initiated stream, `GET` and `DELETE` answer `405` and
 say so. Batches work. `?readonly=1` on the URL drops the six writing tools for that
 registration — a guard rail for an agent, not a security boundary, since nothing stops a
-caller from omitting it.
+caller from omitting it. The boundary is the token: `/mcp` passes the caller's
+`Authorization` header to every tool call it replays, so a tool can do exactly what the same
+token can do over REST.
 
 `rm` and `reindex` are not exposed over MCP at all: retracting an entry and rebuilding the
 index should not be something an agent reaches for mid-thought.
@@ -280,6 +285,41 @@ A deploy script, an `ssh` one-liner on a fleet node, `cron` and a person at a te
 need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses `kyb`.
 
 ---
+
+## Access: tokens and roles
+
+Out of the box KYB asks nobody for anything (`KYB_AUTH=off`) and relies on the network it
+listens on. To know who wrote what, and to let some callers only read, turn tokens on.
+
+```bash
+# on the server, next to the data (the book is the root of trust; it is not in git)
+kyb-server auth add --id alex    --name "Alex"    --role admin
+kyb-server auth add --id agent-a --name "Agent A" --role write --label build-box
+kyb-server auth list                 # ids, roles, token ids — never tokens
+kyb-server auth token  --id agent-a  # a second token: rotate with an overlap
+kyb-server auth revoke --token t_1a2b3c4d      # or --id agent-a for the whole principal
+
+# on each client
+echo "$TOKEN" | kyb login            # checked against the server, then kept in ~/.config/kyb/token (0600)
+kyb whoami
+```
+
+A token is 256 random bits, shown once; the book keeps its SHA-256. Changes to the book take
+effect without a restart. Three roles, each including the one before:
+
+| Role | May |
+|---|---|
+| `read` | search, read, history, diffs, relations |
+| `write` | add and edit entries; file, resolve and archive incidents and tasks |
+| `admin` | retract a knowledge entry (`kyb rm`), `reindex` |
+
+The git commit a write produces is authored by the token's principal, so `kyb history` and the
+Versions tab say who changed what. A commit made without a token (before tokens, or under
+`off`/`compat`) names nobody. This is attribution, not proof: anyone with direct access to the
+repository can write any author. Rolling out: start with `KYB_AUTH=compat` on the trusted bind,
+give every agent a token, watch the `actor` field of the audit log until no `-` remains, then
+switch to `required`. The web UI asks for a token when the server does and hides what the
+token's role would be refused.
 
 ## Web UI and Control Room
 

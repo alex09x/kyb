@@ -1,4 +1,5 @@
 mod audit;
+mod auth;
 mod config;
 mod embed;
 mod index;
@@ -45,6 +46,7 @@ pub struct AppState {
     /// Relations between entries, derived from the repository. Kept until the
     /// next write (the generation it was built at no longer matches).
     links_cache: std::sync::Mutex<Option<(u64, Arc<links::LinkIndex>)>>,
+    pub(crate) auth: auth::Auth,
 }
 
 impl AppState {
@@ -150,6 +152,10 @@ async fn rebuild_vectors(st: &AppState) {
 }
 
 fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
+    build_state_with(cfg, auth::Auth::from_env()?)
+}
+
+fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppState>> {
     let store = store::Store::open(&cfg.data_dir)?;
     let index = index::SearchIndex::open_or_create(&cfg.index_dir)?;
     let mut writer = index.writer()?;
@@ -183,6 +189,7 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
         history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         history_gen: std::sync::atomic::AtomicU64::new(0),
         links_cache: std::sync::Mutex::new(None),
+        auth,
     }))
 }
 
@@ -200,6 +207,7 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/api/audit", get(web::api_audit))
         .route("/api/activity", get(web::api_activity))
         .route("/healthz", get(healthz))
+        .route("/whoami", get(auth::whoami))
         .route("/knowledge", post(upsert))
         .route("/knowledge/{key}", get(get_one).delete(remove))
         .route("/knowledge/{key}/history", get(history))
@@ -215,6 +223,8 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/search", get(search))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
+        // auth inside audit: a refused request is logged too, with who it was refused to
+        .layer(middleware::from_fn_with_state(state.clone(), auth::auth_mw))
         .layer(middleware::from_fn_with_state(state.clone(), audit::audit_mw))
         .with_state(state)
 }
@@ -235,6 +245,18 @@ async fn main() -> Result<()> {
     // the per-document indexing that is linear in history.
     let boot = std::time::Instant::now();
     let cfg = config::Config::from_env();
+    // `kyb-server auth ...` edits the token book and exits; it never starts the service.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("auth") {
+        match auth::cli(&args[1..]) {
+            Ok(out) => println!("{out}"),
+            Err(e) => {
+                eprintln!("{e:#}");
+                std::process::exit(2);
+            }
+        }
+        return Ok(());
+    }
     let state = build_state(&cfg)?;
     let indexed = boot.elapsed();
     rebuild_vectors(&state).await;
@@ -1574,6 +1596,11 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         }
         Ok(Some(e)) => e,
     };
+    // Archiving an incident or task is everyday work. Deleting knowledge is a
+    // retraction - it leaves the default search - and takes the admin role.
+    if entry.kind == model::KIND_KNOWLEDGE && auth::role() < auth::Role::Admin {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "retracting a knowledge entry needs the admin role", "needs": "admin"})));
+    }
     // both branches change the key's git history: a deletion or an archive commit.
     // Forgotten before (no stale answer is served meanwhile) and after (no scan
     // that began meanwhile can cache the pre-commit history).
@@ -1724,8 +1751,132 @@ mod api_tests {
             model_dir: idx.path().join("no-model"),
             addr: String::new(),
         };
-        let state = build_state(&cfg).unwrap();
+        // the tests must not depend on what KYB_AUTH happens to be in the environment
+        let state = build_state_with(&cfg, auth::Auth::off()).unwrap();
         (build_app(state.clone()), state, data, idx)
+    }
+
+    /// An app that asks for tokens, with one principal per role. Returns the
+    /// tokens as (read, write, admin).
+    fn app_with_auth(mode: auth::Mode, anon: Option<auth::Role>) -> (Router, [String; 3], tempfile::TempDir, tempfile::TempDir) {
+        let data = tempfile::tempdir().unwrap();
+        let idx = tempfile::tempdir().unwrap();
+        let cfg = config::Config {
+            data_dir: data.path().to_path_buf(),
+            index_dir: idx.path().to_path_buf(),
+            audit_path: idx.path().join("audit.jsonl"),
+            model_dir: idx.path().join("no-model"),
+            addr: String::new(),
+        };
+        let mut book = auth::Book::default();
+        let read = book.add("reader", "Rita Reader", "", auth::Role::Read, "").unwrap();
+        let write = book.add("agent-w", "Agent W", "w@fleet", auth::Role::Write, "").unwrap();
+        let admin = book.add("owner", "The Owner", "o@fleet", auth::Role::Admin, "").unwrap();
+        let book_path = idx.path().join("auth.json");
+        book.save(&book_path).unwrap();
+        let state = build_state_with(&cfg, auth::Auth::new(mode, anon, book_path)).unwrap();
+        (build_app(state), [read, write, admin], data, idx)
+    }
+
+    async fn call_as(app: &Router, token: Option<&str>, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+        let mut b = Request::builder().method(method).uri(uri);
+        if let Some(t) = token {
+            b = b.header("authorization", format!("Bearer {t}"));
+        }
+        let req = match body {
+            Some(v) => b.header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
+            None => b.body(Body::empty()).unwrap(),
+        };
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test]
+    async fn required_auth_holds_every_route_to_a_role_and_signs_commits() {
+        let (app, [read, write, admin], _data, idx) = app_with_auth(auth::Mode::Required, None);
+        let (r, w, a) = (Some(read.as_str()), Some(write.as_str()), Some(admin.as_str()));
+
+        // nameless: only the page, the probe and whoami
+        assert_eq!(call_as(&app, None, "GET", "/search?q=x", None).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(call_as(&app, None, "POST", "/knowledge", Some(upsert_body("n", "b"))).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(call_as(&app, None, "GET", "/healthz", None).await.0, StatusCode::OK);
+        let (st, me) = call_as(&app, None, "GET", "/whoami", None).await;
+        assert_eq!((st, me["auth"].clone(), me["role"].clone(), me["actor"].clone()), (StatusCode::OK, json!("required"), json!("read"), Value::Null));
+        let (st, e) = call_as(&app, Some("kyb_never-issued"), "GET", "/search?q=x", None).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+        assert!(e["error"].as_str().unwrap().contains("not known"));
+
+        // read: reads, cannot write
+        assert_eq!(call_as(&app, r, "GET", "/search?q=x", None).await.0, StatusCode::OK);
+        let (st, e) = call_as(&app, r, "POST", "/knowledge", Some(upsert_body("note", "body"))).await;
+        assert_eq!((st, e["needs"].clone(), e["role"].clone()), (StatusCode::FORBIDDEN, json!("write"), json!("read")));
+        let (_, me) = call_as(&app, r, "GET", "/whoami", None).await;
+        assert_eq!((me["role"].clone(), me["actor"]["id"].clone(), me["actor"]["name"].clone()), (json!("read"), json!("reader"), json!("Rita Reader")));
+
+        // write: writes, files and resolves; the commit carries its name
+        assert_eq!(call_as(&app, w, "POST", "/knowledge", Some(upsert_body("note", "body"))).await.0, StatusCode::OK);
+        let (_, h) = call_as(&app, r, "GET", "/knowledge/note/history", None).await;
+        assert_eq!(h["versions"][0]["author"], "Agent W <w@fleet>");
+        assert_eq!(call_as(&app, w, "POST", "/incidents", Some(json!({"key": "inc-a", "title": "A", "service": "s", "severity": "low", "body": "b"}))).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, w, "POST", "/incidents/inc-a/resolve", Some(json!({"resolution": "ok"}))).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, w, "POST", "/incidents", Some(json!({"key": "inc-b", "title": "B", "service": "s", "severity": "low", "body": "b"}))).await.0, StatusCode::OK);
+        // archiving an open incident is write work; retracting knowledge and reindexing are not
+        assert_eq!(call_as(&app, w, "DELETE", "/knowledge/inc-b", None).await.0, StatusCode::OK);
+        let (st, e) = call_as(&app, w, "DELETE", "/knowledge/note", None).await;
+        assert_eq!((st, e["needs"].clone()), (StatusCode::FORBIDDEN, json!("admin")));
+        assert_eq!(call_as(&app, w, "POST", "/reindex", None).await.0, StatusCode::FORBIDDEN);
+
+        // admin: everything; a second author on the same entry is its own version
+        assert_eq!(call_as(&app, a, "POST", "/knowledge", Some(upsert_body("note", "body two"))).await.0, StatusCode::OK);
+        let (_, h) = call_as(&app, a, "GET", "/knowledge/note/history", None).await;
+        assert_eq!((h["versions"][0]["author"].clone(), h["versions"][1]["author"].clone()), (json!("The Owner <o@fleet>"), json!("Agent W <w@fleet>")));
+        assert_eq!(call_as(&app, a, "POST", "/reindex", None).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, a, "DELETE", "/knowledge/note", None).await.0, StatusCode::OK);
+
+        // MCP: the token travels with the tool call, and the API decides
+        let mcp = |token: Option<&str>, name: &str, args: Value| {
+            let app = app.clone();
+            let token = token.map(str::to_string);
+            let payload = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}});
+            async move { call_as(&app, token.as_deref(), "POST", "/mcp", Some(payload)).await.1 }
+        };
+        let add = json!({"key": "via-mcp", "title": "T", "body": "b"});
+        let refused = mcp(r, "kyb_add", add.clone()).await;
+        assert_eq!(refused["result"]["isError"], json!(true));
+        assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("403"), "{refused}");
+        let nameless = mcp(None, "kyb_get", json!({"key": "via-mcp"})).await;
+        assert!(nameless["result"]["content"][0]["text"].as_str().unwrap().contains("401"), "{nameless}");
+        assert_ne!(mcp(w, "kyb_add", add).await["result"]["isError"], json!(true));
+        let (_, h) = call_as(&app, r, "GET", "/knowledge/via-mcp/history", None).await;
+        assert_eq!(h["versions"][0]["author"], "Agent W <w@fleet>");
+
+        // the audit log says who, including who was refused
+        let log = std::fs::read_to_string(idx.path().join("audit.jsonl")).unwrap();
+        let actors: Vec<String> = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["actor"].as_str().unwrap_or("?").to_string()).collect();
+        for who in ["reader", "agent-w", "owner", "refused"] {
+            assert!(actors.iter().any(|a| a == who), "no audit line for {who}: {actors:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn compat_keeps_the_nameless_working_and_a_demo_reads_without_a_token() {
+        let (app, [read, write, _], _data, _idx) = app_with_auth(auth::Mode::Compat, None);
+        // no token: as before, and the commit is unattributed
+        assert_eq!(call_as(&app, None, "POST", "/knowledge", Some(upsert_body("old-client", "b"))).await.0, StatusCode::OK);
+        let (_, h) = call_as(&app, None, "GET", "/knowledge/old-client/history", None).await;
+        assert_eq!(h["versions"][0]["author"], "");
+        let (_, me) = call_as(&app, None, "GET", "/whoami", None).await;
+        assert_eq!((me["auth"].clone(), me["role"].clone()), (json!("compat"), json!("admin")));
+        // a token that is sent is believed and held to its role
+        assert_eq!(call_as(&app, Some(&write), "POST", "/knowledge", Some(upsert_body("new-client", "b"))).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, Some(&read), "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::FORBIDDEN);
+
+        let (demo, [_, write, _], _d, _i) = app_with_auth(auth::Mode::Required, Some(auth::Role::Read));
+        assert_eq!(call_as(&demo, None, "GET", "/search?q=x", None).await.0, StatusCode::OK);
+        assert_eq!(call_as(&demo, None, "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&demo, Some(&write), "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::OK);
     }
 
     pub(super) fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {

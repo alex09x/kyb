@@ -84,7 +84,7 @@ def wait_http(url, seconds=30):
     return False
 
 
-def start_sandbox(tmp):
+def start_sandbox(tmp, extra_env=None):
     binary = os.environ.get("KYB_SERVER_BIN")
     if not binary:
         for cand in (REPO / "target/release/kyb-server", REPO / "target/debug/kyb-server"):
@@ -99,6 +99,9 @@ def start_sandbox(tmp):
     env = dict(os.environ,
                KYB_DATA=str(tmp / "data"), KYB_INDEX=str(tmp / "index"), KYB_AUDIT=str(tmp / "audit.jsonl"),
                KYB_MODEL=str(tmp / "no-model"), KYB_ADDR=f"127.0.0.1:{port}", KYB_UI_PATH=str(ui))
+    env.pop("KYB_AUTH", None); env.pop("KYB_ANON", None)   # the main sandbox asks nobody for anything, whatever the shell has set
+    env.update(extra_env or {})
+    tmp.mkdir(parents=True, exist_ok=True)
     log = open(tmp / "server.log", "w")
     proc = subprocess.Popen([binary], env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
@@ -106,6 +109,13 @@ def start_sandbox(tmp):
         proc.kill()
         sys.exit("sandbox server did not come up:\n" + (tmp / "server.log").read_text())
     return proc, base
+
+
+def issue_token(tmp, ident, name, role):
+    """A principal and its token, made the way an operator makes them: with the server binary."""
+    binary = os.environ.get("KYB_SERVER_BIN") or str(next(c for c in (REPO / "target/release/kyb-server", REPO / "target/debug/kyb-server") if c.exists()))
+    out = subprocess.run([binary, "auth", "add", "--id", ident, "--name", name, "--role", role], env=dict(os.environ, KYB_AUTH_FILE=str(tmp / "auth.json")), capture_output=True, text=True, check=True)
+    return out.stdout.splitlines()[0].strip()
 
 
 def api(base, method, path, body=None):
@@ -289,7 +299,7 @@ def run(base, headed, coverage=None):
         # Records the test invents (made-up keys and shas) have nothing on the server. A 404 for
         # exactly such a path is the test's own doing; any other status on it, or a 404 anywhere
         # else, is reported like every other error.
-        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh", "/knowledge/k-anon")
+        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh", "/knowledge/k-anon", "/knowledge/k-mail")
         expected_404 = set()
         page.on("response", lambda r: expected_404.add(r.url) if r.status == 404 and any(x in r.url for x in synthetic) else None)
 
@@ -816,6 +826,8 @@ def run(base, headed, coverage=None):
         # Usability fixes the owner asked for, held in place.
         # ------------------------------------------------------------------
         ev("switchTab('search'); setGlobalSearchQuery('')")
+        # the search just cleared is refreshing the list; the tag check below needs the full list back
+        page.wait_for_function("App.entries.some(e => e.key === 'kyb-service')", timeout=8000)
         ev("const el = document.getElementById('globalSearch'); el.value = '#kyb'; el.dispatchEvent(new Event('input', {bubbles: true}))")
         check("typing #tag in the search box filters by that tag", ev("App.tagFilter") == "kyb" and ev("[...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.dataset.key)") == ["kyb-service"])
         ev("const el = document.getElementById('globalSearch'); el.value = 'kyb'; el.dispatchEvent(new Event('input', {bubbles: true}))")
@@ -948,15 +960,17 @@ def run(base, headed, coverage=None):
           renderDetailView({key: 'p-mit', kind: 'incident', status: 'mitigated', title: 'x'}, []); out.pills.push(document.querySelectorAll('.dh-pills .pill')[1].className.replace('pill', '').trim());
           for (const pr of ['critical', 'high', 'low']) { renderDetailView({key: 'p-' + pr, kind: 'task', priority: pr, title: 'x'}, []); out.pills.push(document.querySelectorAll('.dh-pills .pill')[1].className.replace('pill', '').trim()); }
           renderDetailView({key: 'p-done', kind: 'task', status: 'done', title: 'x'}, []); out.pills.push(pill());
-          // an author field that is empty is shown as nothing, not as 'undefined'
-          renderDetailView({key: 'k-anon', title: 'K'}, [{sha: 'g'.repeat(40), author: '', committed_at: new Date().toISOString()}, {sha: 'h'.repeat(40), author: 'First <f>', committed_at: new Date().toISOString()}]); out.unknown = txt().includes('undefined') ? 'undefined' : (txt().includes('last changed by') ? '' : 'missing');
+          // a last version with no author (made without a token) names nobody: no 'last changed by', no 'undefined'
+          renderDetailView({key: 'k-anon', title: 'K'}, [{sha: 'g'.repeat(40), author: '', committed_at: new Date().toISOString()}, {sha: 'h'.repeat(40), author: 'First <f>', committed_at: new Date().toISOString()}]); out.unknown = txt().includes('undefined') ? 'undefined' : (txt().includes('last changed by') ? 'shown' : '');
+          // an author that is only an address is shown as written
+          renderDetailView({key: 'k-mail', title: 'M'}, [{sha: 'h'.repeat(40), author: '<only@mail>', committed_at: new Date().toISOString()}]); out.mailOnly = txt().includes('by <only@mail>');
           // markRequired tolerates a missing element and a field outside a form group
           const t0 = document.getElementById('newTitle'); if (t0) t0.id = 'newTitle__gone'; try { markRequired(['newTitle']); } finally { if (t0) t0.id = 'newTitle'; } markRequired(['globalSearch']); out.loose = document.getElementById('globalSearch').classList.contains('invalid'); document.getElementById('globalSearch').classList.remove('invalid');
           return out; })()""")
         check("an open incident without a check gets the 'No detection' callout with an Add check button", "No detection" in cal["noDet"] and cal["addCheck"] == ["Add check"] and cal["loose"] is True, cal)
         check("a resolved incident without a check gets no such callout but shows its resolution", "No detection" not in cal["resolved"] and cal["resolvedCallout"] == ["Resolved", "r"], cal["resolved"][:200])
         check("an incident with a check shows it with a Copy button and names its hosts", "Is it still happening? true" in cal["det"] and cal["copy"] == ["Copy"] and "h1, h2" in cal["det"], cal["det"][:200])
-        check("a blocked task shows the reason in a callout with Unblock", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == ["Unblock"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
+        check("a blocked task shows the reason in a callout with Unblock", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == ["Unblock"] and cal["mailOnly"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
         ev(f"selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
 
@@ -1299,12 +1313,12 @@ def run(base, headed, coverage=None):
         check("a new incident with nothing chosen is medium on 'infrastructure' and carries no detection", by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium" and "detection" not in by["incidents:inc-defaults"], by.get("incidents:inc-defaults"))
         check("a segment pressed and a detection typed go out with the incident", by["incidents:inc-detect"]["severity"] == "high" and by["incidents:inc-detect"]["detection"] == "true", by.get("incidents:inc-detect"))
         check("the edit form marks the stored severity and keeps the detection", all(f"data-value=\"{sev}\" " in frm["sev-" + sev] and 'class="on"' in frm["sev-" + sev] for sev in ("critical", "high", "low")) and by["incidents:e-inc"]["detection"] == "d", by.get("incidents:e-inc"))
-        check("a new task with no assignee typed gets the default one and no priority", by["tasks:task-defaults"]["assignee"] == "Alexander Panasenko" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
+        check("a new task with no assignee typed is unclaimed and unranked", by["tasks:task-defaults"]["assignee"] == "" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
         check("a new knowledge entry with no tags sends none", by["knowledge:k-defaults"]["tags"] == [], by.get("knowledge:k-defaults"))
-        check("editing a bare incident, task and note fills honest defaults and a default author", by["incidents:e-inc"]["author"].startswith("Alexander") and by["tasks:e-task"]["assignee"] == "Alexander Panasenko" and by["knowledge:e-know"]["tags"] == [] and "Author" not in frm["incHtml"] and "Author" not in frm["taskHtml"] and "Author" not in frm["knowHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
+        check("editing a bare incident, task and note fills honest defaults and sends no author: the server takes it from the token", "author" not in by["incidents:e-inc"] and by["tasks:e-task"]["assignee"] == "" and by["knowledge:e-know"]["tags"] == [] and "Author" not in frm["incHtml"] and "Author" not in frm["taskHtml"] and "Author" not in frm["knowHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
         req = ev("""(() => { const out = {}; openNewModal('incident'); __t.set('newTitle', ''); __t.set('newKey', 'k'); __t.set('newBody', '');
-          submitNewModal(); out.marked = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errs = document.querySelectorAll('#newModalBody .form-err').length; out.focus = document.activeElement.id;
-          __t.set('newTitle', 'T'); submitNewModal(); out.after = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errsAfter = document.querySelectorAll('#newModalBody .form-err').length;
+          submitNewModal(); out.marked = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errs = document.querySelectorAll('#newModalBody .form-err.req').length; out.focus = document.activeElement.id;
+          __t.set('newTitle', 'T'); submitNewModal(); out.after = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errsAfter = document.querySelectorAll('#newModalBody .form-err.req').length;
           // a key the user typed into is not overwritten by the title
           const key = document.getElementById('newKey'); key.value = 'inc-mine'; key.dispatchEvent(new Event('input')); autoSlugIncident('Other title'); out.keptInc = key.value;
           openNewModal('task'); document.getElementById('newKey').value = 'task-mine'; document.getElementById('newKey').dispatchEvent(new Event('input')); autoSlugTask('Other'); out.keptTask = document.getElementById('newKey').value;
@@ -1339,6 +1353,108 @@ def run(base, headed, coverage=None):
         check("a real click on a tab switches to it", ev("App.activeTab") == "incidents" and ev("location.hash") == "#/incidents")
         ev("setGlobalSearchQuery(''); location.hash = '#/search'")
 
+
+        # ------------------------------------------------------------------
+        # Who is at the console: the token, the role, and what a reader is not offered.
+        # ------------------------------------------------------------------
+        check("a server that asks for nothing shows no name and no role", ev("[App.me.auth, App.me.role, document.getElementById('whoLabel').textContent, document.body.dataset.role]") == ["off", "admin", "", "admin"], ev("App.me"))
+        page.click("#whoBtn")
+        check("the status chip opens the token dialog, which says a token is not needed here", ev("__t.open()") == ["tokenModal"] and "does not ask for tokens" in ev("document.getElementById('tokenWhy').textContent"))
+        page.click("#tokenModal .btn.primary")
+        check("an empty token is marked, not sent", ev("document.getElementById('tokenInput').classList.contains('invalid')") and ev("__t.open()") == ["tokenModal"])
+        tok = ev("""async () => { const out = {}; const real = window.fetch; const seen = []; const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status}));
+          const me = (role, name) => ({auth: 'required', role, actor: name ? {id: 'x', name} : null});
+          let answer = () => json({error: 'no'}, 401);
+          window.fetch = (u, o) => { if (String(u).endsWith('/whoami')) { seen.push((o && o.headers && o.headers.Authorization) || ''); return answer(); } return real(u, o); };
+          __t.set('tokenInput', 'kyb_wrong'); await submitToken(); out.unknown = [document.getElementById('tokenErr').textContent, localStorage.getItem('kyb.token')];
+          answer = () => Promise.reject(new Error('down')); await submitToken(); out.down = document.getElementById('tokenErr').textContent;
+          // a reader: named, marked read-only, offered nothing it would be refused
+          answer = () => json(me('read', 'Rita Reader')); __t.set('tokenInput', ' kyb_reader '); await submitToken();
+          out.reader = [localStorage.getItem('kyb.token'), seen[seen.length - 1], document.getElementById('whoLabel').textContent, document.body.dataset.role, __t.open().length, getComputedStyle(document.getElementById('btnOpenNew')).display];
+          const errs = () => document.querySelectorAll('#toastContainer .toast.error').length; const before = errs();
+          openNewModal(); await openEditModal('kyb-service'); openResolveIncidentModal('i', 't'); openResolveTaskModal('t', 't'); promptBlockTask('t', 't'); await transitionTask('t', 'open');
+          out.refused = [errs() - before, __t.open().length];
+          // every request carries the token
+          let carried = null; const real2 = window.fetch; window.fetch = (u, o) => { if (String(u).includes('/tags')) carried = o && o.headers && o.headers.Authorization; return real2(u, o); }; await apiFetch('/tags'); window.fetch = real2; out.carried = carried;
+          // the label in each state
+          answer = () => json(me('read', null)); await loadWhoami(); out.anonReader = document.getElementById('whoLabel').textContent;
+          answer = () => json(me('write', null)); await loadWhoami(); out.noToken = document.getElementById('whoLabel').textContent;
+          answer = () => json(me('write', 'Agent W')); await loadWhoami(); out.writer = [document.getElementById('whoLabel').textContent, getComputedStyle(document.getElementById('btnOpenNew')).display !== 'none'];
+          openNewModal('task'); out.assignee = document.getElementById('newAssignee').value; closeModal('newModal');
+          openTokenModal(); out.signedIn = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          // a failed whoami keeps what was known; a page without the label is survived
+          answer = () => json({}, 500); const kept = await loadWhoami(); out.kept = kept && kept.role;
+          const lbl = document.getElementById('whoLabel'); lbl.id = 'gone'; await loadWhoami(); lbl.id = 'whoLabel';
+          // nothing known at all (the very first whoami failed): no role, and the dialog still opens
+          const known = App.me; App.me = null; await loadWhoami(); out.blank = [App.me, document.body.dataset.role]; openTokenModal(); out.blankWhy = document.getElementById('tokenWhy').textContent; closeModal('tokenModal'); App.me = known;
+          // a token for a role with no name on it
+          answer = () => json(me('write', null)); openTokenModal(); __t.set('tokenInput', 'kyb_nameless'); await submitToken(); out.nameless = [...document.querySelectorAll('#toastContainer .toast')].pop().textContent; localStorage.setItem('kyb.token', 'kyb_reader');
+          // a 401 on any read or write asks for a token, once
+          window.fetch = (u, o) => String(u).includes('/probe') ? json({error: 'x'}, 401) : real(u, o);
+          await apiFetch('/probe'); out.asked = [__t.open(), document.getElementById('tokenWhy').textContent]; closeModal('tokenModal');
+          await apiPost('/probe', {}); out.askedOnce = __t.open().length;
+          App.askedForToken = false; localStorage.removeItem('kyb.token'); await apiPost('/probe', {}); out.askedBare = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          openTokenModal('custom reason'); out.custom = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          App.me = {auth: 'required', role: 'write', actor: null}; openTokenModal(); out.paste = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          // a browser that refuses storage: the console still works for this page
+          const S = Storage.prototype; const g = S.getItem, st = S.setItem, rm = S.removeItem;
+          S.getItem = S.setItem = S.removeItem = () => { throw new Error('denied'); };
+          try { out.noStore = [storedToken(), Object.keys(authHeaders()).length]; answer = () => json(me('write', 'Agent W'));
+            window.fetch = (u, o) => String(u).endsWith('/whoami') ? answer() : real(u, o); openTokenModal(); __t.set('tokenInput', 'kyb_x'); await submitToken(); out.noStoreSaved = __t.open().length; await forgetToken(); }
+          finally { S.getItem = g; S.setItem = st; S.removeItem = rm; }
+          // forgetting: back to what the server says for nobody
+          window.fetch = real; localStorage.setItem('kyb.token', 'kyb_old'); await forgetToken(); out.forgot = [localStorage.getItem('kyb.token'), App.me.auth, document.getElementById('whoLabel').textContent, document.body.dataset.role];
+          return out; }""")
+        forgive_console(0)
+        check("a token the server does not know is said so and not kept; an unreachable server is said so", tok["unknown"] == ["The server does not know this token.", None] and tok["down"] == "Could not reach the server.", tok)
+        check("a reader's token is trimmed, tried, kept, named, and the console goes read-only", tok["reader"] == ["kyb_reader", "Bearer kyb_reader", "· Rita Reader (read-only)", "read", 0, "none"], tok["reader"])
+        check("every write entry point refuses a reader with a reason, keyboard or not", tok["refused"] == [6, 0], tok["refused"])
+        check("the token goes out with every request", tok["carried"] == "Bearer kyb_reader", tok["carried"])
+        check("the chip says who: an anonymous reader, a caller without a token, a named writer", [tok["anonReader"], tok["noToken"], tok["writer"]] == ["· read-only", "· no token", ["· Agent W", True]], tok)
+        check("a new task is offered to whoever is signed in; the dialog says who that is", tok["assignee"] == "Agent W" and tok["signedIn"] == "Signed in as Agent W, role write.", tok)
+        check("a failed whoami keeps the last known answer; with nothing known there is no role and the dialog still explains itself", tok["kept"] == "write" and tok["blank"] == [None, ""] and "Paste the token" in tok["blankWhy"] and "Token saved" in tok["nameless"], tok)
+        check("a 401 opens the token dialog once, with the reason that fits", tok["asked"] == [["tokenModal"], "This token is not known to the server, or was revoked."] and tok["askedOnce"] == 0 and tok["askedBare"] == "This server asks for a token." and tok["custom"] == "custom reason" and "Paste the token" in tok["paste"], tok)
+        check("without browser storage the console still signs in for the page", tok["noStore"] == ["", 0] and tok["noStoreSaved"] == 0, tok)
+        check("forgetting the token returns to what the server gives nobody", tok["forgot"] == [None, "off", "", "admin"], tok["forgot"])
+
+        # and against a server that really asks: the same page, real tokens, a real commit
+        with tempfile.TemporaryDirectory(prefix="kyb-ui-auth-") as atmp:
+            atmp = pathlib.Path(atmp)
+            t_read, t_write = issue_token(atmp, "reader", "Rita Reader", "read"), issue_token(atmp, "agent-w", "Agent W", "write")
+            aproc, abase = start_sandbox(atmp, {"KYB_AUTH": "required", "KYB_AUTH_FILE": str(atmp / "auth.json")})
+            try:
+                actx = browser.new_context(viewport={"width": 1440, "height": 900})   # its own storage: no token carried over
+                ap_ = actx.new_page()
+                aerr = []
+                ap_.on("pageerror", lambda e: aerr.append(str(e)))
+                ap_.goto(abase + "/")
+                ap_.wait_for_selector("#tokenModal.open", timeout=8000)
+                check("auth server: the page loads for anyone and asks for a token", ap_.inner_text("#tokenWhy") == "This server asks for a token.")
+                ap_.fill("#tokenInput", "kyb_" + "0" * 64); ap_.click("#tokenModal .btn.primary")
+                ap_.wait_for_function("document.getElementById('tokenErr').textContent !== ''", timeout=5000)
+                check("auth server: a made-up token is refused", ap_.inner_text("#tokenErr") == "The server does not know this token.")
+                ap_.fill("#tokenInput", t_read); ap_.click("#tokenModal .btn.primary")
+                ap_.wait_for_function("document.body.dataset.role === 'read' && !document.querySelector('.modal-backdrop.open')", timeout=8000)
+                check("auth server: a reader signs in, is named, and is offered no write control", ap_.inner_text("#whoLabel") == "· Rita Reader (read-only)" and not ap_.is_visible("#btnOpenNew"))
+                ap_.keyboard.press("n")
+                check("auth server: the keyboard cannot open a form for a reader", ap_.evaluate("document.querySelectorAll('.modal-backdrop.open').length") == 0)
+                st_, e_ = api(abase, "POST", "/knowledge", {"key": "sneak", "title": "t", "body": "b"})
+                check("auth server: without a token the API itself refuses", st_ == 401, (st_, e_))
+                ap_.reload(); ap_.wait_for_function("document.body.dataset.role === 'read'", timeout=8000)
+                check("auth server: the token survives a reload", ap_.inner_text("#whoLabel") == "· Rita Reader (read-only)")
+                ap_.click("#whoBtn"); ap_.fill("#tokenInput", t_write); ap_.click("#tokenModal .btn.primary")
+                ap_.wait_for_function("document.body.dataset.role === 'write'", timeout=8000)
+                ap_.click("#btnOpenNew"); ap_.fill("#newTitle", "Signed Note"); ap_.fill("#newBody", "Written through the form."); ap_.click("#newModalSubmitBtn")
+                ap_.wait_for_function("App.selectedKey === 'signed-note'", timeout=8000)
+                ap_.wait_for_function("document.querySelector('.dh-words') && document.querySelector('.dh-words').textContent.includes('Agent W')", timeout=8000)
+                check("auth server: a writer's entry is authored by the token's name, in the card and in git", "by Agent W" in ap_.inner_text(".dh-words"), ap_.inner_text(".dh-words"))
+                req = urllib.request.Request(abase + "/knowledge/signed-note/history", headers={"authorization": "Bearer " + t_read})
+                hist = json.loads(urllib.request.urlopen(req, timeout=10).read())
+                check("auth server: the commit carries the writer", hist["versions"][0]["author"] == "Agent W <agent-w@kyb>", hist["versions"][0])
+                check("auth server: no script errors", not aerr, aerr[:3])
+                actx.close()
+            finally:
+                aproc.terminate()
 
         # ------------------------------------------------------------------
         # Relations: Related in the card, Services and hosts. Every row says why it is there.
@@ -1468,7 +1584,7 @@ def run(base, headed, coverage=None):
           await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
           window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
         forgive_console(0, "POST /knowledge")
-        check("resolve, done and block go out with the owner as author", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
+        check("resolve, done and block go out without an author field", len(sub[0]) == 3 and "author" not in sub[0][2][1] and sub[0][2][1].get("blocked_reason") == "r", sub[0])
         check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
         dv = ev("""(() => { const out = {};
           renderDetailView({key: 'inc-nodate', kind: 'incident', resolution: 'fixed', title: 'No dates'}, []); out.inc = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');

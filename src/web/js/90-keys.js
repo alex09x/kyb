@@ -224,7 +224,7 @@
       window.addEventListener('popstate', applyRoute);
 
       // Initial load & 4s polling
-      refreshAll().then(() => {
+      loadWhoami().then(refreshAll).then(() => {
         applyRoute();
       });
       App.refreshTimer = setInterval(refreshAll, 4000);  // kept so the loop can be paused (the UI test drives refreshes itself)

@@ -177,6 +177,7 @@
     }
 
     function openResolveIncidentModal(key, title) {
+      if (refuseReadOnly()) return;
       App.activeResolveKey = key;
       document.getElementById('resolveIncidentTargetText').textContent = `Incident: ${title} (${key})`;
       document.getElementById('resolveIncidentOutcome').value = '';

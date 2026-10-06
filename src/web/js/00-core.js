@@ -100,7 +100,8 @@
     // API Helpers
     async function apiFetch(endpoint) {
       try {
-        const res = await fetch(endpoint);
+        const res = await fetch(endpoint, { headers: authHeaders() });
+        if (res.status === 401) askForToken();
         if (!res.ok) return null;
         return await res.json();
       } catch (err) {
@@ -113,10 +114,11 @@
       try {
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify(body)
         });
         const data = await res.json().catch(() => ({}));
+        if (res.status === 401) askForToken();
         // A write changes the record and its history, and possibly the entries
         // linked to it; whatever the detail pane cached is now a stale version.
         if (res.ok) { App.cacheGen++; App.detailCache.clear(); if (App.entryPrefetch) App.entryPrefetch.clear(); }
@@ -125,6 +127,69 @@
         console.error('API POST Error', endpoint, err);
         return { ok: false, error: err.message };
       }
+    }
+
+    // ---- Who is at the console. The token lives in this browser only and goes out as a
+    // bearer header; the server decides what it may do. The role only hides controls that
+    // would be refused anyway.
+    function storedToken() { try { return localStorage.getItem('kyb.token') || ''; } catch (_) { return ''; } }
+    function authHeaders() { const t = storedToken(); return t ? { Authorization: 'Bearer ' + t } : {}; }
+    function readOnly() { return !!App.me && App.me.role === 'read'; }
+    function meName() { return (App.me && App.me.actor && App.me.actor.name) || ''; }
+    // Entry points of every write call this first: the keyboard reaches them too.
+    function refuseReadOnly() {
+      if (!readOnly()) return false;
+      showToast('Read-only: this token has the read role', 'error');
+      return true;
+    }
+
+    async function loadWhoami() {
+      const me = await apiFetch('/whoami');
+      App.me = me || App.me || null;
+      document.body.dataset.role = App.me ? App.me.role : '';
+      const who = document.getElementById('whoLabel');
+      if (who) who.textContent = !App.me || App.me.auth === 'off' ? '' : meName() ? `· ${meName()}${readOnly() ? ' (read-only)' : ''}` : readOnly() ? '· read-only' : '· no token';
+      return App.me;
+    }
+
+    function askForToken() {
+      if (App.askedForToken) return;      // once per failure, not once per request of a refresh
+      App.askedForToken = true;
+      openTokenModal(storedToken() ? 'This token is not known to the server, or was revoked.' : 'This server asks for a token.');
+    }
+
+    function openTokenModal(why) {
+      document.getElementById('tokenInput').value = '';
+      const mode = App.me ? App.me.auth : '';
+      document.getElementById('tokenWhy').textContent = why || (mode === 'off' ? 'This server does not ask for tokens; one is not needed here.' : meName() ? `Signed in as ${meName()}, role ${App.me.role}.` : 'Paste the token you were issued. It stays in this browser.');
+      document.getElementById('tokenErr').textContent = '';
+      openModal('tokenModal');
+    }
+
+    async function submitToken() {
+      const t = document.getElementById('tokenInput').value.trim();
+      if (!markRequired(['tokenInput'])) return;
+      // tried before it is kept: a token the server does not know is not stored
+      let res = null;
+      try { res = await fetch('/whoami', { headers: { Authorization: 'Bearer ' + t } }); } catch (_) { res = null; }
+      if (!res || !res.ok) {
+        document.getElementById('tokenErr').textContent = res && res.status === 401 ? 'The server does not know this token.' : 'Could not reach the server.';
+        return;
+      }
+      try { localStorage.setItem('kyb.token', t); } catch (_) {}
+      App.askedForToken = false;
+      closeModal('tokenModal');
+      await loadWhoami();
+      showToast(meName() ? `Signed in as ${meName()}` : 'Token saved', 'success');
+      await refreshAll();
+    }
+
+    async function forgetToken() {
+      try { localStorage.removeItem('kyb.token'); } catch (_) {}
+      App.askedForToken = false;
+      closeModal('tokenModal');
+      await loadWhoami();
+      await refreshAll();
     }
 
     // Full Refresh Loop

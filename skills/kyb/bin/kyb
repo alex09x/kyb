@@ -10,6 +10,12 @@ KYB_HOST="${KYB_HOST:-127.0.0.1}"
 ADDR="${KYB_ADDR:-$KYB_HOST:9310}"
 BASE="http://$ADDR"
 
+# Access token, in priority order: env KYB_TOKEN -> ~/.config/kyb/token (written
+# by `kyb login`). A server that does not ask for tokens ignores it. The token is
+# handed to curl through a config stream, never as an argument: the command line
+# of a process is readable by every user of the machine.
+KYB_TOKEN="${KYB_TOKEN:-$(cat "$HOME/.config/kyb/token" 2>/dev/null || true)}"
+
 die() { echo "kyb: $*" >&2; exit 1; }
 
 # A server older than this CLI cannot object to a parameter it has never heard
@@ -75,7 +81,11 @@ urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.arg
 # start or fix anything remotely. If the server doesn't answer, say so and stop.
 kyb_curl() {
   local out rc=0
-  out="$(curl -sS -m 15 "$@" 2>&1)" || rc=$?
+  if [ -n "$KYB_TOKEN" ]; then
+    out="$(curl -sS -m 15 --config <(printf 'header = "authorization: Bearer %s"\n' "$KYB_TOKEN") "$@" 2>&1)" || rc=$?
+  else
+    out="$(curl -sS -m 15 "$@" 2>&1)" || rc=$?
+  fi
   [ "$rc" -eq 0 ] || die "cannot reach $ADDR: $out"
   printf '%s\n' "$out"
 }
@@ -95,6 +105,9 @@ kyb — Know Your Business (our infrastructure knowledge base)
   kyb rm <key>
   kyb reindex
   kyb health
+  kyb whoami                                        (who the server takes you for, and your role)
+  kyb login                                         (token on stdin; kept in ~/.config/kyb/token, owner-only)
+  kyb logout
 
 incident reports (key must start with inc-, e.g. inc-2026-07-22-orders-api-oom):
   kyb incident --template                       (print the body skeleton to fill in)
@@ -435,6 +448,29 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     ;;
   health)
     kyb_curl "$BASE/healthz" | pretty
+    ;;
+  whoami)
+    kyb_curl "$BASE/whoami" | pretty
+    ;;
+  login)
+    # The token comes on stdin so it is never in the shell history or the process list.
+    IFS= read -r token || true
+    token="${token//[[:space:]]/}"
+    [ -n "$token" ] || die "no token on stdin: echo it in, or paste it and press Enter"
+    KYB_TOKEN="$token"
+    who="$(kyb_curl "$BASE/whoami")"
+    case "$who" in
+      *'"actor":{'*) ;;
+      *'"auth":"off"'*) die "this server does not ask for tokens; nothing was saved" ;;
+      *) die "the server does not know this token; nothing was saved" ;;
+    esac
+    mkdir -p "$HOME/.config/kyb"
+    ( umask 077; printf '%s\n' "$token" > "$HOME/.config/kyb/token" )
+    printf '%s\n' "$who" | pretty
+    ;;
+  logout)
+    rm -f "$HOME/.config/kyb/token"
+    echo "token forgotten"
     ;;
   *)
     usage

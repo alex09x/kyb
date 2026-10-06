@@ -116,6 +116,8 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Exercise the web UI end to end
         run: KYB_SERVER_BIN=./target/release/kyb-server python scripts/test-web-ui.py --coverage ui-uncovered.txt --min-coverage 100
+      - name: Exercise the CLI against a server that asks for tokens
+        run: KYB_SERVER_BIN=./target/release/kyb-server bash scripts/test-cli-auth.sh
 
   # Tag builds only. Branch and PR runs are untouched by this job.
   #

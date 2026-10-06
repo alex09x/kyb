@@ -147,6 +147,8 @@ mod tests {
             "function renderPlaces",
             "function renderPlaceDetail",
             "function relatedHtml",
+            "function loadWhoami",
+            "function submitToken",
             "function switchTab",
             "function openNewModal",
             "function submitNewModal",
