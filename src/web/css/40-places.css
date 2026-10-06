@@ -23,4 +23,4 @@
     .place .quiet { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
     .place-sum { font-size: 15px; color: var(--text-dim); margin-bottom: 6px; }
     .place-sum.hot { color: var(--amber); }
-    @media (max-width: 900px) { .places { grid-template-columns: 1fr; } .places-list { border-right: 0; border-bottom: 1px solid var(--border); max-height: 240px; } .rel-row { grid-template-columns: 56px minmax(0, 1fr) auto; } .rel-row .why { display: none; } }
+    @media (max-width: 900px) { .places { grid-template-columns: 1fr; } .places-list { border-right: 0; border-bottom: 1px solid var(--border); max-height: 240px; } .rel-row { grid-template-columns: 56px minmax(0, 1fr) auto; row-gap: 2px; } .rel-row .why { grid-column: 2 / -1; text-align: left; white-space: normal; } }   /* the reason moves under the title; it is never dropped */

@@ -318,7 +318,9 @@ Versions tab say who changed what. A commit made without a token (before tokens,
 `off`/`compat`) names nobody. This is attribution, not proof: anyone with direct access to the
 repository can write any author. Rolling out: start with `KYB_AUTH=compat` on the trusted bind,
 give every agent a token, watch the `actor` field of the audit log until no `-` remains, then
-switch to `required`. The web UI asks for a token when the server does and hides what the
+switch to `required`. Never leave `compat` on an address reachable from outside: it lets a
+caller through by leaving the token out. A public read-only demo is its own instance, with its
+own synthetic data, started with `KYB_AUTH=required KYB_ANON=read`. The web UI asks for a token when the server does and hides what the
 token's role would be refused.
 
 ## Web UI and Control Room

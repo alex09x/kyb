@@ -45,26 +45,69 @@ pub struct AppState {
     history_gen: std::sync::atomic::AtomicU64,
     /// Relations between entries, derived from the repository. Kept until the
     /// next write (the generation it was built at no longer matches).
-    links_cache: std::sync::Mutex<Option<(u64, Arc<links::LinkIndex>)>>,
+    links_cache: std::sync::Mutex<Option<LinksCache>>,
+    /// Keys archived since the link index last took note. A key can be filed and
+    /// closed between two builds, so comparing trees alone would miss it.
+    archived_since: std::sync::Mutex<Vec<String>>,
     pub(crate) auth: auth::Auth,
+}
+
+/// The link index with what it takes to rebuild it without re-reading history.
+struct LinksCache {
+    gen: u64,
+    index: Arc<links::LinkIndex>,
+    archived: Arc<std::collections::HashMap<String, model::Entry>>,
 }
 
 impl AppState {
     /// The link index for the current state of the repository.
+    ///
+    /// The tree is cheap to read; the archive is not - finding the last version
+    /// of every closed incident and task walks the whole history. That walk
+    /// happens once per process. After it, a rebuild only looks at the keys the
+    /// server archived since the previous build: each one's last version is a
+    /// short walk back from HEAD, and a key that came back into the tree leaves
+    /// the archive. (Retracted knowledge is never in the archive: only closing an
+    /// incident or task archives.)
     fn links(&self) -> Result<Arc<links::LinkIndex>> {
         use std::sync::atomic::Ordering;
         let gen = self.history_gen.load(Ordering::Acquire);
-        if let Some((at, ix)) = self.links_cache.lock().unwrap().as_ref() {
-            if *at == gen {
-                return Ok(ix.clone());
+        let prev = {
+            let held = self.links_cache.lock().unwrap();
+            match held.as_ref() {
+                Some(c) if c.gen == gen => return Ok(c.index.clone()),
+                Some(c) => Some(((), c.archived.clone())),
+                None => None,
             }
-        }
-        let ix = Arc::new(links::LinkIndex::build(&self.store.list_head()?, &self.store.archived_latest()?));
+        };
+        // noted before the tree is read: an archive that lands after this is a later build's
+        let noted: Vec<String> = self.archived_since.lock().unwrap().clone();
+        let head = self.store.list_head()?;
+        let head_kinds: HashSet<String> = head.iter().map(|e| e.key.clone()).collect();
+        let archived: Arc<std::collections::HashMap<String, model::Entry>> = match prev {
+            None => Arc::new(self.store.archived_latest()?.into_iter().map(|e| (e.key.clone(), e)).collect()),
+            Some((_, archived)) => {
+                let mut next = (*archived).clone();
+                next.retain(|k, _| !head_kinds.contains(k));
+                for key in noted.iter().filter(|k| !head_kinds.contains(*k)) {
+                    if let Some(last) = self.store.latest_version(key)? {
+                        next.insert(key.clone(), last);
+                    }
+                }
+                Arc::new(next)
+            }
+        };
+        let archived_list: Vec<model::Entry> = archived.values().cloned().collect();
+        let index = Arc::new(links::LinkIndex::build(&head, &archived_list));
         // a write that landed while we were reading makes this answer stale: serve it once, do not keep it
         if self.history_gen.load(Ordering::Acquire) == gen {
-            *self.links_cache.lock().unwrap() = Some((gen, ix.clone()));
+            *self.links_cache.lock().unwrap() = Some(LinksCache { gen, index: index.clone(), archived });
+            // these are in the kept index now; anything pushed meanwhile stays for the next build
+            let mut since = self.archived_since.lock().unwrap();
+            let done = noted.len().min(since.len());
+            since.drain(..done);
         }
-        Ok(ix)
+        Ok(index)
     }
 
     fn history_cached(&self, key: &str) -> Result<Vec<store::VersionInfo>> {
@@ -189,6 +232,7 @@ fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppSta
         history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         history_gen: std::sync::atomic::AtomicU64::new(0),
         links_cache: std::sync::Mutex::new(None),
+        archived_since: std::sync::Mutex::new(Vec::new()),
         auth,
     }))
 }
@@ -619,6 +663,7 @@ fn archive_locked(st: &AppState, _w: &mut IndexWriter, key: &str, reply: &mut Re
     if reply.0 != StatusCode::OK {
         return;
     }
+    st.archived_since.lock().unwrap().push(key.to_string());
     match st.store.archive(key) {
         Err(e) => eprintln!("kyb: archive failed for {key}: {e:#}"),
         Ok(None) => {} // already archived
@@ -1637,6 +1682,7 @@ async fn remove_committed(
         }
     } else {
         // live index doc and vector stay: archived means findable
+        st.archived_since.lock().unwrap().push(key.to_string());
         match st.store.archive(key) {
             Err(e) => err500(e),
             Ok(None) => {
@@ -2010,6 +2056,28 @@ mod api_tests {
         assert_eq!((v["incoming"][0]["live"].clone(), v["incoming"][0]["archived"].clone()), (json!(false), json!(true)));
         let (_, p) = call(&app, "GET", "/places", None).await;
         assert_eq!((p["services"][0]["open"].clone(), p["services"][0]["total"].clone()), (json!(0), json!(1)));
+
+        // a second incident closed after the index exists is picked up without a history walk,
+        // a retracted note takes its edges with it, and a key filed again is live again
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-two", "title": "Two", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        call(&app, "GET", "/places", None).await;
+        call(&app, "POST", "/incidents/inc-two/resolve", Some(json!({"resolution": "ok"}))).await;
+        // filed and closed with no build in between: the tree never showed it to the index
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-flash", "title": "Flash", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        call(&app, "POST", "/incidents/inc-flash/resolve", Some(json!({"resolution": "ok"}))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        let incoming: Vec<(String, bool)> = v["incoming"].as_array().unwrap().iter().map(|r| (r["key"].as_str().unwrap().to_string(), r["archived"] == json!(true))).collect();
+        assert!(incoming.contains(&("inc-two".to_string(), true)) && incoming.contains(&("inc-redis-oom".to_string(), true)) && incoming.contains(&("inc-flash".to_string(), true)), "{incoming:?}");
+        call(&app, "POST", "/knowledge", Some(upsert_body("pointer", "See [[redis-runbook]]."))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert!(v["incoming"].as_array().unwrap().iter().any(|r| r["key"] == "pointer"));
+        call(&app, "DELETE", "/knowledge/pointer", None).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert!(!v["incoming"].as_array().unwrap().iter().any(|r| r["key"] == "pointer"), "a retracted note keeps no edges");
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-two", "title": "Two again", "service": "redis", "severity": "high", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        let again = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-two").unwrap().clone();
+        assert_eq!((again["archived"].clone(), again["live"].clone(), again["title"].clone()), (json!(false), json!(true), json!("Two again")));
 
         for bad in ["/impact", "/impact?service=a&host=b", "/impact?service=%20", "/impact?host="] {
             let (st, v) = call(&app, "GET", bad, None).await;

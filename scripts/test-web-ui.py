@@ -1501,6 +1501,13 @@ def run(base, headed, coverage=None):
         page.wait_for_timeout(500)
         check("a refresh keeps the place and its detail", ev("[App.place.name, document.querySelector('#placeDetail h1').textContent]") == [SVC, SVC])
 
+        # narrow: the reason for a row moves under its title, it is not dropped
+        page.set_viewport_size({"width": 800, "height": 900})
+        page.wait_for_timeout(150)
+        why = ev("(() => { const w = document.querySelector('#placeDetail .rel-row .why'), t = document.querySelector('#placeDetail .rel-row .t'); const a = w.getBoundingClientRect(), b = t.getBoundingClientRect(); return [getComputedStyle(w).display, a.width > 40, a.top >= b.bottom - 1, w.textContent]; })()")
+        check("at 800px every row still says why it is there, on a second line", why[:3] == ["block", True, True] and why[3] != "", why)
+        page.set_viewport_size({"width": 1440, "height": 900})
+
         # from the place to the card, and the card's own Related
         page.click(f"#placeDetail .rel-row:has-text('Rel runbook')")
         page.wait_for_function(f"App.selectedKey === '{RN}' && document.querySelectorAll('#relatedBox .rel-row').length === 3", timeout=8000)
@@ -1530,6 +1537,14 @@ def run(base, headed, coverage=None):
           // an answer for a place nobody is looking at any more is dropped
           let release; window.fetch = u => String(u).includes('/impact') ? new Promise(r => {{ release = () => r(new Response(JSON.stringify({{kind: 'service', name: 'late', open: 0, incidents: [], runbooks: [], tasks: []}}), {{status: 200}})); }}) : real(u);
           const p = selectPlace('service', 'late', false); App.place = {{kind: 'host', name: 'only-host'}}; release(); await p; out.late = App.impact;
+          // the same place asked twice (a refresh landing on a slow answer): the older answer, arriving last, is dropped
+          {{ const held = []; const imp = n => new Response(JSON.stringify({{kind: 'host', name: 'only-host', open: n, incidents: [], runbooks: [], tasks: []}}), {{status: 200}});
+            window.fetch = u => String(u).includes('/impact') ? new Promise(r => held.push(r)) : real(u);
+            App.place = {{kind: 'host', name: 'only-host'}}; const first = loadImpact(); const second = loadImpact(); held[1](imp(2)); await second; held[0](imp(1)); await first; out.sameOrder = App.impact.open; }}
+          // and the same card: its older Related answer does not replace the newer one
+          {{ const held = []; const rel = k => new Response(JSON.stringify({{outgoing: [], incoming: [{{key: k, kind: 'knowledge', title: k, via: 'link'}}]}}), {{status: 200}});
+            window.fetch = u => String(u).includes('/related') ? new Promise(r => held.push(r)) : real(u);
+            const first = loadRelated('ordered'); const second = loadRelated('ordered'); held[1](rel('newer')); await second; held[0](rel('older')); await first; out.sameCard = App.related.get('ordered').incoming[0].key; }}
           window.fetch = real;   // the held-back answer above must not hold this one back too
           App.places = {{services: [{{name: 'solo', open: 0, total: 1, worst: '', last: ''}}], hosts: []}}; App.place = {{kind: 'service', name: 'solo'}}; await renderPlaces(); out.noHosts = [...document.querySelectorAll('#placesList .rel-h')].length;
           out.missingOdd = (() => {{ const d = document.createElement('div'); d.innerHTML = relRow({{key: 'm', missing: true, via: 'odd'}}); return d.textContent; }})();
@@ -1555,6 +1570,7 @@ def run(base, headed, coverage=None):
         check("with no incident naming a place the list says so and the badge is calm", "No incident names a service or a host yet" in cor["empty"] and "red" not in cor["badge"], cor)
         check("hosts alone are listed; a place with nothing open shows its closed count; a failed load says so", cor["hostOnly"] == ["host", "3 closed", "Could not load only-host."] and cor["noHosts"] == 1 and cor["missingOdd"] == "modd · not in the base", cor)
         check("an impact answer for a place no longer selected is dropped", cor["late"] is None, cor["late"])
+        check("for one place and for one card only the answer to the latest question is used", cor["sameOrder"] == 2 and cor["sameCard"] == "newer", cor)
         check("a quiet place says nothing is open and explains each empty section", cor["quiet"] == ["Nothing open right now", "place-sum", 3], cor["quiet"])
         check("rows colour by state: high amber, default open amber, task in progress accent, done green, a note no pill; an unknown reason is shown as written", cor["tones"] == ["amber:high|names this service", "amber:open|odd", "acc:in progress|linked in the text", "acc:open|linked in the text", "ok:done|linked in the text", "-|cited"], cor["tones"])
         check("Related: a failed load keeps the card, another card's answer is stored not drawn, an unchanged answer does not redraw, a missing box is survived", cor["failKept"] and cor["otherKept"] and cor["unchanged"] and cor["noBox"], cor)

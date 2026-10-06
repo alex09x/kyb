@@ -25,6 +25,16 @@ pub const VIA_KNOWLEDGE: &str = "knowledge";
 pub const VIA_PARENT: &str = "parent_task";
 pub const VIA_LINK: &str = "link";
 
+fn wiki() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"\[\[([^\[\]]+)\]\]").unwrap())
+}
+
+fn inline() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"\[[^\[\]]+\]\(([^()\s]+)\)").unwrap())
+}
+
 /// Internal links written in a markdown body. Fenced blocks and inline code
 /// are skipped: a key inside a command is an example, not a reference.
 pub fn body_links(body: &str) -> Vec<String> {
@@ -53,28 +63,14 @@ pub fn body_links(body: &str) -> Vec<String> {
                 text.push(c);
             }
         }
-        let mut rest = text.as_str();
-        while let Some(at) = rest.find("[[") {
-            let tail = &rest[at + 2..];
-            match tail.find("]]") {
-                Some(end) => {
-                    push(tail[..end].trim());
-                    rest = &tail[end + 2..];
-                }
-                None => break,
-            }
+        // [[key]]
+        for m in wiki().captures_iter(&text) {
+            push(m[1].trim());
         }
-        let mut rest = text.as_str();
-        while let Some(at) = rest.find("](") {
-            let tail = &rest[at + 2..];
-            match tail.find(')') {
-                Some(end) => {
-                    let href = tail[..end].trim();
-                    push(href.strip_prefix("#/knowledge/").unwrap_or(href));
-                    rest = &tail[end + 1..];
-                }
-                None => break,
-            }
+        // [label](target): the whole shape the page renders as a link, not a stray "]("
+        for m in inline().captures_iter(&text) {
+            let href = m[1].trim();
+            push(href.strip_prefix("#/knowledge/").unwrap_or(href));
         }
     }
     out
@@ -355,6 +351,9 @@ mod tests {
         assert_eq!(body_links(body), vec!["redis-runbook", "pg-failover", "deploy-flow", "after-fence"]);
         assert!(body_links("").is_empty());
         assert!(body_links("[a](unclosed").is_empty());
+        // a stray "](" is not a link: the page does not render one either
+        assert!(body_links("Syntax reminder: ](runbook-a) and [](empty-label) and [x] (spaced-key)").is_empty());
+        assert_eq!(body_links("[one](a-key)[two](b-key) [[c-key]][[d-key]]"), vec!["c-key", "d-key", "a-key", "b-key"]);
     }
 
     #[test]

@@ -35,8 +35,14 @@
       </div>`;
     }
 
+    // The card is rebuilt on every refresh and asks again each time, so two answers for one
+    // key can be in flight. Only the answer to the latest question is used.
+    const relatedAsked = new Map();
     async function loadRelated(key) {
+      const mine = (relatedAsked.get(key) || 0) + 1;
+      relatedAsked.set(key, mine);
       const data = await apiFetch(`/knowledge/${encodeURIComponent(key)}/related`);
+      if (relatedAsked.get(key) !== mine) return;
       if (!data || !data.outgoing) return;
       const before = JSON.stringify(App.related.get(key) || null);
       App.related.set(key, { outgoing: data.outgoing, incoming: data.incoming });
@@ -63,9 +69,10 @@
 
     async function loadImpact() {
       const { kind, name } = App.place;
+      const mine = App.impactAsked = (App.impactAsked || 0) + 1;
       const data = await apiFetch(`/impact?${kind}=${encodeURIComponent(name)}`);
-      // another place was picked while this one was loading
-      if (App.place.kind !== kind || App.place.name !== name) return;
+      // another place was picked, or the same place was asked about again, while this was loading
+      if (App.impactAsked !== mine || App.place.kind !== kind || App.place.name !== name) return;
       App.impact = data;
       renderPlaceDetail();
     }
