@@ -158,7 +158,7 @@
     .detail-tab:hover { color: var(--text); }
     .detail-tab.active { color: var(--text); border-bottom-color: var(--accent); }
     .dh-acts { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; }
-    .dh-acts .btn kbd { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-left: 4px; }
+    .dh-acts .btn kbd { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-left: 4px; }
     .btn.ghost { border-color: transparent; color: var(--text-dim); }
     .more { position: relative; }
     .more .menu { display: none; position: absolute; right: 0; top: calc(100% + 4px); min-width: 200px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.5); z-index: 30; flex-direction: column; }

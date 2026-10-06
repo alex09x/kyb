@@ -149,12 +149,12 @@
           </div>
 
           <div style="margin-bottom:8px;">
-            <input type="text" id="topoSearchInput" class="form-input" style="padding:5px 8px; font-size:12px; border-radius:5px; width:100%;" placeholder="Filter nodes in graph..." oninput="setTopoSearch(this.value)">
-            <div id="topoSearchCount" style="font-size:11px; color:var(--accent); margin-top:3px; display:none;"></div>
+            <input type="text" id="topoSearchInput" class="form-input" style="padding:5px 8px; font-size:13px; border-radius:5px; width:100%;" placeholder="Filter nodes in graph..." oninput="setTopoSearch(this.value)">
+            <div id="topoSearchCount" style="font-size:12.5px; color:var(--accent); margin-top:3px; display:none;"></div>
           </div>
 
           <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:4px;">
-            <div style="font-size:10.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Layout View</div>
+            <div style="font-size:12.5px; font-weight:600; color:var(--text-muted); margin-bottom:5px;">Layout View</div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px;">
               <button class="chip" id="layoutOrbitBtn" onclick="setGraphLayout('orbit')">Cluster</button>
               <button class="chip" id="layoutRadarBtn" onclick="setGraphLayout('radar')">Concentric</button>
@@ -164,7 +164,7 @@
           </div>
 
           <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px;">
-            <div style="font-size:10.5px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px;">Filter Elements</div>
+            <div style="font-size:12.5px; font-weight:600; color:var(--text-muted); margin-bottom:5px;">Filter Elements</div>
             <div style="display:flex; gap:4px; flex-wrap:wrap;">
               <button class="chip active" id="gFilterAll" onclick="setGraphFilter('all')">All</button>
               <button class="chip" id="gFilterKnowledge" onclick="setGraphFilter('knowledge')">Docs</button>
@@ -173,7 +173,7 @@
             </div>
           </div>
 
-          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px; font-size:11px; display:flex; flex-direction:column; gap:4px;">
+          <div style="border-top:1px solid var(--border); padding-top:8px; margin-top:6px; font-size:12.5px; display:flex; flex-direction:column; gap:4px;">
             <div class="graph-legend-item"><span class="legend-color" style="background:#5e6ad2;"></span> Services</div>
             <div class="graph-legend-item"><span class="legend-color" style="background:#a78bfa;"></span> Fleet Hosts</div>
             <div class="graph-legend-item"><span class="legend-color" style="background:#94a3b8;"></span> Knowledge Base</div>
@@ -187,20 +187,20 @@
           <div class="graph-drawer-header">
             <div style="display:flex; align-items:center; gap:8px;">
               <span class="badge badge-knowledge" id="drawerBadge">KNOWLEDGE</span>
-              <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);" id="drawerKey">key</span>
+              <span style="font-family:var(--font-mono); font-size:12.5px; color:var(--accent);" id="drawerKey">key</span>
             </div>
             <button class="modal-close" onclick="closeGraphDrawer()" style="font-size:16px;">✕</button>
           </div>
           <div class="graph-drawer-body" id="drawerBody">
             <h2 id="drawerTitle" style="font-size:15px; font-weight:700; color:#fff; margin-bottom:8px;">Title</h2>
-            <div id="drawerMeta" style="font-size:11.5px; color:var(--text-muted); margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
+            <div id="drawerMeta" style="font-size:13px; color:var(--text-muted); margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
             <div style="border-top:1px solid var(--border); padding-top:10px; margin-bottom:12px;">
-              <div style="font-size:10.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Connected Infrastructure</div>
+              <div style="font-size:12.5px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Connected Infrastructure</div>
               <div id="drawerLinks" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
             </div>
             <div style="border-top:1px solid var(--border); padding-top:10px;">
-              <div style="font-size:10.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Document Summary</div>
-              <div id="drawerContent" class="prose" style="font-size:12px; max-height:260px; overflow-y:auto; background:var(--card-subtle); padding:10px; border-radius:6px;"></div>
+              <div style="font-size:12.5px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Document Summary</div>
+              <div id="drawerContent" class="prose" style="font-size:13px; max-height:260px; overflow-y:auto; background:var(--card-subtle); padding:10px; border-radius:6px;"></div>
             </div>
           </div>
           <div class="graph-drawer-footer" id="drawerFooter">

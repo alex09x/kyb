@@ -1660,7 +1660,23 @@ def run(base, headed, coverage=None):
             scope = ".modal-backdrop.open" if "dialog" in name else None
             cov = ev(f"__t.covered({scope!r})" if scope else "__t.covered()")
             check(f"nothing is covered: {name}", cov == [], cov[:6])
+            # the type scale: nothing a person reads is set below 12.5px, and no label is tracked uppercase
+            small = ev("""(() => { const out = []; for (const el of document.querySelectorAll('body *')) { if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
+              const cs = getComputedStyle(el); const own = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()); if (!own) continue;
+              const px = parseFloat(cs.fontSize); if (px < 12.5 || cs.textTransform === 'uppercase' || parseFloat(cs.letterSpacing) > 0.3) out.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ' ' + px + 'px ' + cs.textTransform + ' ' + cs.letterSpacing); }
+              return out.slice(0, 8); })()""")
+            check(f"type scale holds: {name}", small == [], small)
         ev("[...document.querySelectorAll('.modal-backdrop.open')].forEach(m => m.classList.remove('open'))")
+
+        # the header fits: at every width down to a small tablet nothing in it is outside the window or overlapping
+        for w in (1680, 1440, 1280, 1100, 1024, 900):
+            page.set_viewport_size({"width": w, "height": 900})
+            page.wait_for_timeout(150)
+            fit = ev("""(() => { const items = [...document.querySelector('header').children].filter(c => c.getBoundingClientRect().width); const rs = items.map(c => c.getBoundingClientRect());
+              const outside = rs.filter(r => r.left < 0 || r.right > innerWidth + 0.5).length; let overlap = 0; for (let i = 1; i < rs.length; i++) if (rs[i].left < rs[i - 1].right - 0.5) overlap++;
+              return {outside, overlap, right: Math.round(Math.max(...rs.map(r => r.right))), scroll: document.documentElement.scrollWidth > innerWidth}; })()""")
+            check(f"header fits at {w}px", fit["outside"] == 0 and fit["overlap"] == 0 and not fit["scroll"], fit)
+        page.set_viewport_size({"width": 1440, "height": 900})
 
         # and the controls are pressed for real: Playwright refuses to click what is hidden, disabled or covered
         ev(f"location.hash = '#/graph'; openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
