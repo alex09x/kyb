@@ -562,6 +562,9 @@ pub async fn whoami(State(st): State<Arc<crate::AppState>>) -> Json<serde_json::
 /// `kyb-server auth ...`, run on the machine that holds the book.
 pub fn cli(args: &[String]) -> anyhow::Result<String> {
     let path = book_path();
+    // the same rule as the server's, whatever KYB_AUTH is: the book is never written into the canon
+    let canon = PathBuf::from(std::env::var("KYB_DATA").unwrap_or_else(|_| "./kyb-data".into()));
+    anyhow::ensure!(!inside(&path, &canon), "KYB_AUTH_FILE {} is inside the git canon {}: the book would be committed and shared; put it beside the data, not in it", path.display(), canon.display());
     let flag = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     match args.first().map(String::as_str) {
         Some("add") => {
