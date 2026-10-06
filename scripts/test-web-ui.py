@@ -1374,6 +1374,8 @@ def run(base, headed, coverage=None):
           const errs = () => document.querySelectorAll('#toastContainer .toast.error').length; const before = errs();
           openNewModal(); await openEditModal('kyb-service'); openResolveIncidentModal('i', 't'); openResolveTaskModal('t', 't'); promptBlockTask('t', 't'); await transitionTask('t', 'open');
           out.refused = [errs() - before, __t.open().length];
+          // the request log is the admin's: a reader's refresh does not ask for it
+          { const asked = []; const r3 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return r3(u, o); }; await refreshAll(); window.fetch = r3; out.readerAudit = asked.some(u => u.includes('/api/audit')); }
           // every request carries the token
           let carried = null; const real2 = window.fetch; window.fetch = (u, o) => { if (String(u).includes('/tags')) carried = o && o.headers && o.headers.Authorization; return real2(u, o); }; await apiFetch('/tags'); window.fetch = real2; out.carried = carried;
           // the label in each state
@@ -1410,6 +1412,7 @@ def run(base, headed, coverage=None):
         check("a reader's token is trimmed, tried, kept, named, and the console goes read-only", tok["reader"] == ["kyb_reader", "Bearer kyb_reader", "· Rita Reader (read-only)", "read", 0, "none"], tok["reader"])
         check("every write entry point refuses a reader with a reason, keyboard or not", tok["refused"] == [6, 0], tok["refused"])
         check("the token goes out with every request", tok["carried"] == "Bearer kyb_reader", tok["carried"])
+        check("a reader's console does not ask for the request log", tok["readerAudit"] is False, tok["readerAudit"])
         check("the chip says who: an anonymous reader, a caller without a token, a named writer", [tok["anonReader"], tok["noToken"], tok["writer"]] == ["· read-only", "· no token", ["· Agent W", True]], tok)
         check("a new task is offered to whoever is signed in; the dialog says who that is", tok["assignee"] == "Agent W" and tok["signedIn"] == "Signed in as Agent W, role write.", tok)
         check("a failed whoami keeps the last known answer; with nothing known there is no role and the dialog still explains itself", tok["kept"] == "write" and tok["blank"] == [None, ""] and "Paste the token" in tok["blankWhy"] and "Token saved" in tok["nameless"], tok)

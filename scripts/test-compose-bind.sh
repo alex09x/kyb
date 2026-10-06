@@ -22,4 +22,25 @@ docker compose -f "$REPO/docker-compose.yml" config --format json | assert_bind 
 KYB_PUBLISH_ADDR=10.0.0.10 \
   docker compose -f "$REPO/docker-compose.yml" config --format json | assert_bind 10.0.0.10
 
-echo "Docker Compose bind tests passed"
+# The auth settings must reach the container: Compose reads .env only for ${...},
+# so a variable that is not named in the service never arrives and the server
+# stays wide open while its operator believes otherwise.
+assert_env() {
+  python3 -c '
+import json
+import sys
+
+want = dict(a.split("=", 1) for a in sys.argv[1:])
+env = json.load(sys.stdin)["services"]["kyb"]["environment"]
+bad = {k: (env.get(k), v) for k, v in want.items() if env.get(k) != v}
+if bad:
+    raise SystemExit(f"container environment differs (got, wanted): {bad!r}")
+' "$@"
+}
+
+unset KYB_AUTH KYB_AUTH_FILE KYB_ANON
+docker compose -f "$REPO/docker-compose.yml" config --format json | assert_env KYB_AUTH=off KYB_AUTH_FILE=/data/auth.json KYB_ANON=
+KYB_AUTH=required KYB_ANON=read KYB_AUTH_FILE=/data/secrets/book.json \
+  docker compose -f "$REPO/docker-compose.yml" config --format json | assert_env KYB_AUTH=required KYB_AUTH_FILE=/data/secrets/book.json KYB_ANON=read
+
+echo "Docker Compose bind and auth tests passed"

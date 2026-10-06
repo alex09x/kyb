@@ -201,7 +201,8 @@
         apiFetch('/tags'),
         apiFetch('/healthz'),
         apiFetch('/api/activity'),
-        App.feedPaused ? Promise.resolve(null) : apiFetch('/api/audit?limit=400'),
+        // the request log (who searched for what, from where) is the admin's; others are not shown it and do not ask
+        App.feedPaused || (App.me && App.me.role !== 'admin') ? Promise.resolve(null) : apiFetch('/api/audit?limit=400'),
         apiFetch('/places')
       ]);
       if (placesData && placesData.services) App.places = placesData;

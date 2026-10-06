@@ -431,4 +431,5 @@ Your role decides what you may do: `read` searches and reads, `write` also adds,
 and closes, `admin` also retracts knowledge and reindexes. Every write is committed under the
 token's name, so `kyb history <key>` says who changed what. A `401` means the server does not
 know the token (ask the owner for one, never invent or borrow one); a `403` names the role the
-action needs. Never put a token into an entry, a command line, a log or a message.
+action needs. Never put a token into an entry, a command line, a log or a message. A server
+behind TLS is addressed whole with `KYB_URL=https://...`.

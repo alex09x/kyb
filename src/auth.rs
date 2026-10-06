@@ -116,7 +116,8 @@ pub const SERVICE_EMAIL: &str = "kyb@local";
 /// How a commit's author is shown: `Name <email>`, or nothing for a commit the
 /// service signed itself (made before authorship, or by a caller without a token).
 pub fn shown_author(name: &str, email: &str) -> String {
-    if name.is_empty() || (name == SERVICE_NAME && email == SERVICE_EMAIL) || name == SERVICE_NAME {
+    // only the service's own full signature is nobody: a principal may be called anything
+    if name.is_empty() || (name == SERVICE_NAME && email == SERVICE_EMAIL) {
         String::new()
     } else if email.is_empty() {
         name.to_string()
@@ -186,11 +187,20 @@ impl Book {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(self)? + "\n")?;
+        // created owner-only from the first byte: the roster is private even before the rename
+        let _ = std::fs::remove_file(&tmp);
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        {
+            use std::io::Write;
+            let mut f = opts.open(&tmp)?;
+            f.write_all((serde_json::to_string_pretty(self)? + "\n").as_bytes())?;
+            f.sync_all()?;
         }
         std::fs::rename(&tmp, path)?;
         Ok(())
@@ -286,6 +296,10 @@ pub fn need(method: &Method, path: &str) -> Need {
     if path == "/" || path == "/healthz" || path == "/whoami" {
         return Need::Nothing;
     }
+    // The raw request log holds client addresses and other callers' queries.
+    if path == "/api/audit" {
+        return Need::Role(Role::Admin);
+    }
     if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
         return Need::Role(Role::Read);
     }
@@ -329,6 +343,22 @@ impl Auth {
             other => anyhow::bail!("KYB_ANON can only be 'read', not '{other}': an anonymous writer is no author"),
         };
         Ok(Auth::new(mode, anon, book_path()))
+    }
+
+    /// One line for the start-up log, so an operator sees what is in force
+    /// instead of assuming it - and a warning when the setting cannot work.
+    pub fn describe(&self) -> String {
+        let n = self.book().principals.iter().filter(|p| !p.revoked).count();
+        match (self.mode, self.anon) {
+            (Mode::Off, _) => "auth off - anyone who can reach this address can read and write".to_string(),
+            (Mode::Compat, _) => format!("auth compat - tokens honoured, callers without one keep full access ({n} principals in {}); for a trusted bind only", self.path.display()),
+            (Mode::Required, anon) => format!(
+                "auth required - {n} principals in {}{}{}",
+                self.path.display(),
+                if anon.is_some() { ", callers without a token may read" } else { "" },
+                if n == 0 { " - WARNING: the book is empty or missing, nobody can write; issue a token with `kyb-server auth add`" } else { "" },
+            ),
+        }
     }
 
     /// The book as it is on disk now: re-read when the file changed, so a token
@@ -565,6 +595,8 @@ mod tests {
         assert_eq!(need(&Method::GET, "/healthz"), Need::Nothing);
         assert_eq!(need(&Method::GET, "/whoami"), Need::Nothing);
         assert_eq!(need(&Method::GET, "/search"), Need::Role(Role::Read));
+        assert_eq!(need(&Method::GET, "/api/activity"), Need::Role(Role::Read));
+        assert_eq!(need(&Method::GET, "/api/audit"), Need::Role(Role::Admin));
         assert_eq!(need(&Method::POST, "/knowledge"), Need::Role(Role::Write));
         assert_eq!(need(&Method::POST, "/incidents/x/resolve"), Need::Role(Role::Write));
         assert_eq!(need(&Method::DELETE, "/knowledge/x"), Need::Role(Role::Write));
@@ -632,11 +664,25 @@ mod tests {
     #[test]
     fn shown_author_hides_the_service_signature() {
         assert_eq!(shown_author("kyb", "kyb@local"), "");
+        assert_eq!(shown_author("kyb", "kyb@fleet"), "kyb <kyb@fleet>", "a principal named like the service is still someone");
         assert_eq!(shown_author("", ""), "");
         assert_eq!(shown_author("Agent A", "a@kyb"), "Agent A <a@kyb>");
         assert_eq!(shown_author("Agent A", ""), "Agent A");
         assert_eq!(signature(), ("kyb".to_string(), "kyb@local".to_string()));
         assert_eq!(role(), Role::Admin);
+    }
+
+    #[test]
+    fn the_start_up_line_says_what_is_in_force() {
+        let (book, _) = book_with(Role::Write);
+        let (off, _d) = auth_with(Mode::Off, None, &book);
+        assert!(off.describe().starts_with("auth off"));
+        let (compat, _d) = auth_with(Mode::Compat, None, &book);
+        assert!(compat.describe().contains("1 principals") && compat.describe().contains("trusted bind"));
+        let (demo, _d) = auth_with(Mode::Required, Some(Role::Read), &book);
+        assert!(demo.describe().contains("may read") && !demo.describe().contains("WARNING"));
+        let (empty, _d) = auth_with(Mode::Required, None, &Book::default());
+        assert!(empty.describe().contains("WARNING"), "{}", empty.describe());
     }
 
     #[test]

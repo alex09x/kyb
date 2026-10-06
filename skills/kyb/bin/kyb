@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # kyb — CLI for Know Your Business: our shared infrastructure knowledge base.
 # The service runs in docker on the shared server; every agent and machine sees the same data.
+# A shell trace would print the access token (it is expanded where it is read and
+# where it is handed to curl), so tracing is switched off for the whole run.
+case "$-" in *x*) set +x; echo "kyb: shell tracing is off inside kyb - it would print the access token" >&2 ;; esac
 set -euo pipefail
 
 # Server address, in priority order: env KYB_HOST/KYB_ADDR -> the host file
@@ -8,7 +11,15 @@ set -euo pipefail
 KYB_HOST="${KYB_HOST:-$(cat "$HOME/.config/kyb/host" 2>/dev/null || true)}"
 KYB_HOST="${KYB_HOST:-127.0.0.1}"
 ADDR="${KYB_ADDR:-$KYB_HOST:9310}"
-BASE="http://$ADDR"
+# KYB_URL names the server whole, scheme included - the way to reach one behind
+# TLS (https://kyb.example). A token sent over plain http can be read and reused
+# by anyone who can watch the network; http is for a network you trust.
+if [ -n "${KYB_URL:-}" ]; then
+  BASE="${KYB_URL%/}"
+  ADDR="${BASE#*://}"
+else
+  BASE="http://$ADDR"
+fi
 
 # Access token, in priority order: env KYB_TOKEN -> ~/.config/kyb/token (written
 # by `kyb login`). A server that does not ask for tokens ignores it. The token is

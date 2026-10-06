@@ -61,6 +61,21 @@ sleep 0.5
 refuse "the token is not on any command line" "$(ps -axww -o args= | grep -v 'grep' || true)" "$t_write"
 pkill -f "192.0.2.1:9" 2>/dev/null
 
+# debugging with a shell trace must not print it either
+trace="$(KYB_TOKEN="$t_write" bash -x "$cli" tags 2>&1)"
+refuse "a shell trace does not print the token" "$trace" "$t_write"
+expect "and says why tracing went quiet" "$trace" "shell tracing is off"
+expect "the same holds for the token file" "$(bash -x "$cli" whoami 2>&1 | grep -c "$t_read")" "0"
+
+# KYB_URL names the server whole, scheme included (how a server behind TLS is reached)
+expect "KYB_URL is used as given" "$(KYB_ADDR=192.0.2.1:9 KYB_URL="http://127.0.0.1:$port/" KYB_TOKEN="$t_write" "$cli" whoami 2>&1)" "Agent W"
+expect "an https URL is passed to curl as https" "$(KYB_URL="https://127.0.0.1:$port" "$cli" whoami 2>&1)" "cannot reach 127.0.0.1:$port"
+
+mode="$(stat -f '%Lp' "$KYB_AUTH_FILE" 2>/dev/null || stat -c '%a' "$KYB_AUTH_FILE")"
+[ "$mode" = "600" ] && ok "the book is owner-only" || fail "the book is owner-only" "mode $mode"
+expect "the server says at start what is in force" "$(cat "$tmp/server.log")" "auth required - 2 principals"
+expect "a reader cannot read the request log" "$("$cli" tags >/dev/null 2>&1; curl -s -H "authorization: Bearer $t_read" "http://127.0.0.1:$port/api/audit")" "needs the admin role"
+
 tok_id="$("$bin" auth list | awk '/ci$/ {print $1}')"
 expect "revoking by token id" "$("$bin" auth revoke --token "$tok_id")" "revoked"
 expect "a revoked token stops working without a restart" "$(KYB_TOKEN="$t_write" "$cli" tags 2>&1)" "not known here"

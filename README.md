@@ -172,7 +172,7 @@ KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
 | `KYB_INDEX` | `./index` | Tantivy cache (safe to delete) |
 | `KYB_ADDR` | `127.0.0.1:9310` | where to listen; with `KYB_AUTH=off` anyone who can reach it can write |
 | `KYB_AUTH` | `off` | `off` trusts the network, `compat` honours a token but does not ask for one (for rollout, on a trusted bind — it protects nothing), `required` refuses callers without one |
-| `KYB_AUTH_FILE` | `./auth.json` | the token book; keep it beside the data, never inside `kyb-data` |
+| `KYB_AUTH_FILE` | `./auth.json` (Docker: `/data/auth.json`) | the token book; keep it on persistent storage beside the data, never inside `kyb-data` |
 | `KYB_ANON` | *(unset)* | `read`: with `KYB_AUTH=required`, callers without a token may read (a public demo) |
 | `KYB_PUBLISH_ADDR` | `127.0.0.1` | Docker Compose host interface; set one exact private IP for remote clients |
 | `KYB_MODEL` | *(unset)* | dir with `model.onnx` + `tokenizer.json`; absent = lexical-only |
@@ -291,6 +291,18 @@ need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses 
 Out of the box KYB asks nobody for anything (`KYB_AUTH=off`) and relies on the network it
 listens on. To know who wrote what, and to let some callers only read, turn tokens on.
 
+Tokens tell callers apart; they do not hide traffic. KYB itself speaks plain HTTP, and a
+token sent over plain HTTP can be read and replayed by anyone who can watch the network. On a
+network you trust against eavesdropping (loopback, a private LAN, a VPN) that is enough. To
+serve anyone beyond it, put a TLS-terminating proxy in front and point clients at it with
+`KYB_URL=https://kyb.example`.
+
+With Docker Compose the three settings are passed through from `.env` (`KYB_AUTH`, `KYB_ANON`,
+`KYB_AUTH_FILE`), and the book defaults to `/data/auth.json` - on the persistent volume, outside
+the git canon. Issue tokens with `docker compose exec kyb kyb-server auth add ...`. The server
+prints the mode in force when it starts (`kyb: auth required - 3 principals in ...`); check that
+line, or `kyb whoami`, rather than assuming.
+
 ```bash
 # on the server, next to the data (the book is the root of trust; it is not in git)
 kyb-server auth add --id alex    --name "Alex"    --role admin
@@ -311,7 +323,7 @@ effect without a restart. Three roles, each including the one before:
 |---|---|
 | `read` | search, read, history, diffs, relations |
 | `write` | add and edit entries; file, resolve and archive incidents and tasks |
-| `admin` | retract a knowledge entry (`kyb rm`), `reindex` |
+| `admin` | retract a knowledge entry (`kyb rm`), `reindex`, read the raw request log (`/api/audit`: client addresses and everyone's queries) |
 
 The git commit a write produces is authored by the token's principal, so `kyb history` and the
 Versions tab say who changed what. A commit made without a token (before tokens, or under

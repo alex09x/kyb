@@ -29,6 +29,7 @@ COPY --from=model /model /model
 
 # /data — external directory: the git canon, index and audit log live on the host
 ENV KYB_DATA=/data/kyb-data \
+    KYB_AUTH_FILE=/data/auth.json \
     KYB_INDEX=/data/index \
     KYB_AUDIT=/data/audit.jsonl \
     KYB_MODEL=/model \

@@ -305,6 +305,7 @@ async fn main() -> Result<()> {
     let indexed = boot.elapsed();
     rebuild_vectors(&state).await;
     let ready = boot.elapsed();
+    let state_auth_line = state.auth.describe();
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
     eprintln!(
@@ -314,6 +315,7 @@ async fn main() -> Result<()> {
         (ready - indexed).as_secs_f64()
     );
     eprintln!("kyb: listening on http://{}", cfg.addr);
+    eprintln!("kyb: {}", state_auth_line);
     // ConnectInfo so the audit log sees the real client IP
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
     Ok(())
@@ -1898,6 +1900,12 @@ mod api_tests {
         let (_, h) = call_as(&app, r, "GET", "/knowledge/via-mcp/history", None).await;
         assert_eq!(h["versions"][0]["author"], "Agent W <w@fleet>");
 
+        // the raw request log (addresses, other callers' queries) is the admin's alone
+        assert_eq!(call_as(&app, r, "GET", "/api/audit", None).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&app, w, "GET", "/api/audit", None).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&app, a, "GET", "/api/audit", None).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, r, "GET", "/api/activity", None).await.0, StatusCode::OK);
+
         // the audit log says who, including who was refused
         let log = std::fs::read_to_string(idx.path().join("audit.jsonl")).unwrap();
         let actors: Vec<String> = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["actor"].as_str().unwrap_or("?").to_string()).collect();
@@ -1921,6 +1929,8 @@ mod api_tests {
 
         let (demo, [_, write, _], _d, _i) = app_with_auth(auth::Mode::Required, Some(auth::Role::Read));
         assert_eq!(call_as(&demo, None, "GET", "/search?q=x", None).await.0, StatusCode::OK);
+        // a visitor of the demo cannot read what other visitors asked, or from where
+        assert_eq!(call_as(&demo, None, "GET", "/api/audit", None).await.0, StatusCode::FORBIDDEN);
         assert_eq!(call_as(&demo, None, "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::FORBIDDEN);
         assert_eq!(call_as(&demo, Some(&write), "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::OK);
     }
