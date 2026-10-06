@@ -102,10 +102,15 @@ impl AppState {
         // a write that landed while we were reading makes this answer stale: serve it once, do not keep it
         if self.history_gen.load(Ordering::Acquire) == gen {
             *self.links_cache.lock().unwrap() = Some(LinksCache { gen, index: index.clone(), archived });
-            // these are in the kept index now; anything pushed meanwhile stays for the next build
+            // Only the notes this build acted on are taken: a key still in the tree
+            // when we looked (its archive commit not yet visible) keeps its note, and
+            // anything pushed meanwhile stays for the next build.
             let mut since = self.archived_since.lock().unwrap();
-            let done = noted.len().min(since.len());
-            since.drain(..done);
+            for key in noted.iter().filter(|k| !head_kinds.contains(*k)) {
+                if let Some(at) = since.iter().position(|k| k == key) {
+                    since.remove(at);
+                }
+            }
         }
         Ok(index)
     }
@@ -665,11 +670,14 @@ fn archive_locked(st: &AppState, _w: &mut IndexWriter, key: &str, reply: &mut Re
     if reply.0 != StatusCode::OK {
         return;
     }
-    st.archived_since.lock().unwrap().push(key.to_string());
     match st.store.archive(key) {
         Err(e) => eprintln!("kyb: archive failed for {key}: {e:#}"),
         Ok(None) => {} // already archived
         Ok(Some(sha)) => {
+            // noted only once the deletion is committed: a rebuild that reads the note
+            // then finds the key gone from the tree, and the caller's generation bump
+            // that follows invalidates any index built in between
+            st.archived_since.lock().unwrap().push(key.to_string());
             if let Some(obj) = reply.1.as_object_mut() {
                 obj.insert("archived".into(), json!(true));
                 obj.insert("archive_sha".into(), json!(sha));
@@ -1684,13 +1692,14 @@ async fn remove_committed(
         }
     } else {
         // live index doc and vector stay: archived means findable
-        st.archived_since.lock().unwrap().push(key.to_string());
         match st.store.archive(key) {
             Err(e) => err500(e),
             Ok(None) => {
                 (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
             }
             Ok(Some(sha)) => {
+                // after the commit, before the caller's generation bump (see archive_locked)
+                st.archived_since.lock().unwrap().push(key.to_string());
                 (StatusCode::OK, Json(json!({"key": key, "archived": true, "sha": sha})))
             }
         }
@@ -2032,7 +2041,8 @@ mod api_tests {
 
     #[tokio::test]
     async fn relations_follow_the_repository() {
-        let (app, _data, _idx) = app_with_tmp();
+        let (app, state, _data, _idx) = app_with_state();
+        let state_of = |_: &Router| state.clone();
         call(&app, "POST", "/knowledge", Some(upsert_body("redis-runbook", "How to restart redis."))).await;
         let (st, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
         assert_eq!(st, StatusCode::OK);
@@ -2088,6 +2098,24 @@ mod api_tests {
         let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
         let again = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-two").unwrap().clone();
         assert_eq!((again["archived"].clone(), again["live"].clone(), again["title"].clone()), (json!(false), json!(true), json!("Two again")));
+
+        // the pre-commit window, played by hand: a note for a key that is still in the tree
+        // must survive the build that saw it there, and be acted on by the next one
+        let st = state_of(&app);
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-window", "title": "W", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        st.archived_since.lock().unwrap().push("inc-window".into());   // noted, but the file is still there
+        call(&app, "GET", "/places", None).await;                         // a build sees the key live and must keep the note
+        assert!(st.archived_since.lock().unwrap().contains(&"inc-window".to_string()), "a note for a key still in the tree is not consumed");
+        {
+            let mut w = st.writer.lock().await;
+            st.store.archive("inc-window").unwrap();                     // the commit lands without going through the handler
+            let _ = &mut w;
+        }
+        st.forget_history("inc-window");
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        let win = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-window").cloned();
+        assert_eq!(win.map(|r| r["archived"].clone()), Some(json!(true)), "the next build archives it from the kept note");
+        assert!(!st.archived_since.lock().unwrap().contains(&"inc-window".to_string()), "and the note is consumed then");
 
         for bad in ["/impact", "/impact?service=a&host=b", "/impact?service=%20", "/impact?host="] {
             let (st, v) = call(&app, "GET", bad, None).await;
