@@ -48,7 +48,10 @@ pub struct AppState {
     links_cache: std::sync::Mutex<Option<LinksCache>>,
     /// Keys archived since the link index last took note. A key can be filed and
     /// closed between two builds, so comparing trees alone would miss it.
-    archived_since: std::sync::Mutex<Vec<String>>,
+    /// Each note carries its own number, so a build removes exactly the notes it
+    /// read and never a later one that happens to name the same key.
+    archived_since: std::sync::Mutex<Vec<(u64, String)>>,
+    note_seq: std::sync::atomic::AtomicU64,
     pub(crate) auth: auth::Auth,
 }
 
@@ -60,6 +63,19 @@ struct LinksCache {
 }
 
 impl AppState {
+    /// A closed incident or task left the tree: remembered for the next link-index build.
+    fn note_archived(&self, key: &str) {
+        let n = self.note_seq.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.archived_since.lock().unwrap().push((n, key.to_string()));
+    }
+
+    /// Remove exactly the notes a build read - by number, so a note for the same
+    /// key pushed after the build read its snapshot is left for the next build.
+    fn settle_notes(&self, read: &[(u64, String)]) {
+        let mut since = self.archived_since.lock().unwrap();
+        since.retain(|(n, _)| !read.iter().any(|(r, _)| r == n));
+    }
+
     /// The link index for the current state of the repository.
     ///
     /// The tree is cheap to read; the archive is not - finding the last version
@@ -81,7 +97,7 @@ impl AppState {
             }
         };
         // noted before the tree is read: an archive that lands after this is a later build's
-        let noted: Vec<String> = self.archived_since.lock().unwrap().clone();
+        let noted: Vec<(u64, String)> = self.archived_since.lock().unwrap().clone();
         let head = self.store.list_head()?;
         let head_kinds: HashSet<String> = head.iter().map(|e| e.key.clone()).collect();
         let archived: Arc<std::collections::HashMap<String, model::Entry>> = match prev {
@@ -89,7 +105,7 @@ impl AppState {
             Some((_, archived)) => {
                 let mut next = (*archived).clone();
                 next.retain(|k, _| !head_kinds.contains(k));
-                for key in noted.iter().filter(|k| !head_kinds.contains(*k)) {
+                for key in noted.iter().map(|(_, k)| k).filter(|k| !head_kinds.contains(*k)) {
                     if let Some(last) = self.store.latest_version(key)? {
                         next.insert(key.clone(), last);
                     }
@@ -106,12 +122,7 @@ impl AppState {
             // archive commit, so a key that is nonetheless in the tree was filed again
             // since, and the live entry supersedes the archived one. Notes pushed while
             // we were building stay for the next build.
-            let mut since = self.archived_since.lock().unwrap();
-            for key in &noted {
-                if let Some(at) = since.iter().position(|k| k == key) {
-                    since.remove(at);
-                }
-            }
+            self.settle_notes(&noted);
         }
         Ok(index)
     }
@@ -241,6 +252,7 @@ fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppSta
         history_gen: std::sync::atomic::AtomicU64::new(0),
         links_cache: std::sync::Mutex::new(None),
         archived_since: std::sync::Mutex::new(Vec::new()),
+        note_seq: std::sync::atomic::AtomicU64::new(0),
         auth,
     }))
 }
@@ -680,7 +692,7 @@ fn archive_locked(st: &AppState, _w: &mut IndexWriter, key: &str, reply: &mut Re
             // noted only once the deletion is committed: a rebuild that reads the note
             // then finds the key gone from the tree, and the caller's generation bump
             // that follows invalidates any index built in between
-            st.archived_since.lock().unwrap().push(key.to_string());
+            st.note_archived(key);
             if let Some(obj) = reply.1.as_object_mut() {
                 obj.insert("archived".into(), json!(true));
                 obj.insert("archive_sha".into(), json!(sha));
@@ -1702,7 +1714,7 @@ async fn remove_committed(
             }
             Ok(Some(sha)) => {
                 // after the commit, before the caller's generation bump (see archive_locked)
-                st.archived_since.lock().unwrap().push(key.to_string());
+                st.note_archived(key);
                 (StatusCode::OK, Json(json!({"key": key, "archived": true, "sha": sha})))
             }
         }
@@ -2107,18 +2119,29 @@ mod api_tests {
         call(&app, "POST", "/incidents", Some(json!({"key": "inc-refile", "title": "R", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
         call(&app, "POST", "/incidents/inc-refile/resolve", Some(json!({"resolution": "ok"}))).await;
         call(&app, "POST", "/incidents", Some(json!({"key": "inc-refile", "title": "R again", "service": "redis", "severity": "high", "knowledge": ["redis-runbook"], "body": "b"}))).await;
-        assert!(st.archived_since.lock().unwrap().contains(&"inc-refile".to_string()), "the archive was noted");
+        let noted = |k: &str| st.archived_since.lock().unwrap().iter().any(|(_, key)| key == k);
+        assert!(noted("inc-refile"), "the archive was noted");
         let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
         let r = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-refile").cloned().unwrap();
         assert_eq!((r["archived"].clone(), r["live"].clone(), r["title"].clone()), (json!(false), json!(true), json!("R again")));
-        assert!(!st.archived_since.lock().unwrap().contains(&"inc-refile".to_string()), "the note is settled by the build that saw the key live");
+        assert!(!noted("inc-refile"), "the note is settled by the build that saw the key live");
         // a note pushed while a build runs is not lost: it is simply next
-        st.archived_since.lock().unwrap().push("inc-pushed-later".into());
+        st.note_archived("inc-pushed-later");
         call(&app, "GET", "/places", None).await;                                  // a cache hit: no build, the note waits
         assert_eq!(st.archived_since.lock().unwrap().len(), 1);
         st.forget_history("anything");                                              // the next write; the next build settles it
         call(&app, "GET", "/places", None).await;
         assert!(st.archived_since.lock().unwrap().is_empty(), "a note for a key nowhere in the tree is settled by the next build");
+        // two builds overlapping: the older one settles only the notes it read, never a newer note for the same key
+        st.note_archived("inc-twice");
+        let snapshot = st.archived_since.lock().unwrap().clone();     // what an older build read
+        st.note_archived("inc-twice");                                 // archived again after that build's snapshot
+        st.settle_notes(&snapshot);
+        let left = st.archived_since.lock().unwrap().clone();
+        assert_eq!(left.len(), 1, "the newer note survives: {left:?}");
+        assert!(left[0].0 > snapshot[0].0 && left[0].1 == "inc-twice");
+        st.settle_notes(&left);
+        assert!(st.archived_since.lock().unwrap().is_empty());
 
         for bad in ["/impact", "/impact?service=a&host=b", "/impact?service=%20", "/impact?host="] {
             let (st, v) = call(&app, "GET", bad, None).await;
