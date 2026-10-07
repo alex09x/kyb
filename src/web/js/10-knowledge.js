@@ -68,10 +68,12 @@
 
       container.innerHTML = list.map(item => {
         const isSel = item.key === App.selectedKey;
+        // the same pill as on the card: colour only for what demands it
+        const sev = (item.severity || '').toLowerCase();
         const kindBadge = item.kind === 'incident'
-          ? `<span class="badge badge-${item.severity || 'incident'}">${item.severity ? escapeHtml(item.severity) : 'incident'}</span>`
+          ? `<span class="pill ${sev === 'critical' ? 'crit' : sev === 'high' ? 'amber' : ''}">${sev ? escapeHtml(sev) : 'incident'}</span>`
           : item.kind === 'task'
-            ? `<span class="badge badge-task">task</span>`
+            ? `<span class="pill">task</span>`
             : '';
 
         const cached = App.detailCache.get(item.key);
@@ -87,13 +89,11 @@
               <span class="item-title">${highlightText(item.title || item.key, App.searchQuery)}</span>
               ${kindBadge}
             </div>
-            <div class="item-key">${highlightText(item.key, App.searchQuery)}</div>
-            <div class="item-meta" style="margin-top: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <span>${timeAgo(item.updated_at || item.committed_at)}</span>
-                ${(item.tags || []).slice(0, 3).map(t => `<span class="badge-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
-                ${revCount > 1 ? `<span class="rev-badge" title="${revCount} revisions recorded">${revCount} revs</span>` : ''}
-              </div>
+            <div class="item-meta">
+              <span class="item-key">${highlightText(item.key, App.searchQuery)}</span>
+              <span class="dot-sep">&middot;</span><span>${timeAgo(item.updated_at || item.committed_at)}</span>
+              ${(item.tags || []).slice(0, 3).map(t => `<span class="item-tag">#${highlightText(t, App.searchQuery)}</span>`).join('')}
+              ${revCount > 1 ? `<span class="item-tag" title="${revCount} revisions recorded">${revCount} versions</span>` : ''}
             </div>
           </a>
         `;
@@ -165,7 +165,10 @@
     // The state of an entry, read as one line: pills for what colour must say, words for the rest.
     // Actions that make sense in this state sit at the right. Anything that needs more than a
     // line - a blocked reason, a resolution, the detection check - is a callout below.
-    function renderEntityHeroBanner(e, historyList = []) {
+    // A card's state, in the places the design gives it: state pills beside the key, one line of
+    // plain words under the title, the actions this state allows beside Edit, and whatever needs
+    // more than a line (blocked reason, detection, resolution) as a callout at the top of the body.
+    function entityParts(e, historyList = []) {
       const createdVer = (historyList && historyList.length) ? historyList[historyList.length - 1] : null;
       const lastVer = (historyList && historyList.length) ? historyList[0] : null;
       const creator = (createdVer && createdVer.author) || e.author || '';   // a commit made without a token names nobody
@@ -173,65 +176,58 @@
       const who = s => escapeHtml(String(s).replace(/\s*<[^>]*>/, '').trim() || s);
       const when = createdAt ? timeAgo(createdAt) : 'recent';
       const by = creator ? ` by ${who(creator)}` : '';
+      const versions = historyList.length > 1 ? ` · ${historyList.length} versions, last change ${timeAgo(lastVer.committed_at)}` : '';
       const linked = (e.knowledge && e.knowledge.length)
         ? `<div class="dh-links"><span>Related:</span>${e.knowledge.map(k => `<a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(k)}, 'knowledge')">${escapeHtml(k)}</a>`).join('')}</div>` : '';
       const resolution = e.resolution
         ? `<div class="callout good"><b>${e.kind === 'task' ? 'Done' : 'Resolved'}</b><span style="white-space:pre-wrap">${escapeHtml(e.resolution)}${e.resolved_at ? ` <span class="muted">· ${timeAgo(e.resolved_at)}</span>` : ''}</span></div>` : '';
+      const K = jsArg(e.key), T = jsArg(e.title);
 
       if (e.kind === 'task') {
         const st = (e.status || 'open').toLowerCase();
         const isDone = ['done', 'closed', 'dropped', 'resolved'].includes(st) || e.archived;
         const isBlocked = st === 'blocked', isProgress = st === 'in_progress', isOpen = !isDone && !isBlocked && !isProgress;
         const pr = (e.priority || '').toLowerCase();
-        const acts = isOpen ? `
-            <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Start Progress</button>
-            <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
-            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>`
-          : isProgress ? `
-            <button class="btn sm warning" onclick="promptBlockTask(${jsArg(e.key)}, ${jsArg(e.title)})">Block Task</button>
-            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
-            <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>`
-          : isBlocked ? `
-            <button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock & Resume</button>
-            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Task</button>
-            <button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'open')">Move to Backlog</button>`
-          : `<button class="btn sm primary" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Re-open Task</button>`;
-        return `
-          <div class="dh-state task-hero-panel">
-            <div class="dh-pills">
-              <span class="pill ${isBlocked ? 'amber' : isProgress ? 'acc' : isDone ? 'ok' : ''}">${st === 'in_progress' ? 'in progress' : escapeHtml(st)}</span>
-              ${pr ? `<span class="pill ${pr === 'critical' ? 'crit' : pr === 'high' ? 'amber' : ''}">${escapeHtml(pr)}</span>` : ''}
-              <span class="dh-words">${escapeHtml(e.assignee || 'Unassigned')} · created ${when}${by}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}</span>
-            </div>
-            <div class="dh-acts">${acts}</div>
-          </div>
-          ${e.blocked_reason ? `<div class="callout"><b>Blocked</b><span>${escapeHtml(e.blocked_reason)}</span><button class="btn sm" onclick="transitionTask(${jsArg(e.key)}, 'in_progress')">Unblock</button></div>` : ''}
-          ${resolution}${linked}`;
+        const start = label => `<button class="btn sm primary" onclick="transitionTask(${K}, 'in_progress')">${label}</button>`;
+        const block = `<button class="btn sm warning" onclick="promptBlockTask(${K}, ${T})">Block</button>`;
+        const done = `<button class="btn sm success" onclick="openResolveTaskModal(${K}, ${T})">Done</button>`;
+        const backlog = `<button class="btn sm" onclick="transitionTask(${K}, 'open')">Backlog</button>`;
+        const acts = isOpen ? start('Start') + block + done
+          : isProgress ? block + done + backlog
+          : isBlocked ? start('Unblock') + done + backlog
+          : start('Reopen');
+        return {
+          hero: 'task-hero-panel',
+          pills: `<span class="pill ${isBlocked ? 'amber' : isProgress ? 'acc' : isDone ? 'ok' : ''}">${st === 'in_progress' ? 'in progress' : escapeHtml(st)}</span>
+                  ${pr ? `<span class="pill ${pr === 'critical' ? 'crit' : pr === 'high' ? 'amber' : ''}">${escapeHtml(pr)}</span>` : ''}`,
+          words: `${escapeHtml(e.assignee || 'Unassigned')} · created ${when}${by}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}${versions}`,
+          acts,
+          body: `${e.blocked_reason ? `<div class="callout"><b>Blocked</b><span>${escapeHtml(e.blocked_reason)}</span></div>` : ''}${resolution}${linked}`,
+        };
       }
 
       if (e.kind === 'incident') {
         const st = (e.status || 'open').toLowerCase(), sev = (e.severity || 'medium').toLowerCase();
-        return `
-          <div class="dh-state incident-hero-panel">
-            <div class="dh-pills">
-              <span class="pill ${sev === 'critical' ? 'crit' : sev === 'high' ? 'amber' : ''}">${escapeHtml(sev)}</span>
-              <span class="pill ${st === 'resolved' ? 'ok' : st === 'mitigated' ? 'amber' : ''}">${escapeHtml(st)}</span>
-              <span class="dh-words"><span class="mono">${escapeHtml(e.service || 'infrastructure')}</span>${(e.hosts && e.hosts.length) ? ` on <span class="mono">${e.hosts.map(escapeHtml).join(', ')}</span>` : ''} · opened ${when}${by}</span>
-            </div>
-            <div class="dh-acts">${st !== 'resolved' ? `<button class="btn sm success" onclick="openResolveIncidentModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Incident</button>` : ''}</div>
-          </div>
-          ${e.detection
+        return {
+          hero: 'incident-hero-panel',
+          pills: `<span class="pill ${sev === 'critical' ? 'crit' : sev === 'high' ? 'amber' : ''}">${escapeHtml(sev)}</span>
+                  <span class="pill ${st === 'resolved' ? 'ok' : st === 'mitigated' ? 'amber' : ''}">${escapeHtml(st)}</span>`,
+          words: `<span class="mono">${escapeHtml(e.service || 'infrastructure')}</span>${(e.hosts && e.hosts.length) ? ` on <span class="mono">${e.hosts.map(escapeHtml).join(', ')}</span>` : ''} · opened ${when}${by}${versions}`,
+          acts: st !== 'resolved' ? `<button class="btn sm success" onclick="openResolveIncidentModal(${K}, ${T})">Resolve</button>` : '',
+          body: `${e.detection
             ? `<div class="detect"><span><span class="l">Is it still happening? </span><code>${escapeHtml(e.detection)}</code></span><button class="btn sm" onclick="copyToClipboard(${jsArg(e.detection)}, 'Check command copied!')">Copy</button></div>`
-            : (st !== 'resolved' ? `<div class="callout"><b>No detection</b><span>Nobody can tell whether this is still happening. Add a command and what a healthy answer looks like.</span><button class="btn sm" onclick="openEditModal(${jsArg(e.key)})">Add check</button></div>` : '')}
-          ${resolution}${linked}`;
+            : (st !== 'resolved' ? `<div class="callout"><b>No detection</b><span>Nobody can tell whether this is still happening. Add a command and what a healthy answer looks like.</span><button class="btn sm" onclick="openEditModal(${K})">Add check</button></div>` : '')}${resolution}${linked}`,
+        };
       }
 
-      // knowledge
       const changed = lastVer && lastVer.author && lastVer.author !== creator ? ` · last changed by ${who(lastVer.author)}` : '';
-      return `
-        <div class="dh-state">
-          <div class="dh-pills"><span class="dh-words">Written ${when}${by}${changed}${(e.refs && e.refs.length) ? ` · refs: ${e.refs.map(r => `<span class="mono">${escapeHtml(r)}</span>`).join(', ')}` : ''}</span></div>
-        </div>`;
+      return {
+        hero: '',
+        pills: `<span class="pill">${escapeHtml(e.kind)}</span>`,
+        words: `Written ${when}${by}${changed}${(e.refs && e.refs.length) ? ` · refs: ${e.refs.map(r => `<span class="mono">${escapeHtml(r)}</span>`).join(', ')}` : ''}${versions}`,
+        acts: '',
+        body: '',
+      };
     }
 
     // The "More" menu closes on any click that is not its own toggle (the toggle stops propagation).
@@ -241,14 +237,17 @@
       const detailEl = document.getElementById('detailView');
       App.currentDetailBody = e.body || '';
 
+      // a skeleton drawn from a list row may not carry its kind; the key's prefix says it
+      if (!e.kind) e = { ...e, kind: e.key.startsWith('inc-') ? 'incident' : e.key.startsWith('task-') ? 'task' : 'knowledge' };
+      const parts = entityParts(e, historyList);
       detailEl.innerHTML = `
         <div class="detail-header">
           <div class="dh-kind">
-            ${e.kind === 'incident' || e.kind === 'task' ? '' : `<span class="pill">${e.kind || 'knowledge'}</span>`}
+            <span class="dh-pills">${parts.pills}</span>
             <span class="mono dh-key">${escapeHtml(e.key)}</span>
-            ${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="badge-tag" onclick="handleTagClick(event, ${jsArg(t)})">#${escapeHtml(t)}</a>`).join('')}
           </div>
           <h1>${escapeHtml(e.title || e.key)}</h1>
+          <div class="dh-meta"><span class="dh-words">${parts.words}</span>${(e.tags || []).map(t => `<a href="#/search?tag=${encodeURIComponent(t)}" class="dh-tag" onclick="handleTagClick(event, ${jsArg(t)})">#${escapeHtml(t)}</a>`).join('')}</div>
           <div class="dh-row">
             <div class="detail-tabs">
               <button class="detail-tab active" onclick="switchDetailTab('content')">${e.kind === 'incident' ? 'Report' : e.kind === 'task' ? 'Task' : 'Document'}</button>
@@ -256,7 +255,8 @@
               <button class="detail-tab" onclick="switchDetailTab('raw')">Raw</button>
             </div>
             <div class="dh-acts">
-              <button class="btn sm primary" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit <kbd>e</kbd></button>
+              <span class="dh-state-acts ${parts.hero}">${parts.acts}</span>
+              <button class="btn sm" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit <kbd>e</kbd></button>
               <div class="more">
                 <button class="btn sm ghost" onclick="this.parentElement.classList.toggle('open'); event.stopPropagation();">More ▾</button>
                 <div class="menu">
@@ -271,7 +271,7 @@
         </div>
 
         <div class="detail-body" id="detailBodyContent">
-          ${renderEntityHeroBanner(e, historyList)}
+          ${parts.body}
           <div class="prose">${renderMarkdown(e.body)}</div>
           <div id="relatedBox" data-key="${escapeHtml(e.key)}">${relatedHtml(e.key)}</div>
         </div>
@@ -287,6 +287,7 @@
 
       // The pane is rebuilt on every 4s refresh; the reader's tab must survive it.
       App.currentHistoryList = historyList;
+      App.verLoading = isSkeleton;
       if (!isSkeleton) loadRelated(e.key);
       const sameKey = App.verKey === e.key;
       if (!sameKey) { App.detailTab = 'content'; App.verTextOpen = new Set(); }

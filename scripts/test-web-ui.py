@@ -673,11 +673,11 @@ def run(base, headed, coverage=None):
         ev(f"selectEntry('{K}-seed')")  # blocked
         page.wait_for_function(f"App.selectedKey === '{K}-seed' && document.querySelector('.task-hero-panel')", timeout=5000)
         acts = ev("[...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim())")
-        check("blocked task offers Unblock, Resolve, Backlog", "Unblock & Resume" in acts and "Resolve Task" in acts and "Move to Backlog" in acts and "Start Progress" not in acts, acts)
+        check("blocked task offers Unblock, Done, Backlog", acts == ["Unblock", "Done", "Backlog"], acts)
         ev(f"selectEntry('{K}')")  # open after reopen
-        page.wait_for_function(f"App.selectedKey === '{K}' && [...document.querySelectorAll('.task-hero-panel .btn')].some(b => b.textContent.includes('Start Progress'))", timeout=5000)
+        page.wait_for_function(f"App.selectedKey === '{K}' && [...document.querySelectorAll('.task-hero-panel .btn')].some(b => b.textContent.trim() === 'Start')", timeout=5000)
         acts = ev("[...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim())")
-        check("open task offers Start, Block, Resolve", "Start Progress" in acts and "Block Task" in acts and "Resolve Task" in acts, acts)
+        check("open task offers Start, Block, Done", acts == ["Start", "Block", "Done"], acts)
         check("detail header shows Edit and a More menu with the copy actions", ev("!!document.getElementById('btnCopyDirectLink') && !!document.getElementById('btnEditEntry') && document.querySelectorAll('.more .menu button, .more .menu a').length === 4"))
         more = ev("""(() => { const m = document.querySelector('.more'); const was = getComputedStyle(m.querySelector('.menu')).display; m.querySelector('.btn').click(); const open = getComputedStyle(m.querySelector('.menu')).display; document.body.click(); return [was, open, getComputedStyle(m.querySelector('.menu')).display]; })()""")
         check("More opens its menu and a click elsewhere closes it", more == ["none", "flex", "none"], more)
@@ -691,7 +691,7 @@ def run(base, headed, coverage=None):
         check("incident rows carry service and age", ev("[...document.querySelectorAll('#incidentRows .inc-r')].every(r => r.querySelector('.sv').textContent && r.querySelector('.age').textContent)"))
         check("the cursor row shows the peek with its detection", ev("(() => { const p = document.querySelector('#incidentRows .inc-peek'); const k = App.incidentCursorKey; const i = App.incidents.find(x => x.key === k); return !!p && (!i.detection || p.textContent.includes(i.detection)); })()"))
         check("rows without detection say so", ev("[...document.querySelectorAll('#incidentRows .inc-r:not(.cur)')].every(r => { const i = App.incidents.find(x => x.key === r.querySelector('.t span').textContent); return i.status === 'resolved' || (!!(i.detection||'').trim()) === !!r.querySelector('.inc-note.det') && (!(i.detection||'').trim()) === !!r.querySelector('.inc-note:not(.det):not(.res)'); })"))
-        check("summary line counts open/critical/high", ev("(() => { const t = document.getElementById('incTop').textContent; const o = App.incidents.filter(i => i.status !== 'resolved'); return t.includes(o.length + 'open') && t.includes(o.filter(i => i.severity === 'critical').length + ' critical') && t.includes(o.filter(i => i.severity === 'high').length + ' high'); })()"), ev("document.getElementById('incTop').textContent").strip()[:80])
+        check("the filter bar is segments for status and severity, the count of what is left, and the one action", ev("(() => { const t = document.getElementById('incTop'); return [t.querySelectorAll('.segs').length, document.getElementById('incCount').textContent === incFiltered().length + ' of ' + App.incidents.length + (App.incidentStatusFilter === 'all' ? ' · open and mitigated' : ''), t.querySelector('.btn').textContent.trim(), document.getElementById('incQueue').nextElementSibling === t]; })()") == [2, True, "Report incident", True], ev("document.getElementById('incTop').textContent").strip()[:120])
         check("queue counters equal their filters", ev("INC_QUEUES.every(q => document.querySelector('#incQueue .b:nth-child(' + (INC_QUEUES.indexOf(q) + 1) + ') b').textContent == App.incidents.filter(q.test).length)"))
         ev("switchTab('tasks'); taskSetStatus('live'); App.taskQueue = null; renderTasks()")
         check("task rows == taskFiltered()", trows() == ev("taskFiltered().map(t => t.key)"))
@@ -925,7 +925,7 @@ def run(base, headed, coverage=None):
         check("a bare incident card falls back to the word 'incident' and its key", any("bare-incident" in x and "incident" in x for x in bare["list"]), bare["list"])
         check("a bare entry shows its key as the title", any(x.startswith("bare-note") for x in bare["list"]), bare["list"])
         check("an incident with no service is 'infrastructure', with no dates has no age", "infrastructure" in bare["incRow"] and bare["incAge"] == "", bare["incRow"])
-        check("the peek admits there is no detection", "no detection recorded" in bare["incPeek"], bare["incPeek"])
+        check("the peek admits there is no detection and offers to add a check", "no detection" in bare["incPeek"] and "Add check" in bare["incPeek"], bare["incPeek"])
         check("a task with no status is open and unassigned", any("Bare task" in r and "open" in r and "unassigned" in r for r in bare["taskRows"]), bare["taskRows"])
         check("closed tasks show their resolution and offer Reopen", any("Done" in r and "shipped" in r for r in bare["taskRows"]) and any("Dropped" in r and "not needed" in r for r in bare["taskRows"]) and bare["reopen"], bare["taskRows"])
         check("a child task names its parent", any("part of bare-task" in r for r in bare["taskRows"]), bare["taskRows"])
@@ -946,13 +946,13 @@ def run(base, headed, coverage=None):
         check("a bare knowledge entry renders with its key and kind", "bare-note" in det["note"] and "knowledge" in det["note"].lower(), det["note"][:120])
         check("a bare incident shows default severity and service, its links and who last changed it", "medium" in det["inc"] and "infrastructure" in det["inc"] and "kyb-service" in det["inc"] and "Zed" in det["inc"], det["inc"][:300])
         check("a bare task is unassigned and names its parent", "Unassigned" in det["task"] and "task-parent" in det["task"], det["task"][:300])
-        check("an in-progress task offers Block, Resolve, Backlog", det["prog"][:3] == ["Block Task", "Resolve Task", "Move to Backlog"], det["prog"])
-        check("a done task offers only Re-open", det["done"] == ["Re-open Task"], det["done"])
+        check("an in-progress task offers Block, Done, Backlog", det["prog"] == ["Block", "Done", "Backlog"], det["prog"])
+        check("a done task offers only Reopen", det["done"] == ["Reopen"], det["done"])
         cal = ev("""(() => { const out = {}; const txt = () => document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
           renderDetailView({key: 'c1', kind: 'incident', status: 'open', title: 'A'}, []); out.noDet = txt(); out.addCheck = [...document.querySelectorAll('.callout .btn')].map(b => b.textContent.trim());
           renderDetailView({key: 'c2', kind: 'incident', status: 'resolved', resolution: 'r', title: 'B'}, []); out.resolved = txt(); out.resolvedCallout = [...document.querySelectorAll('.callout.good > *')].slice(0, 2).map(e => e.textContent.trim());
-          renderDetailView({key: 'c3', kind: 'incident', status: 'open', detection: 'true', hosts: ['h1', 'h2'], title: 'C'}, []); out.det = txt(); out.copy = [...document.querySelectorAll('.detect .btn')].map(b => b.textContent.trim());
-          renderDetailView({key: 'c4', kind: 'task', status: 'blocked', blocked_reason: 'vendor', title: 'D'}, []); out.blocked = txt(); out.unblock = [...document.querySelectorAll('.callout .btn')].map(b => b.textContent.trim()); out.blockedCallout = [...document.querySelectorAll('.callout > *')].slice(0, 2).map(e => e.textContent.trim());
+          renderDetailView({key: 'c3', kind: 'incident', status: 'open', detection: 'true', hosts: ['h1', 'h2'], title: 'C'}, []); out.det = txt(); out.copy = [...document.querySelectorAll('#detailView .detect .btn')].map(b => b.textContent.trim());
+          renderDetailView({key: 'c4', kind: 'task', status: 'blocked', blocked_reason: 'vendor', title: 'D'}, []); out.blocked = txt(); out.unblock = [...document.querySelectorAll('.callout .btn')].map(b => b.textContent.trim()); out.headUnblock = [...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim())[0] === 'Unblock'; out.blockedCallout = [...document.querySelectorAll('.callout > *')].slice(0, 2).map(e => e.textContent.trim());
           // colour follows severity and priority: critical red, high amber, the rest plain; a done task is green
           const pill = () => document.querySelector('.dh-pills .pill').className.replace('pill', '').trim();
           out.pills = [];
@@ -970,7 +970,7 @@ def run(base, headed, coverage=None):
         check("an open incident without a check gets the 'No detection' callout with an Add check button", "No detection" in cal["noDet"] and cal["addCheck"] == ["Add check"] and cal["loose"] is True, cal)
         check("a resolved incident without a check gets no such callout but shows its resolution", "No detection" not in cal["resolved"] and cal["resolvedCallout"] == ["Resolved", "r"], cal["resolved"][:200])
         check("an incident with a check shows it with a Copy button and names its hosts", "Is it still happening? true" in cal["det"] and cal["copy"] == ["Copy"] and "h1, h2" in cal["det"], cal["det"][:200])
-        check("a blocked task shows the reason in a callout with Unblock", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == ["Unblock"] and cal["mailOnly"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
+        check("a blocked task shows the reason in a callout; Unblock sits with the other actions in the header", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == [] and cal["headUnblock"] and cal["mailOnly"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
         ev(f"selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
 
@@ -1265,7 +1265,12 @@ def run(base, headed, coverage=None):
         page.mouse.click(5, 400); page.keyboard.press("j")
         check("a task cursor that was never set starts from the top", ev("App.taskCursor") == 1)
         ev(f"App.tasks.push({{key: 'ghost'}}); promptBlockTask('{K}', ''); ")
-        check("the block dialog finds the title itself when not given one", "UI test task edited" in ev("document.getElementById('blockTaskTargetText').textContent"))
+        check("the block dialog finds the title itself when not given one, and shows the key beside it", "UI test task edited" in ev("document.getElementById('blockTaskTitle').textContent") and ev("document.getElementById('blockTaskTargetText').textContent") == K)
+        ttl = ev("""(() => { openResolveIncidentModal('inc-untitled', ''); const a = document.getElementById('resolveIncidentTitle').textContent; closeModal('resolveIncidentModal');
+          openResolveTaskModal('task-untitled', ''); const b = document.getElementById('resolveTaskTitle').textContent; closeModal('resolveTaskModal'); return [a, b]; })()""")
+        kinds = ev("""(() => { const out = []; for (const key of ['inc-no-kind', 'task-no-kind', 'plain-no-kind']) { renderDetailView({key, title: 'x'}, [], true); out.push(document.querySelector('#detailView .dh-pills .pill').textContent.trim()); } selectEntry(App.selectedKey || 'kyb-service', false); return out; })()""")
+        check("a skeleton without a kind takes it from the key's prefix", kinds == ["medium", "open", "knowledge"], kinds)
+        check("a close dialog for something without a title names it by its key", ttl == ["Resolve: inc-untitled", "Finish: task-untitled"], ttl)
         ev("promptBlockTask('nobody-has-this-key', '')")
         check("and falls back to the key", "nobody-has-this-key" in ev("document.getElementById('blockTaskTargetText').textContent"))
         ev("closeModal('blockTaskModal')")

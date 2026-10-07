@@ -41,26 +41,23 @@
       const live = App.tasks.filter(TASK_LIVE);
       const by = st => live.filter(t => (t.status || 'open').toLowerCase() === st).length;
       const f = App.taskStatusFilter || 'live';
+      const listNow = taskFiltered();
+      const tq = App.taskQueue && TASK_QUEUES.find(x => x.id === App.taskQueue);
       top.innerHTML = `
-        <b>${live.length}</b><span>live</span>
-        <span style="color:var(--text-muted)">&middot;</span>
-        <span>${by('open')} open &middot; <span style="color:var(--accent)">${by('in_progress')}</span> in progress &middot; <span style="color:var(--amber)">${by('blocked')}</span> blocked</span>
-        <span style="color:var(--text-muted)">&middot; ${App.tasks.length - live.length} closed</span>
-        <span class="inc-chips">
-          ${[['live','live'],['open','open'],['in_progress','in progress'],['blocked','blocked'],['done','closed']].map(([k,l]) => `<button class="chip ${f === k ? 'active' : ''}" onclick="taskSetStatus('${k}')">${l}</button>`).join('')}
-          <span class="sep"></span>
-          <button class="btn sm primary" onclick="openNewModal('task')">+ Add task</button>
+        <span class="segs">${[['live','live'],['open','open'],['in_progress','in progress'],['blocked','blocked'],['done','closed']].map(([k,l]) => `<button class="chip ${f === k ? 'active' : ''}" onclick="taskSetStatus('${k}')">${l}</button>`).join('')}</span>
+        <span class="bar-r">
+          <span class="cnt"><span id="taskCount">${listNow.length} of ${App.tasks.length}${f === 'live' ? ' · live only' : ''}</span> &middot; ${live.length} live: ${by('open')} open, ${by('in_progress')} in progress, ${by('blocked')} blocked${tq ? ` · ${tq.label} · <a href="javascript:void(0)" onclick="taskSelectQueue(App.taskQueue)">clear</a>` : ''}</span>
+          <button class="btn sm" onclick="openNewModal('task')">Add task</button>
         </span>`;
 
       document.getElementById('taskQueue').innerHTML = TASK_QUEUES.map(q => {
         const n = App.tasks.filter(q.test).length;
         return `<div class="b ${App.taskQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" onclick="taskSelectQueue('${q.id}')">
           <div class="h"><b style="color:${n ? q.color : ''}">${n}</b><span>${q.label}</span></div>
-          <div class="w">${q.why}</div><div class="k">${escapeHtml(q.flag)}</div></div>`;
+          <div class="w">${q.why}</div></div>`;
       }).join('');
 
       const list = taskFiltered();
-      document.getElementById('taskCount').textContent = `${list.length} of ${App.tasks.length}${f === 'live' ? ' · live only' : ''}`;
 
       if (keepSelection && App.taskCursorKey) { const at = list.findIndex(t => t.key === App.taskCursorKey); if (at >= 0) App.taskCursor = at; }
       if (App.taskCursor == null || App.taskCursor >= list.length) App.taskCursor = 0;
@@ -81,16 +78,16 @@
           : done && t.resolution ? `<div class="inc-note res"><b>${st === 'dropped' ? 'Dropped' : 'Done'}</b> &middot; ${escapeHtml(t.resolution)}</div>`
           : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
         const acts = cur ? `<div class="acts" onclick="event.stopPropagation()">
-            <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">&#9166; Doc</a>
-            ${!done ? `<select class="form-select" onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';" style="padding:2px 6px; font-size: 12.5px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
-              <option value="" disabled selected>m Move to…</option>
+            <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">Open <kbd>&#9166;</kbd></a>
+            ${!done ? `<select class="move-sel" onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';">
+              <option value="" disabled selected>Move to… (m)</option>
               <option value="open" ${st === 'open' ? 'disabled' : ''}>Open</option>
               <option value="in_progress" ${st === 'in_progress' ? 'disabled' : ''}>In progress</option>
               <option value="blocked" ${st === 'blocked' ? 'disabled' : ''}>Blocked</option></select>
-            <button class="btn sm" onclick="openResolveTaskModal(${jsArg(t.key)}, ${jsArg(t.title)})">x Done</button>` : `<button class="btn sm" onclick="moveTaskTo('open', ${jsArg(t.key)}, ${jsArg(t.title)})">Reopen</button>`}
-            <button class="btn sm" onclick="openEditModal(${jsArg(t.key)})">e Edit</button>
-            <button class="btn sm" onclick="openDiffForEntry(${jsArg(t.key)})">d Diff</button>
-            <button class="btn sm" onclick="openHistoryForEntry(${jsArg(t.key)})">h History</button>
+            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(t.key)}, ${jsArg(t.title)})">Done <kbd>x</kbd></button>` : `<button class="btn sm" onclick="moveTaskTo('open', ${jsArg(t.key)}, ${jsArg(t.title)})">Reopen</button>`}
+            <button class="btn sm" onclick="openEditModal(${jsArg(t.key)})">Edit <kbd>e</kbd></button>
+            <button class="btn sm ghost" onclick="openHistoryForEntry(${jsArg(t.key)})">Versions <kbd>h</kbd></button>
+            <button class="btn sm ghost" onclick="openDiffForEntry(${jsArg(t.key)})">Diff <kbd>d</kbd></button>
           </div>` : '';
         return `<div class="inc-r task ${cur ? 'cur' : ''}" onclick="App.taskCursor=${idx}; renderTasks();" ondblclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">
             <span class="n">${idx + 1}</span>
@@ -165,7 +162,9 @@
       const t = App.tasks.find(x => x.key === key);
       const displayTitle = title || t?.title || key;
       const targetEl = document.getElementById('blockTaskTargetText');
-      if (targetEl) targetEl.textContent = `Task: ${displayTitle} (${key})`;
+      if (targetEl) targetEl.textContent = key;
+      const titleEl = document.getElementById('blockTaskTitle');
+      if (titleEl) titleEl.textContent = `Block: ${displayTitle}`;
       const reasonEl = document.getElementById('blockTaskReason');
       if (reasonEl) reasonEl.value = '';
       openModal('blockTaskModal');
@@ -185,7 +184,8 @@
     function openResolveTaskModal(key, title) {
       if (refuseReadOnly()) return;
       App.activeResolveKey = key;
-      document.getElementById('resolveTaskTargetText').textContent = `Task: ${title} (${key})`;
+      document.getElementById('resolveTaskTitle').textContent = `Finish: ${title || key}`;
+      document.getElementById('resolveTaskTargetText').textContent = key;
       document.getElementById('resolveTaskOutcome').value = '';
       openModal('resolveTaskModal');
     }

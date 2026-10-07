@@ -112,13 +112,12 @@
     <!-- ==================== TAB 2: INCIDENTS ==================== -->
     <div id="tab-incidents" class="tab-content">
       <div class="inc">
-        <div class="inc-top" id="incTop"></div>
         <div class="inc-queue" id="incQueue"></div>
+        <div class="inc-top" id="incTop"></div>
         <div id="incidentRows"></div>
         <div class="inc-hint">
           <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> open</span><span><kbd>r</kbd> resolve</span>
           <span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
-          <span class="cnt" id="incCount"></span>
         </div>
       </div>
     </div>
@@ -126,13 +125,12 @@
     <!-- ==================== TAB 3: TASKS ==================== -->
     <div id="tab-tasks" class="tab-content">
       <div class="inc">
-        <div class="inc-top" id="taskTop"></div>
         <div class="inc-queue" id="taskQueue"></div>
+        <div class="inc-top" id="taskTop"></div>
         <div id="taskRows"></div>
         <div class="inc-hint">
           <span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>&#9166;</kbd> open</span><span><kbd>m</kbd> move to&hellip;</span>
           <span><kbd>x</kbd> done</span><span><kbd>e</kbd> edit</span><span><kbd>d</kbd> diff</span><span><kbd>h</kbd> history</span><span><kbd>esc</kbd> clear queue</span>
-          <span class="cnt" id="taskCount"></span>
         </div>
       </div>
     </div>
@@ -160,13 +158,12 @@
     <div class="modal-card">
       <div class="modal-header">
         <div class="modal-title" id="newModalTitle">New note</div>
+        <span class="segs modal-switch">
+          <button class="chip active" id="modalTypeKnowledge" onclick="switchNewModalType('knowledge')">Knowledge</button>
+          <button class="chip" id="modalTypeIncident" onclick="switchNewModalType('incident')">Incident</button>
+          <button class="chip" id="modalTypeTask" onclick="switchNewModalType('task')">Task</button>
+        </span>
         <button class="modal-close" onclick="closeModal('newModal')">✕</button>
-      </div>
-
-      <div style="display:flex; border-bottom:1px solid var(--border); background:var(--card-subtle); padding:4px 20px 0 20px; gap:8px;">
-        <button class="chip active" id="modalTypeKnowledge" onclick="switchNewModalType('knowledge')">Knowledge</button>
-        <button class="chip" id="modalTypeIncident" onclick="switchNewModalType('incident')">Incident</button>
-        <button class="chip" id="modalTypeTask" onclick="switchNewModalType('task')">Task</button>
       </div>
 
       <div class="modal-body" id="newModalBody">
@@ -174,7 +171,8 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn" onclick="closeModal('newModal')">Cancel</button>
+        <span class="foot-hint" id="newModalHint"></span>
+        <button class="btn ghost" onclick="closeModal('newModal')">Cancel</button>
         <button class="btn primary" id="newModalSubmitBtn" onclick="submitNewModal()">Save Entry</button>
       </div>
     </div>
@@ -184,18 +182,19 @@
   <div class="modal-backdrop" id="resolveIncidentModal" onclick="handleBackdropClick(event, 'resolveIncidentModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title">Resolve incident</div>
+        <div class="modal-title" id="resolveIncidentTitle">Resolve incident</div>
+        <span class="mono modal-key" id="resolveIncidentTargetText"></span>
         <button class="modal-close" onclick="closeModal('resolveIncidentModal')">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-target" id="resolveIncidentTargetText"></div>
         <div class="form-group">
           <label class="form-label">What fixed it</label>
           <textarea class="form-textarea" id="resolveIncidentOutcome" placeholder="The cause and the change that fixed it. This is what the next person reads."></textarea>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn" onclick="closeModal('resolveIncidentModal')">Cancel</button>
+        <span class="foot-hint">The report leaves the open list and stays searchable.</span>
+        <button class="btn ghost" onclick="closeModal('resolveIncidentModal')">Cancel</button>
         <button class="btn success" onclick="submitResolveIncident()">Resolve and archive</button>
       </div>
     </div>
@@ -205,18 +204,19 @@
   <div class="modal-backdrop" id="resolveTaskModal" onclick="handleBackdropClick(event, 'resolveTaskModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title">Finish task</div>
+        <div class="modal-title" id="resolveTaskTitle">Finish task</div>
+        <span class="mono modal-key" id="resolveTaskTargetText"></span>
         <button class="modal-close" onclick="closeModal('resolveTaskModal')">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-target" id="resolveTaskTargetText"></div>
         <div class="form-group">
           <label class="form-label">What came out of it</label>
           <textarea class="form-textarea" id="resolveTaskOutcome" placeholder="The result, how it was verified, a link if there is one."></textarea>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn" onclick="closeModal('resolveTaskModal')">Cancel</button>
+        <span class="foot-hint">The task is archived and stays searchable.</span>
+        <button class="btn ghost" onclick="closeModal('resolveTaskModal')">Cancel</button>
         <button class="btn success" onclick="submitResolveTask()">Mark done</button>
       </div>
     </div>
@@ -226,18 +226,19 @@
   <div class="modal-backdrop" id="blockTaskModal" onclick="handleBackdropClick(event, 'blockTaskModal')">
     <div class="modal-card">
       <div class="modal-header">
-        <div class="modal-title">Block task</div>
+        <div class="modal-title" id="blockTaskTitle">Block task</div>
+        <span class="mono modal-key" id="blockTaskTargetText"></span>
         <button class="modal-close" onclick="closeModal('blockTaskModal')">✕</button>
       </div>
       <div class="modal-body">
-        <div class="form-target" id="blockTaskTargetText"></div>
         <div class="form-group">
           <label class="form-label">What is blocking it</label>
           <textarea class="form-textarea" id="blockTaskReason" placeholder="Who or what has to happen first."></textarea>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn" onclick="closeModal('blockTaskModal')">Cancel</button>
+        <span class="foot-hint">The reason shows on the task until it is unblocked.</span>
+        <button class="btn ghost" onclick="closeModal('blockTaskModal')">Cancel</button>
         <button class="btn warning" onclick="submitBlockTask()">Block</button>
       </div>
     </div>
@@ -325,8 +326,8 @@
         <!-- Rendered by openEditModal -->
       </div>
       <div class="modal-footer">
-        <button class="btn" onclick="closeModal('editModal')">Cancel</button>
-        <button class="btn primary" id="editModalSubmitBtn" onclick="submitEditModal()">Save Changes</button>
+        <button class="btn ghost" onclick="closeModal('editModal')">Cancel</button>
+        <button class="btn primary" id="editModalSubmitBtn" onclick="submitEditModal()">Save</button>
       </div>
     </div>
   </div>
