@@ -47,14 +47,14 @@
         <span class="segs">${[['live','live'],['open','open'],['in_progress','in progress'],['blocked','blocked'],['done','closed']].map(([k,l]) => `<button class="chip ${f === k ? 'active' : ''}" onclick="taskSetStatus('${k}')">${l}</button>`).join('')}</span>
         <span class="bar-r">
           <span class="cnt"><span id="taskCount">${listNow.length} of ${App.tasks.length}${f === 'live' ? ' · live only' : ''}</span> &middot; ${live.length} live: ${by('open')} open, ${by('in_progress')} in progress, ${by('blocked')} blocked${tq ? ` · ${tq.label} · <a href="javascript:void(0)" onclick="taskSelectQueue(App.taskQueue)">clear</a>` : ''}</span>
-          <button class="btn sm" onclick="openNewModal('task')">Add task</button>
+          <button class="btn sm" data-write onclick="openNewModal('task')">Add task</button>
         </span>`;
 
       document.getElementById('taskQueue').innerHTML = TASK_QUEUES.map(q => {
         const n = App.tasks.filter(q.test).length;
-        return `<div class="b ${App.taskQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" onclick="taskSelectQueue('${q.id}')">
+        return `<button type="button" class="b ${App.taskQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" aria-pressed="${App.taskQueue === q.id}" onclick="taskSelectQueue('${q.id}')">
           <div class="h"><b style="color:${n ? q.color : ''}">${n}</b><span>${q.label}</span></div>
-          <div class="w">${q.why}</div></div>`;
+          <div class="w">${q.why}</div></button>`;
       }).join('');
 
       const list = taskFiltered();
@@ -79,13 +79,13 @@
           : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
         const acts = cur ? `<div class="acts" onclick="event.stopPropagation()">
             <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">Open <kbd>&#9166;</kbd></a>
-            ${!done ? `<select class="move-sel" onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';">
+            ${!done ? `<select class="move-sel" data-write onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';">
               <option value="" disabled selected>Move to… (m)</option>
               <option value="open" ${st === 'open' ? 'disabled' : ''}>Open</option>
               <option value="in_progress" ${st === 'in_progress' ? 'disabled' : ''}>In progress</option>
               <option value="blocked" ${st === 'blocked' ? 'disabled' : ''}>Blocked</option></select>
-            <button class="btn sm success" onclick="openResolveTaskModal(${jsArg(t.key)}, ${jsArg(t.title)})">Done <kbd>x</kbd></button>` : `<button class="btn sm" onclick="moveTaskTo('open', ${jsArg(t.key)}, ${jsArg(t.title)})">Reopen</button>`}
-            <button class="btn sm" onclick="openEditModal(${jsArg(t.key)})">Edit <kbd>e</kbd></button>
+            <button class="btn sm success" data-write onclick="openResolveTaskModal(${jsArg(t.key)}, ${jsArg(t.title)})">Done <kbd>x</kbd></button>` : `<button class="btn sm" data-write onclick="moveTaskTo('open', ${jsArg(t.key)}, ${jsArg(t.title)})">Reopen</button>`}
+            <button class="btn sm" data-write onclick="openEditModal(${jsArg(t.key)})">Edit <kbd>e</kbd></button>
             <button class="btn sm ghost" onclick="openHistoryForEntry(${jsArg(t.key)})">Versions <kbd>h</kbd></button>
             <button class="btn sm ghost" onclick="openDiffForEntry(${jsArg(t.key)})">Diff <kbd>d</kbd></button>
           </div>` : '';

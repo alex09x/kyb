@@ -70,15 +70,15 @@
         <span class="segs">${['all','critical','high','medium','low'].map(sv => `<button class="chip ${App.incidentSeverityFilter === sv ? 'active' : ''}" onclick="filterIncidentsSeverity('${sv}')">${sv === 'all' ? 'any severity' : sv}</button>`).join('')}</span>
         <span class="bar-r">
           <span class="cnt"><span id="incCount">${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' · open and mitigated' : ''}</span>${q ? ` · ${q.label} · <a href="javascript:void(0)" onclick="incClearCell()">clear</a>` : ''}</span>
-          <button class="btn sm" onclick="openNewModal('incident')">Report incident</button>
+          <button class="btn sm" data-write onclick="openNewModal('incident')">Report incident</button>
         </span>`;
 
       // ---- attention queue
       document.getElementById('incQueue').innerHTML = INC_QUEUES.map(q => {
         const n = App.incidents.filter(q.test).length;
-        return `<div class="b ${App.incidentQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" onclick="incSelectQueue('${q.id}')">
+        return `<button type="button" class="b ${App.incidentQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" aria-pressed="${App.incidentQueue === q.id}" onclick="incSelectQueue('${q.id}')">
           <div class="h"><b style="color:${n ? q.color : ''}">${n}</b><span>${q.label}</span></div>
-          <div class="w">${q.why}</div></div>`;
+          <div class="w">${q.why}</div></button>`;
       }).join('');
 
 
@@ -102,13 +102,13 @@
           const K = jsArg(inc.key), svc = (inc.service || 'infrastructure').toLowerCase();
           peek = `<div class="inc-peek">
             ${inc.detection ? `<div class="detect"><span><span class="l">Is it still happening? </span><code>${escapeHtml(inc.detection)}</code></span><button class="btn sm" onclick="event.stopPropagation(); copyToClipboard(${jsArg(inc.detection)}, 'Check command copied!')">Copy</button></div>`
-              : inc.status !== 'resolved' ? `<div class="callout"><b>no detection</b><span>Add a command that shows whether this is still happening - the report is a story until then.</span><button class="btn sm" onclick="event.stopPropagation(); openEditModal(${K})">Add check</button></div>` : ''}
+              : inc.status !== 'resolved' ? `<div class="callout"><b>no detection</b><span>Add a command that shows whether this is still happening - the report is a story until then.</span><button class="btn sm" data-write onclick="event.stopPropagation(); openEditModal(${K})">Add check</button></div>` : ''}
             <div class="k">${inc.status} &middot; ${escapeHtml(inc.service || 'infrastructure')}${(inc.hosts || []).length ? ' &middot; ' + escapeHtml(inc.hosts.join(', ')) : ''} &middot; detected ${timeAgo(inc.detected_at || inc.started_at)}${inc.open_followups ? ` &middot; ${inc.open_followups} open follow-up${inc.open_followups > 1 ? 's' : ''}` : ''}</div>
             ${inc.resolution ? `<div><span style="color:var(--green)">Resolution:</span> ${escapeHtml(inc.resolution)}</div>` : ''}
             <div class="row">
               <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, ${K}, 'knowledge')">Open report <kbd>&#9166;</kbd></a>
-              ${inc.status !== 'resolved' ? `<button class="btn sm success" onclick="event.stopPropagation(); openResolveIncidentModal(${K}, ${jsArg(inc.title)})">Resolve <kbd>r</kbd></button>` : ''}
-              <button class="btn sm" onclick="event.stopPropagation(); openEditModal(${K})">Edit <kbd>e</kbd></button>
+              ${inc.status !== 'resolved' ? `<button class="btn sm success" data-write onclick="event.stopPropagation(); openResolveIncidentModal(${K}, ${jsArg(inc.title)})">Resolve <kbd>r</kbd></button>` : ''}
+              <button class="btn sm" data-write onclick="event.stopPropagation(); openEditModal(${K})">Edit <kbd>e</kbd></button>
               <button class="btn sm ghost" onclick="event.stopPropagation(); openHistoryForEntry(${K})">Versions${hist ? ` · ${hist.length}` : ''} <kbd>h</kbd></button>
               <button class="btn sm ghost" onclick="event.stopPropagation(); openDiffForEntry(${K})">Diff <kbd>d</kbd></button>
               <a href="${placeHash({kind: 'service', name: svc})}" class="btn sm ghost" onclick="openPlace(event, 'service', ${jsArg(svc)})">Service</a>

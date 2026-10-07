@@ -188,10 +188,10 @@
         const isDone = ['done', 'closed', 'dropped', 'resolved'].includes(st) || e.archived;
         const isBlocked = st === 'blocked', isProgress = st === 'in_progress', isOpen = !isDone && !isBlocked && !isProgress;
         const pr = (e.priority || '').toLowerCase();
-        const start = label => `<button class="btn sm primary" onclick="transitionTask(${K}, 'in_progress')">${label}</button>`;
-        const block = `<button class="btn sm warning" onclick="promptBlockTask(${K}, ${T})">Block</button>`;
-        const done = `<button class="btn sm success" onclick="openResolveTaskModal(${K}, ${T})">Done</button>`;
-        const backlog = `<button class="btn sm" onclick="transitionTask(${K}, 'open')">Backlog</button>`;
+        const start = label => `<button class="btn sm primary" data-write onclick="transitionTask(${K}, 'in_progress')">${label}</button>`;
+        const block = `<button class="btn sm warning" data-write onclick="promptBlockTask(${K}, ${T})">Block</button>`;
+        const done = `<button class="btn sm success" data-write onclick="openResolveTaskModal(${K}, ${T})">Done</button>`;
+        const backlog = `<button class="btn sm" data-write onclick="transitionTask(${K}, 'open')">Backlog</button>`;
         const acts = isOpen ? start('Start') + block + done
           : isProgress ? block + done + backlog
           : isBlocked ? start('Unblock') + done + backlog
@@ -213,10 +213,10 @@
           pills: `<span class="pill ${sev === 'critical' ? 'crit' : sev === 'high' ? 'amber' : ''}">${escapeHtml(sev)}</span>
                   <span class="pill ${st === 'resolved' ? 'ok' : st === 'mitigated' ? 'amber' : ''}">${escapeHtml(st)}</span>`,
           words: `<span class="mono">${escapeHtml(e.service || 'infrastructure')}</span>${(e.hosts && e.hosts.length) ? ` on <span class="mono">${e.hosts.map(escapeHtml).join(', ')}</span>` : ''} · opened ${when}${by}${versions}`,
-          acts: st !== 'resolved' ? `<button class="btn sm success" onclick="openResolveIncidentModal(${K}, ${T})">Resolve</button>` : '',
+          acts: st !== 'resolved' ? `<button class="btn sm success" data-write onclick="openResolveIncidentModal(${K}, ${T})">Resolve</button>` : '',
           body: `${e.detection
             ? `<div class="detect"><span><span class="l">Is it still happening? </span><code>${escapeHtml(e.detection)}</code></span><button class="btn sm" onclick="copyToClipboard(${jsArg(e.detection)}, 'Check command copied!')">Copy</button></div>`
-            : (st !== 'resolved' ? `<div class="callout"><b>No detection</b><span>Nobody can tell whether this is still happening. Add a command and what a healthy answer looks like.</span><button class="btn sm" onclick="openEditModal(${K})">Add check</button></div>` : '')}${resolution}${linked}`,
+            : (st !== 'resolved' ? `<div class="callout"><b>No detection</b><span>Nobody can tell whether this is still happening. Add a command and what a healthy answer looks like.</span><button class="btn sm" data-write onclick="openEditModal(${K})">Add check</button></div>` : '')}${resolution}${linked}`,
         };
       }
 
@@ -256,7 +256,7 @@
             </div>
             <div class="dh-acts">
               <span class="dh-state-acts ${parts.hero}">${parts.acts}</span>
-              <button class="btn sm" id="btnEditEntry" onclick="openEditModal(${jsArg(e.key)})">Edit <kbd>e</kbd></button>
+              <button class="btn sm" id="btnEditEntry" data-write onclick="openEditModal(${jsArg(e.key)})">Edit <kbd>e</kbd></button>
               <div class="more">
                 <button class="btn sm ghost" onclick="this.parentElement.classList.toggle('open'); event.stopPropagation();">More ▾</button>
                 <div class="menu">

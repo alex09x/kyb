@@ -691,6 +691,8 @@ def run(base, headed, coverage=None):
         check("incident rows carry service and age", ev("[...document.querySelectorAll('#incidentRows .inc-r')].every(r => r.querySelector('.sv').textContent && r.querySelector('.age').textContent)"))
         check("the cursor row shows the peek with its detection", ev("(() => { const p = document.querySelector('#incidentRows .inc-peek'); const k = App.incidentCursorKey; const i = App.incidents.find(x => x.key === k); return !!p && (!i.detection || p.textContent.includes(i.detection)); })()"))
         check("rows without detection say so", ev("[...document.querySelectorAll('#incidentRows .inc-r:not(.cur)')].every(r => { const i = App.incidents.find(x => x.key === r.querySelector('.t span').textContent); return i.status === 'resolved' || (!!(i.detection||'').trim()) === !!r.querySelector('.inc-note.det') && (!(i.detection||'').trim()) === !!r.querySelector('.inc-note:not(.det):not(.res)'); })"))
+        qk = ev("""(() => { const b = document.querySelector('#incQueue .b'); b.focus(); const focused = document.activeElement === b; b.click(); const pressed = document.querySelector('#incQueue .b').getAttribute('aria-pressed'); const q = App.incidentQueue; incClearCell(); return [b.tagName, focused, pressed, !!q]; })()""")
+        check("queue cards are buttons: focusable, pressable, and say when they are on", qk == ["BUTTON", True, "true", True], qk)
         check("the filter bar is segments for status and severity, the count of what is left, and the one action", ev("(() => { const t = document.getElementById('incTop'); return [t.querySelectorAll('.segs').length, document.getElementById('incCount').textContent === incFiltered().length + ' of ' + App.incidents.length + (App.incidentStatusFilter === 'all' ? ' · open and mitigated' : ''), t.querySelector('.btn').textContent.trim(), document.getElementById('incQueue').nextElementSibling === t]; })()") == [2, True, "Report incident", True], ev("document.getElementById('incTop').textContent").strip()[:120])
         check("queue counters equal their filters", ev("INC_QUEUES.every(q => document.querySelector('#incQueue .b:nth-child(' + (INC_QUEUES.indexOf(q) + 1) + ') b').textContent == App.incidents.filter(q.test).length)"))
         ev("switchTab('tasks'); taskSetStatus('live'); App.taskQueue = null; renderTasks()")
@@ -1379,6 +1381,9 @@ def run(base, headed, coverage=None):
           const errs = () => document.querySelectorAll('#toastContainer .toast.error').length; const before = errs();
           openNewModal(); await openEditModal('kyb-service'); openResolveIncidentModal('i', 't'); openResolveTaskModal('t', 't'); promptBlockTask('t', 't'); await transitionTask('t', 'open');
           out.refused = [errs() - before, __t.open().length];
+          // every write control on every pane is hidden for a reader: the peek, the task row actions, the card, the bars
+          App.incidentCursor = 0; renderIncidents(); App.taskCursor = 0; renderTasks(); const reopen = document.createElement('div'); reopen.innerHTML = '<button data-write onclick="moveTaskTo(1)">Reopen</button>'; document.body.appendChild(reopen); const doneRow = getComputedStyle(reopen.firstChild).display === 'none' ? 1 : 0; reopen.remove();
+          const ws = [...document.querySelectorAll('[data-write]')]; out.writeHidden = [ws.length >= 6, doneRow > 0, ws.filter(w => getComputedStyle(w).display !== 'none').map(w => w.textContent.trim().slice(0, 20))];
           // the request log is the admin's: a reader's refresh does not ask for it
           { const asked = []; const r3 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return r3(u, o); }; await refreshAll(); window.fetch = r3; out.readerAudit = asked.some(u => u.includes('/api/audit')); }
           // every request carries the token
@@ -1415,6 +1420,7 @@ def run(base, headed, coverage=None):
         forgive_console(0)
         check("a token the server does not know is said so and not kept; an unreachable server is said so", tok["unknown"] == ["The server does not know this token.", None] and tok["down"] == "Could not reach the server.", tok)
         check("a reader's token is trimmed, tried, kept, named, and the console goes read-only", tok["reader"] == ["kyb_reader", "Bearer kyb_reader", "· Rita Reader (read-only)", "read", 0, "none"], tok["reader"])
+        check("no write control is visible to a reader on any pane", tok["writeHidden"] == [True, True, []], tok["writeHidden"])
         check("every write entry point refuses a reader with a reason, keyboard or not", tok["refused"] == [6, 0], tok["refused"])
         check("the token goes out with every request", tok["carried"] == "Bearer kyb_reader", tok["carried"])
         check("a reader's console does not ask for the request log", tok["readerAudit"] is False, tok["readerAudit"])
