@@ -1,0 +1,108 @@
+    /* ========================================================
+       TAB 4: TOPOLOGY GRAPH CANVAS
+       ======================================================== */
+    .graph-container {
+      position: relative;
+      height: calc(100vh - 170px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      overflow: hidden;
+    }
+    #topoCanvas { width: 100%; height: 100%; display: block; cursor: grab; }
+    #topoCanvas:active { cursor: grabbing; }
+
+    .graph-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(17, 21, 32, 0.92);
+      border: 1px solid var(--border);
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      backdrop-filter: blur(10px);
+      max-width: 280px;
+      z-index: 10;
+    }
+    .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+    .legend-color { width: 10px; height: 10px; border-radius: 50%; }
+
+    .graph-controls-bar {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      display: flex;
+      gap: 6px;
+      background: rgba(17, 21, 32, 0.9);
+      border: 1px solid var(--border);
+      padding: 6px;
+      border-radius: 8px;
+      backdrop-filter: blur(8px);
+      z-index: 50;
+    }
+
+    .node-hud {
+      position: absolute;
+      pointer-events: auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--text);
+      display: none;
+      z-index: 60;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(14px);
+      max-width: 340px;
+    }
+
+    /* Sliding Graph Inspector Drawer */
+    .graph-drawer {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      bottom: 14px;
+      width: 380px;
+      max-width: calc(100% - 28px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(16px);
+      z-index: 45;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(120%);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto;
+    }
+    .graph-drawer.open {
+      transform: translateX(0);
+    }
+    .graph-drawer-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .graph-drawer-body {
+      padding: 18px;
+      flex: 1;
+      overflow-y: auto;
+    }
+    .graph-drawer-footer {
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      background: rgba(255, 255, 255, 0.02);
+    }
+

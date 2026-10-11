@@ -33,6 +33,49 @@ pub struct AppState {
     /// commits are strictly sequential anyway. Search takes no locks.
     writer: Mutex<IndexWriter>,
     pub(crate) audit_path: std::path::PathBuf,
+    /// An entry's history is a walk over every commit in the repository; with
+    /// thousands of them that is close to a second per request, and the UI asks
+    /// for it on every card. Each key's list is kept once computed and dropped
+    /// when that key is written again (the only way its history can change).
+    history_cache: std::sync::Mutex<std::collections::HashMap<String, Vec<store::VersionInfo>>>,
+    /// Bumped by every invalidation. A scan that began before a write must not
+    /// put its pre-write answer into the cache after the write dropped it.
+    history_gen: std::sync::atomic::AtomicU64,
+}
+
+impl AppState {
+    fn history_cached(&self, key: &str) -> Result<Vec<store::VersionInfo>> {
+        use std::sync::atomic::Ordering;
+        if let Some(v) = self.history_cache.lock().unwrap().get(key) {
+            return Ok(v.clone());
+        }
+        let gen = self.history_gen.load(Ordering::Acquire);
+        let v = self.store.history(key)?;
+        if !v.is_empty() {
+            // The generation is re-read under the same lock the invalidation
+            // takes, and forget_history bumps it before taking that lock: a
+            // write that landed during the scan is therefore always seen here.
+            let mut cache = self.history_cache.lock().unwrap();
+            if self.history_gen.load(Ordering::Acquire) == gen {
+                cache.insert(key.to_string(), v.clone());
+            }
+        }
+        Ok(v)
+    }
+    /// The content an archived key had just before its file was removed: the
+    /// cached history names the deletion commit, and the parent of that commit
+    /// still holds the file. One blob read instead of a walk over every commit.
+    fn archived_version(&self, key: &str) -> Result<Option<model::Entry>> {
+        let versions = self.history_cached(key)?;
+        match versions.iter().find(|v| v.change == "deleted") {
+            Some(del) => self.store.get_at(key, &format!("{}^", del.sha)),
+            None => self.store.latest_version(key),
+        }
+    }
+    fn forget_history(&self, key: &str) {
+        self.history_gen.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.history_cache.lock().unwrap().remove(key);
+    }
 }
 
 type St = State<Arc<AppState>>;
@@ -116,6 +159,8 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
         semantic,
         writer: Mutex::new(writer),
         audit_path: cfg.audit_path.clone(),
+        history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+        history_gen: std::sync::atomic::AtomicU64::new(0),
     }))
 }
 
@@ -253,10 +298,14 @@ async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built
     };
     let closed = entry.is_closed();
     let key = entry.key.clone();
+    st.forget_history(&key);
     let (mut reply, committed) = commit_locked(st, &mut w, entry, extra);
     if closed {
         archive_locked(st, &mut w, &key, &mut reply);
     }
+    // again after git moved: a scan that began between the first forget and the
+    // commit read the old HEAD, and this bump keeps it from being cached
+    st.forget_history(&key);
     let pending = match (st.semantic.as_ref(), committed) {
         (Some(sem), Some(entry)) => {
             let ticket = sem.begin_upsert(&entry.key).await;
@@ -1042,7 +1091,7 @@ async fn get_one(State(st): St, Path(key): Path<String>, Q(q): Q<GetQ>) -> Reply
         Ok(None) if q.at.is_none() => {
             // not in the tree — an archived incident/task is still readable
             // from history; deleted knowledge stays a 404 (retraction)
-            match st.store.latest_version(&key) {
+            match st.archived_version(&key) {
                 Err(e) => err500(e),
                 Ok(Some(e)) if e.kind != model::KIND_KNOWLEDGE => {
                     (StatusCode::OK, Json(entry_json(&e, true)))
@@ -1216,7 +1265,7 @@ async fn history(State(st): St, Path(key): Path<String>) -> Reply {
     if let Some(r) = bad_key(&key) {
         return r;
     }
-    match st.store.history(&key) {
+    match st.history_cached(&key) {
         Err(e) => err500(e),
         Ok(v) if v.is_empty() => {
             (StatusCode::NOT_FOUND, Json(json!({"error": format!("no history for '{key}'")})))
@@ -1461,29 +1510,43 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         }
         Ok(Some(e)) => e,
     };
+    // both branches change the key's git history: a deletion or an archive commit.
+    // Forgotten before (no stale answer is served meanwhile) and after (no scan
+    // that began meanwhile can cache the pre-commit history).
+    st.forget_history(&key);
+    let reply = remove_committed(&st, &mut w, &key, &entry).await;
+    st.forget_history(&key);
+    reply
+}
+
+async fn remove_committed(
+    st: &Arc<AppState>,
+    w: &mut tokio::sync::MutexGuard<'_, IndexWriter>,
+    key: &str,
+    entry: &model::Entry,
+) -> Reply {
     if entry.kind == model::KIND_KNOWLEDGE {
-        match st.store.delete(&key) {
+        match st.store.delete(key) {
             Err(e) => err500(e),
             Ok(None) => {
                 (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
             }
             Ok(Some(sha)) => {
-                st.index.delete_head(&mut w, &key);
-                if let Err(e) = st.index.commit_and_reload(&mut w) {
+                st.index.delete_head(w, key);
+                if let Err(e) = st.index.commit_and_reload(w) {
                     return err500(
                         e.context("git committed but the index was not updated — run POST /reindex"),
                     );
                 }
                 if let Some(sem) = st.semantic.as_ref() {
-                    sem.invalidate(&key).await;
+                    sem.invalidate(key).await;
                 }
-                drop(w);
                 (StatusCode::OK, Json(json!({"key": key, "deleted": true, "sha": sha})))
             }
         }
     } else {
         // live index doc and vector stay: archived means findable
-        match st.store.archive(&key) {
+        match st.store.archive(key) {
             Err(e) => err500(e),
             Ok(None) => {
                 (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))

@@ -1,0 +1,33 @@
+    /* ========================================================
+       TAB 5: LIVE FLEET FEED (Audit Log)
+       ======================================================== */
+
+    /* Search highlighting */
+    mark.search-highlight {
+      background: rgba(0, 179, 196, 0.4);
+      color: #fff;
+      border-radius: 2px;
+      padding: 0 3px;
+      font-weight: 700;
+    }
+
+    /* History & Revision Cards */
+    .rev-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      background: rgba(139, 92, 246, 0.15);
+      color: #a78bfa;
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      padding: 1px 5px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .rev-badge:hover {
+      background: rgba(139, 92, 246, 0.25);
+    }
+
+    /* Activity Stream Cards for Live Feed */
+

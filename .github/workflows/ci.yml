@@ -104,6 +104,18 @@ jobs:
           fi
           bash scripts/test-mcp-endpoint.sh http://127.0.0.1:9310
           kill $SERVER_PID
+      # The web UI in a real browser: every screen, every write a person can make
+      # from it, against a sandbox server the test starts itself.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Playwright
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet playwright
+          python -m playwright install --with-deps chromium
+      - name: Exercise the web UI end to end
+        run: KYB_SERVER_BIN=./target/release/kyb-server python scripts/test-web-ui.py
 
   # Tag builds only. Branch and PR runs are untouched by this job.
   #

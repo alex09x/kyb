@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """
 KYB Local Development Server (0-second iteration)
-Serves src/web/index.html directly from disk with live-reload,
+Serves the UI assembled from src/web/ (template + css/ + js/) with live-reload,
 while proxying all API requests to the upstream KYB backend.
 """
 
 import os
+import pathlib
 import sys
 import time
 import json
 import socket
 import argparse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.request
 import urllib.error
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HTML_PATH = os.path.join(REPO_DIR, "src", "web", "index.html")
+WEB_DIR = os.path.join(REPO_DIR, "src", "web")
+sys.path.insert(0, os.path.join(REPO_DIR, "scripts"))
+from build_ui import assemble  # noqa: E402
 
 def get_default_backend():
     # 1. ~/.config/kyb/host
@@ -49,7 +52,7 @@ LIVE_RELOAD_SCRIPT = b"""
       const res = await fetch('/__dev_mtime');
       const data = await res.json();
       if (lastMtime && data.mtime > lastMtime) {
-        console.log('[KYB Dev] src/web/index.html changed, reloading page...');
+        console.log('[KYB Dev] src/web changed, reloading page...');
         window.location.reload();
       }
       lastMtime = data.mtime;
@@ -59,9 +62,18 @@ LIVE_RELOAD_SCRIPT = b"""
 </script>
 """
 
+def newest_mtime(web_dir):
+    """Latest change anywhere in the UI sources - what live-reload watches."""
+    latest = 0.0
+    for root, _dirs, files in os.walk(web_dir):
+        for name in files:
+            latest = max(latest, os.path.getmtime(os.path.join(root, name)))
+    return latest
+
+
 class DevProxyHandler(BaseHTTPRequestHandler):
     backend_url = "http://127.0.0.1:9310"
-    html_path = HTML_PATH
+    web_dir = WEB_DIR
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -86,8 +98,7 @@ class DevProxyHandler(BaseHTTPRequestHandler):
 
     def serve_html(self):
         try:
-            with open(self.html_path, "rb") as f:
-                content = f.read()
+            content = assemble(pathlib.Path(self.web_dir)).encode("utf-8")
             if b"</body>" in content:
                 content = content.replace(b"</body>", LIVE_RELOAD_SCRIPT + b"</body>")
             else:
@@ -104,7 +115,7 @@ class DevProxyHandler(BaseHTTPRequestHandler):
 
     def serve_mtime(self):
         try:
-            mtime = os.path.getmtime(self.html_path)
+            mtime = newest_mtime(self.web_dir)
             data = json.dumps({"mtime": mtime}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -164,16 +175,16 @@ def main():
     parser = argparse.ArgumentParser(description="KYB Local Dev Server")
     parser.add_argument("--port", "-p", type=int, default=9311, help="Local port (default: 9311)")
     parser.add_argument("--backend", "-b", type=str, default=None, help="Backend KYB URL")
-    parser.add_argument("--file", "-f", type=str, default=HTML_PATH, help="Path to index.html")
+    parser.add_argument("--web", type=str, default=WEB_DIR, help="UI source directory (template + css/ + js/)")
     args = parser.parse_args()
 
     backend = args.backend or get_default_backend()
     DevProxyHandler.backend_url = backend.rstrip("/")
-    DevProxyHandler.html_path = args.file
+    DevProxyHandler.web_dir = args.web
 
     server_address = ("127.0.0.1", args.port)
     try:
-        httpd = HTTPServer(server_address, DevProxyHandler)
+        httpd = ThreadingHTTPServer(server_address, DevProxyHandler)
     except OSError as e:
         print(f"Error binding to 127.0.0.1:{args.port}: {e}")
         print("Try another port with --port <PORT>")
@@ -183,9 +194,9 @@ def main():
     print("  🚀 KYB Local Development Server Running")
     print("=" * 60)
     print(f"  • Local UI:      http://localhost:{args.port}/")
-    print(f"  • Source file:   {args.file}")
+    print(f"  • Source dir:    {args.web}")
     print(f"  • API Backend:   {DevProxyHandler.backend_url}")
-    print(f"  • Live Reload:   Enabled (edits to index.html auto-reload)")
+    print(f"  • Live Reload:   Enabled (edits under src/web auto-reload)")
     print("=" * 60)
     print("Press Ctrl+C to stop.\n")
 

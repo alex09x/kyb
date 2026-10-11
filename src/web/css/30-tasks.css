@@ -1,0 +1,19 @@
+    /* ========================================================
+       TAB 3: AGENT TASKS KANBAN
+       ======================================================== */
+
+    .task-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: grab;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+    .task-card:active { cursor: grabbing; }
+    .task-card:hover { border-color: var(--border-light); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+

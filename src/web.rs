@@ -10,7 +10,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
-pub const UI_HTML: &str = include_str!("web/index.html");
+// Assembled by build.rs from src/web/{index.html,css/*,js/*}.
+pub const UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
 pub async fn serve_ui() -> impl IntoResponse {
     let content = if let Ok(path) = std::env::var("KYB_UI_PATH") {
@@ -112,11 +113,13 @@ mod tests {
         assert!(UI_HTML.contains(r#"id="sortSelect""#));
         assert!(UI_HTML.contains(r#"id="topoCanvas""#));
         assert!(UI_HTML.contains(r#"id="nodeHud""#));
-        assert!(UI_HTML.contains(r#"id="feedTableBody""#));
-        assert!(UI_HTML.contains(r#"id="colOpenZone""#));
-        assert!(UI_HTML.contains(r#"id="colProgZone""#));
-        assert!(UI_HTML.contains(r#"id="colBlockZone""#));
-        assert!(UI_HTML.contains(r#"id="colDoneZone""#));
+        // the attention queues and the change ledger
+        assert!(UI_HTML.contains(r#"id="incQueue""#));
+        assert!(UI_HTML.contains(r#"id="incidentRows""#));
+        assert!(UI_HTML.contains(r#"id="taskQueue""#));
+        assert!(UI_HTML.contains(r#"id="taskRows""#));
+        assert!(UI_HTML.contains(r#"id="ledBody""#));
+        assert!(UI_HTML.contains(r#"id="blockTaskModal""#));
 
         // Scripts and essential functions
         assert_eq!(UI_HTML.matches("<script>").count(), 1);
@@ -132,7 +135,7 @@ mod tests {
             "function renderKnowledgeList",
             "function selectEntry",
             "function inspectRevision",
-            "function loadDiff",
+            "function renderVersions",
             "function renderIncidents",
             "function filterIncidents",
             "function filterIncidentsSeverity",
@@ -149,6 +152,7 @@ mod tests {
             "function openEditModal",
             "function submitEditModal",
             "function openShortcutsModal",
+            "function jsArg",
         ];
 
         for f in required_fns {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fast UI deployment: copies src/web/index.html to the server's /data volume.
+# Fast UI deployment: assembles the UI from src/web/ and copies it to the server's /data volume.
 # Takes < 1 second! The server immediately serves the updated UI on the next request.
 set -euo pipefail
 
@@ -13,8 +13,11 @@ else
   exit 1
 fi
 
-echo "== Uploading src/web/index.html to $SERVER:~/kyb/data/index.html..."
+OUT="$(mktemp -t kyb-ui.XXXXXX)"
+trap 'rm -f "$OUT"' EXIT
+python3 "$REPO/scripts/build_ui.py" "$OUT"
+echo "== Uploading assembled UI to $SERVER:~/kyb/data/index.html..."
 scp -q -o ConnectTimeout=10 -o BatchMode=yes \
-  "$REPO/src/web/index.html" "$SERVER:~/kyb/data/index.html"
+  "$OUT" "$SERVER:~/kyb/data/index.html"
 
 echo "✓ Deployed UI in ~0.5s! Changes are now live at http://$SERVER:9310"

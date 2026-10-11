@@ -10,3 +10,4 @@ PLAN.md
 scripts/fleet.local.sh
 .prod/
 .idea/
+scripts/__pycache__/
