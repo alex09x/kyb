@@ -13,7 +13,8 @@ RUN mkdir -p /model \
 # --- build ---
 FROM rust:1-trixie AS builder
 WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
+# build.rs assembles the web UI from src/web at compile time; without it there is no OUT_DIR
 COPY src ./src
 RUN cargo build --release --locked
 
