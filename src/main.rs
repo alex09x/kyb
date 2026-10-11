@@ -2430,6 +2430,27 @@ mod api_tests {
         app.clone().oneshot(req).await.unwrap();
         let (_, h) = call(&app, "GET", "/knowledge/task-by-hdr2/history", None).await;
         assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-h", "workspace": "landing-rs", "via": "meta"}));
+        // a session is one agent's conversation: a source naming another agent never lends its session
+        call(&app, "POST", "/mcp", Some(rpc(10, "kyb_task", json!({"key": "task-by-x1", "title": "T", "body": "b", "_ctx": {"agent": "claude"}}),
+            Some(json!({"x-codex-turn-metadata": {"session_id": "cx-1"}}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x1/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "via": "hook"}));
+        let req = Request::builder().method("POST").uri("/mcp").header("content-type", "application/json")
+            .header("x-kyb-agent", "cursor").header("x-kyb-session", "cursor-1").header("x-kyb-workspace", "landing-rs")
+            .body(Body::from(rpc(11, "kyb_task", json!({"key": "task-by-x2", "title": "T", "body": "b"}), Some(json!({"claudecode/toolUseId": "toolu_9"}))).to_string())).unwrap();
+        app.clone().oneshot(req).await.unwrap();
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x2/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "workspace": "landing-rs", "via": "meta"}), "the workspace is a place and may come from the headers; cursor's session may not");
+        // a session with no agent attached is taken by whichever agent is then named
+        call(&app, "POST", "/mcp", Some(rpc(12, "kyb_task", json!({"key": "task-by-x3", "title": "T", "body": "b", "_ctx": {"session": "s-only"}}),
+            Some(json!({"claudecode/toolUseId": "toolu_10"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x3/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "session": "s-only", "via": "meta"}));
+        // but an agent that brings its own session keeps it over an unattached one
+        call(&app, "POST", "/mcp", Some(rpc(13, "kyb_task", json!({"key": "task-by-x4", "title": "T", "body": "b", "_ctx": {"session": "s-only"}}),
+            Some(json!({"antigravity.google/conversation_id": "conv-x"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x4/history", None).await;
+        assert_eq!(h["versions"][0]["by"]["session"], "conv-x");
     }
 
     #[tokio::test]

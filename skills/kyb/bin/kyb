@@ -103,20 +103,23 @@ urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.arg
 # settles it - the session then comes from that agent's variable or KYB_SESSION,
 # never from another agent's.
 by_context() { # sets BY_AGENT and BY_SESSION
+  local from_prod=""
   BY_AGENT="${KYB_AGENT:-}"
   if [ -z "$BY_AGENT" ]; then
     if [ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]; then BY_AGENT=codex
     elif [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}${ANTIGRAVITY_AGENT:-}" ]; then BY_AGENT=antigravity
     elif [ -n "${CLAUDECODE:-}${CLAUDE_CODE_SESSION_ID:-}" ]; then BY_AGENT=claude
-    elif [ -n "${PROD_PROVIDER:-}" ]; then BY_AGENT="$PROD_PROVIDER"
+    elif [ -n "${PROD_PROVIDER:-}" ]; then BY_AGENT="$PROD_PROVIDER"; from_prod=1
     else BY_AGENT=shell
     fi
   fi
+  # the session is the agent's own, or nothing: prod's session key belongs to the
+  # agent only when prod also named that agent, never to one named by hand
   case "$BY_AGENT" in
     codex)       BY_SESSION="${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}" ;;
     antigravity) BY_SESSION="${ANTIGRAVITY_CONVERSATION_ID:-}" ;;
     claude)      BY_SESSION="${CLAUDE_CODE_SESSION_ID:-}" ;;
-    *)           BY_SESSION="${PROD_PRIMARY_SESSION_KEY:-}" ;;
+    *)           BY_SESSION=""; [ -n "$from_prod" ] && BY_SESSION="${PROD_PRIMARY_SESSION_KEY:-}" ;;
   esac
   BY_SESSION="${KYB_SESSION:-$BY_SESSION}"
 }

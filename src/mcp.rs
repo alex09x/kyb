@@ -304,17 +304,25 @@ fn attribution(ctx: Option<Value>, meta: Option<&Value>, headers: Option<&crate:
         }
         h
     });
+    // The agent is the first source's that names one, and its session comes with
+    // it. A session from another source is taken only when that source names no
+    // agent or the same one: a session is a conversation of one agent, and a
+    // source that names a different agent is talking about a different
+    // conversation. The workspace is a place, not a conversation, and is filled
+    // from any source.
     let mut out = By::default();
-    for src in [from_ctx, from_meta, from_headers].into_iter().flatten() {
-        if out.agent.is_empty() && !src.agent.is_empty() {
-            out.agent = src.agent;
-            out.via = src.via;
-        }
-        if out.session.is_empty() {
-            out.session = src.session;
+    let sources: Vec<By> = [from_ctx, from_meta, from_headers].into_iter().flatten().collect();
+    if let Some(named) = sources.iter().find(|s| !s.agent.is_empty()) {
+        out.agent = named.agent.clone();
+        out.via = named.via.clone();
+        out.session = named.session.clone();
+    }
+    for src in &sources {
+        if out.session.is_empty() && !src.session.is_empty() && (src.agent.is_empty() || src.agent == out.agent) {
+            out.session = src.session.clone();
         }
         if out.workspace.is_empty() {
-            out.workspace = src.workspace;
+            out.workspace = src.workspace.clone();
         }
     }
     if out.is_empty() {
