@@ -686,6 +686,26 @@ mod tests {
         let foreign = HistoryIndex { head: Some("0".repeat(40)), by_key: HashMap::new() };
         let again = store.history_index(Some(&foreign)).unwrap();
         assert_eq!(again.versions("alpha").len(), 2);
+
+        // deleted in one commit and filed again in the next: two versions, not a move
+        store.upsert(entry("beta", "back"), "2026-07-21").unwrap();
+        let back = store.history_index(Some(&extended)).unwrap();
+        let beta: Vec<String> = back.versions("beta").into_iter().map(|v| v.change).collect();
+        assert_eq!(beta, ["added", "deleted", "added"]);
+
+        // a move between layouts (the key removed at one path and added at the other in
+        // one commit) is not a version, on the incremental path as on the full walk
+        let repo = store.repo().unwrap();
+        let mut idx = repo.index().unwrap();
+        let (from, to) = (Store::file_rel("alpha"), Store::legacy_rel("alpha"));
+        fs::rename(dir.path().join(&from), dir.path().join(&to)).unwrap();
+        idx.remove_path(Path::new(&from)).unwrap();
+        idx.add_path(Path::new(&to)).unwrap();
+        store.commit_index(&repo, &mut idx, "move alpha to the flat layout").unwrap();
+        let moved = store.history_index(Some(&back)).unwrap();
+        assert_ne!(moved.head, back.head, "the move is a commit");
+        assert_eq!(moved.versions("alpha").len(), 2, "but not a version of alpha");
+        assert_eq!(moved.versions("alpha").len(), store.history_index(None).unwrap().versions("alpha").len());
     }
 
     fn entry(key: &str, body: &str) -> Entry {

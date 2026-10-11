@@ -40,8 +40,10 @@ pub struct AppState {
     /// for it on every card. One index of every key's versions, built by one walk
     /// at start and extended by the commits since whenever HEAD has moved.
     history_index: std::sync::Mutex<Option<Arc<store::HistoryIndex>>>,
-    /// Bumped by every invalidation. A scan that began before a write must not
-    /// put its pre-write answer into the cache after the write dropped it.
+    /// Bumped by every write. The link index remembers the generation it was
+    /// built at and is rebuilt once that no longer matches; a build that began
+    /// before a write therefore never installs its pre-write answer. (The
+    /// history index does not use it: a commit moves HEAD, and that is its test.)
     history_gen: std::sync::atomic::AtomicU64,
     /// Relations between entries, derived from the repository. Kept until the
     /// next write (the generation it was built at no longer matches).
@@ -133,6 +135,8 @@ impl AppState {
     /// not both walk the same commits.
     fn history_index(&self) -> Result<Arc<store::HistoryIndex>> {
         let mut held = self.history_index.lock().unwrap();
+        // HEAD is read here as well as inside the store's build: this read is what
+        // keeps a hit off the build's path, where "same head" costs a clone of the map
         let head = self.store.head_info()?.map(|(sha, _)| sha);
         if let Some(ix) = held.as_ref() {
             if ix.head == head {
@@ -157,9 +161,7 @@ impl AppState {
         }
     }
     /// A write to `key` is landing: the link index built before it is stale.
-    /// (The history index needs no telling - the commit moves HEAD, and the
-    /// index compares itself against HEAD on every use.)
-    fn forget_history(&self, _key: &str) {
+    fn note_write(&self, _key: &str) {
         self.history_gen.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
@@ -258,10 +260,14 @@ fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppSta
         note_seq: std::sync::atomic::AtomicU64::new(0),
         auth,
     });
-    // the one full walk over history happens here, not under the first click
+    // The one full walk over history happens here, not under the first click.
+    // Search and writes do not need it, so a walk that fails is reported, not fatal:
+    // versions and diffs try again on request and answer with that error.
     let walk = std::time::Instant::now();
-    let keys = st.history_index()?.keys().count();
-    eprintln!("kyb: history index — {keys} keys in {:.1}s", walk.elapsed().as_secs_f64());
+    match st.history_index() {
+        Ok(ix) => eprintln!("kyb: history index — {} keys in {:.1}s", ix.keys().count(), walk.elapsed().as_secs_f64()),
+        Err(e) => eprintln!("kyb: history index not built ({e:#}); versions and diffs will try again on request"),
+    }
     Ok(st)
 }
 
@@ -419,14 +425,14 @@ async fn locked_write(st: &Arc<AppState>, build: impl FnOnce(&AppState) -> Built
     };
     let closed = entry.is_closed();
     let key = entry.key.clone();
-    st.forget_history(&key);
+    st.note_write(&key);
     let (mut reply, committed) = commit_locked(st, &mut w, entry, extra);
     if closed {
         archive_locked(st, &mut w, &key, &mut reply);
     }
     // again after git moved: a scan that began between the first forget and the
     // commit read the old HEAD, and this bump keeps it from being cached
-    st.forget_history(&key);
+    st.note_write(&key);
     let pending = match (st.semantic.as_ref(), committed) {
         (Some(sem), Some(entry)) => {
             let ticket = sem.begin_upsert(&entry.key).await;
@@ -1683,9 +1689,9 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
     // both branches change the key's git history: a deletion or an archive commit.
     // Forgotten before (no stale answer is served meanwhile) and after (no scan
     // that began meanwhile can cache the pre-commit history).
-    st.forget_history(&key);
+    st.note_write(&key);
     let reply = remove_committed(&st, &mut w, &key, &entry).await;
-    st.forget_history(&key);
+    st.note_write(&key);
     reply
 }
 
@@ -2138,7 +2144,7 @@ mod api_tests {
         st.note_archived("inc-pushed-later");
         call(&app, "GET", "/places", None).await;                                  // a cache hit: no build, the note waits
         assert_eq!(st.archived_since.lock().unwrap().len(), 1);
-        st.forget_history("anything");                                              // the next write; the next build settles it
+        st.note_write("anything");                                              // the next write; the next build settles it
         call(&app, "GET", "/places", None).await;
         assert!(st.archived_since.lock().unwrap().is_empty(), "a note for a key nowhere in the tree is settled by the next build");
         // two builds overlapping: the older one settles only the notes it read, never a newer note for the same key
