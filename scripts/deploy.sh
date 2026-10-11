@@ -40,55 +40,72 @@ if [ "${1:-}" != "--skills" ]; then
   gh run watch "$run_id" --exit-status --interval 20 >/dev/null
   echo "CI green (run $run_id)"
 
-  # The image the run built is tagged with the full commit SHA; `latest` is whatever
-  # finished last. The server pulls the SHA tag and the Compose it installs names
-  # that image's manifest digest: what was tested is what runs, and a later build
-  # cannot replace it. (Resolved on the server: it is the one with registry access.)
+  # The run's docker-smoke job tested one manifest digest and recorded it as an
+  # artifact. That digest - not `latest`, not the SHA tag, both of which a rebuild
+  # can replace - is what the server pulls and what the installed Compose names.
+  step "image: the digest this run smoke-tested"
   image="ghcr.io/alex09x/kyb"
+  dl=$(mktemp -d -t kyb-digest.XXXXXX)
+  gh run download "$run_id" -n image-digest -D "$dl" >/dev/null
+  digest=$(tr -d '[:space:]' < "$dl/image-digest.txt")
+  rm -rf "$dl"
+  case "$digest" in sha256:*) ;; *) echo "deploy: run $run_id recorded no usable digest: '$digest'" >&2; exit 1;; esac
+  echo "$image@$digest"
 
-  step "server: resolve the digest, record what runs now, install the pinned compose, restart"
+  step "server: record what runs now, install the pinned compose, restart"
   short_sha=${sha:0:7}
   scp -q -o ConnectTimeout=10 -o BatchMode=yes "$REPO/docker-compose.yml" "$SERVER:~/kyb/docker-compose.yml.new"
-  digest=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" bash -s -- "$short_sha" "$image" "$sha" <<'REMOTE'
+  post_up=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" bash -s -- "$short_sha" "$image" "$digest" <<'REMOTE'
 set -euo pipefail
-short_sha=$1; image=$2; sha=$3
+short_sha=$1; image=$2; digest=$3
 cd "$HOME/kyb"
 trap 'rm -f docker-compose.yml.new' EXIT
-docker pull -q "$image:$sha" >&2
-digest=$(docker image inspect --format '{{join .RepoDigests "\n"}}' "$image:$sha" | grep "^$image@" | head -1 | sed "s|^$image@||")
-[ -n "$digest" ] || { echo "no pullable digest for $image:$sha" >&2; exit 1; }
+docker pull -q "$image@$digest" >&2
 sed -i "s|^\( *image: \).*|\1$image@$digest|" docker-compose.yml.new
 grep -q "image: $image@$digest" docker-compose.yml.new || { echo "could not pin the image in the compose" >&2; exit 1; }
 docker compose -f docker-compose.yml.new config -q
 # the bind comes from the host-local .env (owner's decision), never from the repo: show what will be published
 docker compose -f docker-compose.yml.new config | grep -E "host_ip|published" | sed 's/^/  bind: /' >&2
-# What is running, by pullable digest: the rollback compose names exactly that, not `latest`.
+# What runs now, by pullable digest. The rollback Compose must name exactly that;
+# a running service whose image cannot be named this way is not replaced at all.
 old_id=$(docker inspect --format '{{.Image}}' kyb 2>/dev/null || true)
 old_digest=$(docker image inspect --format '{{join .RepoDigests "\n"}}' "$old_id" 2>/dev/null | grep "^$image@" | head -1 || true)
 echo "running before: id=${old_id:-none} pullable=${old_digest:-none}" >&2
-if [ -f docker-compose.yml ]; then
-  if [ -n "$old_digest" ]; then
-    sed "s|^\( *image: \).*|\1$old_digest|" docker-compose.yml > "docker-compose.yml.rollback-pre-$short_sha"
+if [ -n "$old_id" ] && [ -z "$old_digest" ]; then
+  echo "the running image has no pullable digest for $image; a rollback could not name it - stopping before anything is replaced" >&2
+  exit 1
+fi
+rollback="docker-compose.yml.rollback-pre-$short_sha"
+if [ -f docker-compose.yml ] && [ -n "$old_digest" ]; then
+  # the first attempt's backup is the one that names the last known-good image; a retry must not overwrite it
+  if [ -f "$rollback" ]; then
+    echo "rollback: $rollback already exists from an earlier attempt and is kept; this attempt's state goes to $rollback.$(date +%s)" >&2
+    sed "s|^\( *image: \).*|\1$old_digest|" docker-compose.yml > "$rollback.$(date +%s)"
   else
-    cp -p docker-compose.yml "docker-compose.yml.rollback-pre-$short_sha"
+    sed "s|^\( *image: \).*|\1$old_digest|" docker-compose.yml > "$rollback"
   fi
-  echo "rollback: cp docker-compose.yml.rollback-pre-$short_sha docker-compose.yml && docker compose up -d" >&2
+  echo "rollback: cp $rollback docker-compose.yml && docker compose up -d" >&2
+elif [ -z "$old_id" ]; then
+  echo "first install on this host: nothing to roll back to" >&2
 fi
 mv docker-compose.yml.new docker-compose.yml
 trap - EXIT
 docker compose up -d >&2
-echo "$digest"
+# the new container's identity and restart baseline, for the readiness watch
+sleep 2
+echo "$(docker inspect --format '{{.Id}} {{.RestartCount}}' kyb)"
 REMOTE
 )
-  [ -n "$digest" ] || { echo "deploy: the server did not report a digest" >&2; exit 1; }
-  echo "pinned: $image@$digest"
+  new_id=${post_up%% *}; base_restarts=${post_up##* }
+  [ -n "$new_id" ] || { echo "deploy: the server did not report the new container" >&2; exit 1; }
+  echo "container ${new_id:0:12} started (restarts=$base_restarts)"
 
   # A cold start reindexes every entry and may rebuild embeddings before the port
   # opens: minutes, not seconds. Wait with a deadline, and stop early if the
   # container dies - a crash loop must not read as "still starting".
   step "readiness: healthz, version, and the image that is actually running"
   KYB_URL="http://${SERVER#*@}:9310"
-  deadline=$((SECONDS + 600)); last_note=0
+  deadline=$((SECONDS + 600)); last_note=-30
   until curl -sf -m 3 "$KYB_URL/healthz" >/dev/null; do
     if [ $SECONDS -ge $deadline ]; then
       echo "deploy: not ready after 600s; container state and last log lines:" >&2
@@ -97,21 +114,32 @@ REMOTE
     fi
     if [ $((SECONDS - last_note)) -ge 30 ]; then
       last_note=$SECONDS
-      state=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" 'docker inspect --format "{{.State.Status}} restarts={{.RestartCount}}" kyb 2>/dev/null' || echo unknown)
-      echo "  ${SECONDS}s: container $state"
-      case "$state" in exited*|dead*) echo "deploy: the container died" >&2; ssh -o BatchMode=yes "$SERVER" 'cd ~/kyb && docker compose logs --tail 30 kyb' >&2 || true; exit 1;; esac
+      # a crash loop under restart:unless-stopped shows as "restarting" or as a growing restart count, not as "exited"
+      st=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" "docker inspect --format '{{.Id}} {{.State.Status}} {{.RestartCount}}' kyb 2>/dev/null" || echo "? unknown ?")
+      set -- $st; cur_id=$1; state=$2; restarts=$3
+      echo "  ${SECONDS}s: container $state restarts=$restarts"
+      if [ "$cur_id" != "$new_id" ] || [ "$state" = restarting ] || [ "$state" = exited ] || [ "$state" = dead ] || { [ "$restarts" != "?" ] && [ "$restarts" -gt "$base_restarts" ]; }; then
+        echo "deploy: the container is not coming up (state=$state, restarts $base_restarts -> $restarts); last log lines:" >&2
+        ssh -o BatchMode=yes "$SERVER" 'cd ~/kyb && docker compose logs --tail 30 kyb' >&2 || true
+        exit 1
+      fi
     fi
     sleep 3
   done
   health=$(curl -sf -m 5 "$KYB_URL/healthz")
-  echo "$health" | head -c 300; echo
-  echo "$health" | grep -q '"ok":true' || { echo "deploy: healthz is not ok" >&2; exit 1; }
   want_version=$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO/Cargo.toml" | head -1)
-  echo "$health" | grep -q "\"version\":\"$want_version\"" || { echo "deploy: healthz version is not $want_version" >&2; exit 1; }
+  printf '%s' "$health" | python3 -c '
+import json, sys
+h = json.load(sys.stdin); want = sys.argv[1]
+print(json.dumps({k: h.get(k) for k in ("ok", "version", "entries", "open_incidents", "open_tasks")}))
+if h.get("ok") is not True: sys.exit("deploy: healthz ok is not true")
+if h.get("version") != want: sys.exit("deploy: healthz version is %r, Cargo.toml says %r" % (h.get("version"), want))
+' "$want_version"
   running=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" "docker image inspect --format '{{join .RepoDigests \"\\n\"}}' \$(docker inspect --format '{{.Image}}' kyb)" | grep "^$image@" | head -1 || true)
   [ "$running" = "$image@$digest" ] || { echo "deploy: running image is '$running', expected $image@$digest" >&2; exit 1; }
   echo "running: $running"
-  ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" 'cd ~/kyb && docker compose logs --tail 200 kyb 2>/dev/null | grep -E "kyb: (ready|reindex|semantic|lexical|listening|auth)" | tail -6' || true
+  # what the start cost, and whether the vector cache was reused rather than recomputed
+  ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" 'cd ~/kyb && docker compose logs --tail 300 kyb 2>/dev/null | grep -E "kyb: (ready|reindex|semantic|lexical|listening|auth|vector cache|embeddings:|embedded)" | tail -8' || true
 fi
 
 # the CLI's server address comes from the fleet config, never from the repo
@@ -138,7 +166,7 @@ ok=0; fail=0; skipped=0
 for h in "${FLEET[@]}"; do
   if ! ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" true 2>/dev/null; then
     echo "  $h  SKIP (unreachable)"; skipped=$((skipped+1))
-  elif ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" 'bash -lc "kyb health 2>/dev/null"' | grep -q '"ok":true'; then
+  elif ssh -o ConnectTimeout=8 -o BatchMode=yes "$h" 'bash -lc "kyb health 2>/dev/null"' | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("ok") is True else 1)' 2>/dev/null; then
     echo "  $h  ok"; ok=$((ok+1))
   else
     echo "  $h  FAIL"; fail=$((fail+1))
