@@ -266,18 +266,13 @@ jobs:
       # boot, and answer healthz.
       # The digest the docker job published is what is smoke-tested and what deploy.sh
       # installs: tags (`latest`, the SHA) can be rebuilt, a digest cannot change.
-      - name: record the published digest
+      - name: the digest the docker job published
         run: |
           set -euo pipefail
           digest='${{ needs.docker.outputs.digest }}'
           case "$digest" in sha256:*) ;; *) echo "::error::no digest from the docker job: '$digest'"; exit 1;; esac
           echo "$digest" > image-digest.txt
           echo "image: ghcr.io/${{ github.repository }}@$digest" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: image-digest
-          path: image-digest.txt
-          retention-days: 90
       - name: smoke test image
         run: |
           set -euo pipefail
@@ -288,3 +283,11 @@ jobs:
             sleep 0.5
           done
           exit 1
+      # Published only after the smoke passed, so the artifact always names a tested image;
+      # overwrite, so a rerun of this job can publish again instead of failing on the name.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-digest
+          path: image-digest.txt
+          retention-days: 90
+          overwrite: true

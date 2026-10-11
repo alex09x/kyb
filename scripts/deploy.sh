@@ -135,9 +135,12 @@ print(json.dumps({k: h.get(k) for k in ("ok", "version", "entries", "open_incide
 if h.get("ok") is not True: sys.exit("deploy: healthz ok is not true")
 if h.get("version") != want: sys.exit("deploy: healthz version is %r, Cargo.toml says %r" % (h.get("version"), want))
 ' "$want_version"
-  running=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" "docker image inspect --format '{{join .RepoDigests \"\\n\"}}' \$(docker inspect --format '{{.Image}}' kyb)" | grep "^$image@" | head -1 || true)
-  [ "$running" = "$image@$digest" ] || { echo "deploy: running image is '$running', expected $image@$digest" >&2; exit 1; }
-  echo "running: $running"
+  # the running container's image must be the pinned digest's image: compare image ids, not
+  # the first of possibly several RepoDigests one image can carry
+  ids=$(ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" "docker inspect --format '{{.Image}}' kyb; docker image inspect --format '{{.Id}}' '$image@$digest'")
+  set -- $ids; running_id=$1; wanted_id=$2
+  [ -n "$running_id" ] && [ "$running_id" = "$wanted_id" ] || { echo "deploy: running image id $running_id is not the pinned digest's id $wanted_id" >&2; exit 1; }
+  echo "running: $image@$digest (image ${running_id:7:12})"
   # what the start cost, and whether the vector cache was reused rather than recomputed
   ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" 'cd ~/kyb && docker compose logs --tail 300 kyb 2>/dev/null | grep -E "kyb: (ready|reindex|semantic|lexical|listening|auth|vector cache|embeddings:|embedded)" | tail -8' || true
 fi
