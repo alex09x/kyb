@@ -97,7 +97,7 @@ mod tests {
         assert!(UI_HTML.contains(r#"id="tab-search""#));
         assert!(UI_HTML.contains(r#"id="tab-incidents""#));
         assert!(UI_HTML.contains(r#"id="tab-tasks""#));
-        assert!(UI_HTML.contains(r#"id="tab-graph""#));
+        assert!(UI_HTML.contains(r#"id="tab-services""#));
         assert!(UI_HTML.contains(r#"id="tab-feed""#));
 
         // Modals present
@@ -111,8 +111,8 @@ mod tests {
         // Interactive controls and inputs present
         assert!(UI_HTML.contains(r#"id="globalSearch""#));
         assert!(UI_HTML.contains(r#"id="sortSelect""#));
-        assert!(UI_HTML.contains(r#"id="topoCanvas""#));
-        assert!(UI_HTML.contains(r#"id="nodeHud""#));
+        assert!(UI_HTML.contains(r#"id="placesList""#));
+        assert!(UI_HTML.contains(r#"id="placeDetail""#));
         // the attention queues and the change ledger
         assert!(UI_HTML.contains(r#"id="incQueue""#));
         assert!(UI_HTML.contains(r#"id="incidentRows""#));
@@ -144,8 +144,11 @@ mod tests {
             "function submitResolveIncident",
             "function submitResolveTask",
             "function renderFeed",
-            "function buildTopology",
-            "function initCanvasGraph",
+            "function renderPlaces",
+            "function renderPlaceDetail",
+            "function relatedHtml",
+            "function loadWhoami",
+            "function submitToken",
             "function switchTab",
             "function openNewModal",
             "function submitNewModal",

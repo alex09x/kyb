@@ -80,8 +80,10 @@ impl Store {
     }
 
     fn sig() -> Result<Signature<'static>> {
-        // fixed signature — no dependency on global git config
-        Ok(Signature::now("kyb", "kyb@local")?)
+        // The caller of the request being served, when it presented a token;
+        // otherwise the service's own signature. Never the global git config.
+        let (name, email) = crate::auth::signature();
+        Ok(Signature::now(&name, &email)?)
     }
 
     /// Layout-v2 path of a key, plus the legacy flat path — old commits (and
@@ -224,12 +226,8 @@ impl Store {
         };
         let sha = commit.id().to_string();
         let time = commit.time().seconds();
-        let author_name = commit.author().name().map(|n| n.to_string()).unwrap_or_default();
-        let author = if author_name.is_empty() || author_name == "kyb" {
-            "Alexander Panasenko <alex@prod.codes>".to_string()
-        } else {
-            author_name
-        };
+        let who = commit.author();
+        let author = crate::auth::shown_author(who.name().unwrap_or_default(), who.email().unwrap_or_default());
         let msg = commit.summary().unwrap_or("").to_string();
         Ok(Some((sha, time, author, msg)))
     }
@@ -485,12 +483,8 @@ impl Store {
             if changes.contains(&"added") && changes.contains(&"deleted") {
                 continue;
             }
-            let author_name = commit.author().name().map(|n| n.to_string()).unwrap_or_default();
-            let author = if author_name.is_empty() || author_name == "kyb" {
-                "Alexander Panasenko <alex@prod.codes>".to_string()
-            } else {
-                author_name
-            };
+            let who = commit.author();
+            let author = crate::auth::shown_author(who.name().unwrap_or_default(), who.email().unwrap_or_default());
             for change in changes {
                 out.push(VersionInfo {
                     sha: oid.to_string(),
@@ -550,12 +544,8 @@ impl Store {
                 action = "retracted".to_string();
             }
 
-            let author_name = commit.author().name().map(|n| n.to_string()).unwrap_or_default();
-            let author = if author_name.is_empty() || author_name == "kyb" {
-                "Alexander Panasenko <alex@prod.codes>".to_string()
-            } else {
-                author_name
-            };
+            let who = commit.author();
+            let author = crate::auth::shown_author(who.name().unwrap_or_default(), who.email().unwrap_or_default());
 
             let time_sec = commit.time().seconds();
             let ts = iso(time_sec);

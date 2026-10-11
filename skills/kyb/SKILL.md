@@ -416,3 +416,20 @@ upgrading the server is how agents get new tools. `?readonly=1` drops the writin
   skill deliberately contains no host-specific remote commands or credential plumbing.
 - The skill is installed from one source — `skills/install.sh` in the kyb repo. Edit there and
   reinstall; never patch the agents' copies by hand.
+
+## Access tokens
+
+A server may ask for a token (`kyb whoami` shows `"auth": "required"` or `"compat"`). The CLI
+sends the one in `KYB_TOKEN`, else the one `kyb login` stored in `~/.config/kyb/token`:
+
+```bash
+echo "$TOKEN" | kyb login     # checked against the server before it is kept
+kyb whoami                    # your id, name and role: read | write | admin
+```
+
+Your role decides what you may do: `read` searches and reads, `write` also adds, edits, files
+and closes, `admin` also retracts knowledge and reindexes. Every write is committed under the
+token's name, so `kyb history <key>` says who changed what. A `401` means the server does not
+know the token (ask the owner for one, never invent or borrow one); a `403` names the role the
+action needs. Never put a token into an entry, a command line, a log or a message. A server
+behind TLS is addressed whole with `KYB_URL=https://...`.

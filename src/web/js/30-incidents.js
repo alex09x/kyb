@@ -119,7 +119,7 @@
               <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry(${jsArg(inc.key)})">d Diff</button>
               <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry(${jsArg(inc.key)})">h History${hist ? ` (${hist.length})` : ''}</button>
               <button class="btn sm" onclick="event.stopPropagation(); openEditModal(${jsArg(inc.key)})">e Edit</button>
-              <a href="#/graph/${encodeURIComponent(inc.key)}" class="btn sm" onclick="navigateToGraphNode(event, ${jsArg(inc.key)})">Topology</a>
+              <a href="${placeHash({kind: 'service', name: (inc.service || 'infrastructure').toLowerCase()})}" class="btn sm" onclick="openPlace(event, 'service', ${jsArg((inc.service || 'infrastructure').toLowerCase())})">Service</a>
             </div></div>`;
         }
         // What makes the row actionable sits in the row; under the cursor the peek already says it.
@@ -177,6 +177,7 @@
     }
 
     function openResolveIncidentModal(key, title) {
+      if (refuseReadOnly()) return;
       App.activeResolveKey = key;
       document.getElementById('resolveIncidentTargetText').textContent = `Incident: ${title} (${key})`;
       document.getElementById('resolveIncidentOutcome').value = '';

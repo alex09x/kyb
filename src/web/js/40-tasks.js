@@ -140,11 +140,9 @@
       }
     }
 
-    async function transitionTask(key, status, reason = null, author = 'Alexander Panasenko <alex@prod.codes>') {
-      const payload = {
-        status,
-        author
-      };
+    async function transitionTask(key, status, reason = null) {
+      if (refuseReadOnly()) return;
+      const payload = { status };
       if (status === 'blocked' && reason) {
         payload.blocked_reason = reason;
       }
@@ -162,6 +160,7 @@
     }
 
     function promptBlockTask(key, title = '') {
+      if (refuseReadOnly()) return;
       App.activeBlockKey = key;
       const t = App.tasks.find(x => x.key === key);
       const displayTitle = title || t?.title || key;
@@ -175,16 +174,16 @@
     async function submitBlockTask() {
       const reasonEl = document.getElementById('blockTaskReason');
       const reason = reasonEl ? reasonEl.value.trim() : '';
-      const author = FORM_AUTHOR;
       if (!markRequired(['blockTaskReason']) || !reason) {
         showToast('Say what is blocking it', 'error');
         return;
       }
       closeModal('blockTaskModal');
-      await transitionTask(App.activeBlockKey, 'blocked', reason, author);
+      await transitionTask(App.activeBlockKey, 'blocked', reason);
     }
 
     function openResolveTaskModal(key, title) {
+      if (refuseReadOnly()) return;
       App.activeResolveKey = key;
       document.getElementById('resolveTaskTargetText').textContent = `Task: ${title} (${key})`;
       document.getElementById('resolveTaskOutcome').value = '';

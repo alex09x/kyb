@@ -95,7 +95,11 @@
       border-radius: 6px;
       border: 1px solid var(--border);
     }
-    .system-status { white-space: nowrap; flex-shrink: 0; }
+    .system-status { white-space: nowrap; flex-shrink: 0; cursor: pointer; font-family: inherit; }
+    button.system-status:hover { border-color: var(--border-light); color: var(--text); }
+    #whoLabel:not(:empty) { margin-left: 2px; }
+    /* A reader's console shows no control the server would refuse. The server refuses regardless. */
+    body[data-role="read"] :is([onclick^="openNewModal"], [onclick^="openEditModal"], [onclick^="openResolve"], [onclick^="transitionTask"], [onclick^="promptBlockTask"], [onchange^="moveTaskTo"], #btnOpenNew, #btnEditEntry) { display: none !important; }
     .system-status .sync { color: var(--text-muted); }
     @media (max-width: 1560px) { .system-status .sync { display: none; } }
     @media (max-width: 1100px) { .brand-title, .tab-badge, .system-status span:not(.status-dot) { display: none; } .search-box { min-width: 110px; } header { padding: 0 12px; gap: 10px; } .nav-tabs { gap: 2px; } }   /* compact: logo, icons, search, the dot */

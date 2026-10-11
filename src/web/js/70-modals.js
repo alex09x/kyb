@@ -1,16 +1,3 @@
-    // Expose helpers globally
-    window.focusNode = focusNode;
-    window.focusNodeById = focusNodeById;
-    window.filterFleetByHub = filterFleetByHub;
-    window.fitGraphCamera = fitGraphCamera;
-    window.zoomGraph = zoomGraph;
-    window.resetGraphCamera = resetGraphCamera;
-    window.reheatSimulation = reheatSimulation;
-    window.setGraphLayout = setGraphLayout;
-    window.unpinAllGraphNodes = unpinAllGraphNodes;
-    window.openGraphDrawer = openGraphDrawer;
-    window.closeGraphDrawer = closeGraphDrawer;
-
     // Modal Helpers
     function openModal(id) {
       // One dialog at a time: a modal opened from inside another replaces it.
@@ -29,13 +16,14 @@
     }
 
     function openNewModal(defaultType = 'knowledge') {
+      if (refuseReadOnly()) return;
       switchNewModalType(defaultType);
       openModal('newModal');
     }
 
     // Forms ask only what cannot be derived. The key is derived from the title and shown as
-    // one editable mono line; the author is the console's owner and is not asked for.
-    const FORM_AUTHOR = 'Alexander Panasenko <alex@prod.codes>';
+    // one editable mono line. The author is not asked for and not sent: the server takes it
+    // from the token the console presents.
     const SEVERITIES = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']];
     const PRIORITIES = [['', 'Unranked'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']];
 
@@ -94,7 +82,7 @@
           ${keyField('newKey', '', 'task-migrate-sccache')}
           <div class="form-row">
             ${field('Priority', segmented('newPriority', PRIORITIES, ''))}
-            ${field('Who', `<input type="text" class="form-input" id="newAssignee" value="Alexander Panasenko">`)}
+            ${field('Who', `<input type="text" class="form-input" id="newAssignee" value="${escapeHtml(meName())}" placeholder="unclaimed">`)}
           </div>
           ${field('Done when', `<textarea class="form-textarea" id="newBody" placeholder="What to do and how to tell it is done."></textarea>`)}
         `;
@@ -109,8 +97,9 @@
         const missing = !el.value.trim();
         el.classList.toggle('invalid', missing);
         const group = el.closest('.form-group'); if (!group) return;
-        let err = group.querySelector('.form-err');
-        if (missing && !err) { err = document.createElement('div'); err.className = 'form-err'; err.textContent = 'This is needed.'; group.appendChild(err); }
+        // its own marker only: a form may keep another error line of its own in the same group
+        let err = group.querySelector('.form-err.req');
+        if (missing && !err) { err = document.createElement('div'); err.className = 'form-err req'; err.textContent = 'This is needed.'; group.appendChild(err); }
         if (!missing && err) err.remove();
         if (missing && !first) first = el;
       });
@@ -156,8 +145,7 @@
           key,
           title,
           tags,
-          body,
-          author: FORM_AUTHOR
+          body
         });
       } else if (App.newModalKind === 'incident') {
         const service = document.getElementById('newService')?.value.trim() || 'infrastructure';
@@ -172,19 +160,17 @@
           severity,
           hosts,
           body,
-          ...(detection ? { detection } : {}),
-          author: FORM_AUTHOR
+          ...(detection ? { detection } : {})
         });
       } else if (App.newModalKind === 'task') {
         const priority = document.getElementById('newPriority')?.value || '';
-        const assignee = document.getElementById('newAssignee')?.value.trim() || 'Alexander Panasenko';
+        const assignee = document.getElementById('newAssignee')?.value.trim() || '';
         res = await apiPost('/tasks', {
           key,
           title,
           priority,
           assignee,
-          body,
-          author: FORM_AUTHOR
+          body
         });
       }
 
@@ -209,6 +195,7 @@
     let editingEntry = null;
 
     async function openEditModal(key) {
+      if (refuseReadOnly()) return;
       if (!key) {
         key = App.selectedKey;
       }
@@ -246,7 +233,7 @@
           ${field('What needs doing', `<input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">`)}
           <div class="form-row">
             ${field('Priority', segmented('editPriority', PRIORITIES, entry.priority || ''))}
-            ${field('Who', `<input type="text" class="form-input" id="editAssignee" value="${escapeHtml(entry.assignee || 'Alexander Panasenko')}">`)}
+            ${field('Who', `<input type="text" class="form-input" id="editAssignee" value="${escapeHtml(entry.assignee || '')}" placeholder="unclaimed">`)}
           </div>
           ${field('Done when', `<textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>`)}
         `;
@@ -271,8 +258,6 @@
       const key = document.getElementById('editKey')?.value;
       const title = document.getElementById('editTitle')?.value.trim();
       const body = document.getElementById('editBody')?.value.trim();
-      const author = FORM_AUTHOR;
-
       if (!markRequired(['editTitle', 'editBody'])) {
         showToast('Fill in the marked fields', 'error');
         return;
@@ -293,20 +278,18 @@
           severity,
           hosts,
           body,
-          ...(detection ? { detection } : {}),
-          author
+          ...(detection ? { detection } : {})
         });
       } else if (editingEntryKind === 'task') {
         const priority = document.getElementById('editPriority')?.value || '';
-        const assignee = document.getElementById('editAssignee')?.value.trim() || 'Alexander Panasenko';
+        const assignee = document.getElementById('editAssignee')?.value.trim() || '';
         res = await apiPost('/tasks', {
           ...editKeep(['status', 'blocked_reason', 'parent_task', 'knowledge', 'resolution', 'tags', 'refs']),
           key,
           title,
           priority,
           assignee,
-          body,
-          author
+          body
         });
       } else {
         const rawTags = document.getElementById('editTags')?.value || '';
@@ -316,8 +299,7 @@
           key,
           title,
           tags,
-          body,
-          author
+          body
         });
       }
 

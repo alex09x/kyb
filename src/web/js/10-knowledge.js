@@ -168,10 +168,11 @@
     function renderEntityHeroBanner(e, historyList = []) {
       const createdVer = (historyList && historyList.length) ? historyList[historyList.length - 1] : null;
       const lastVer = (historyList && historyList.length) ? historyList[0] : null;
-      const creator = (createdVer && createdVer.author) || e.author || e.assignee || 'Alexander Panasenko <alex@prod.codes>';
+      const creator = (createdVer && createdVer.author) || e.author || '';   // a commit made without a token names nobody
       const createdAt = (createdVer && createdVer.committed_at) || e.created_at || e.detected_at || e.committed_at || e.updated_at;
-      const who = s => escapeHtml(String(s || '').replace(/\s*<[^>]*>/, '').trim() || s || '');
+      const who = s => escapeHtml(String(s).replace(/\s*<[^>]*>/, '').trim() || s);
       const when = createdAt ? timeAgo(createdAt) : 'recent';
+      const by = creator ? ` by ${who(creator)}` : '';
       const linked = (e.knowledge && e.knowledge.length)
         ? `<div class="dh-links"><span>Related:</span>${e.knowledge.map(k => `<a href="#/knowledge/${encodeURIComponent(k)}" class="badge-tag" onclick="handleCardClick(event, ${jsArg(k)}, 'knowledge')">${escapeHtml(k)}</a>`).join('')}</div>` : '';
       const resolution = e.resolution
@@ -200,7 +201,7 @@
             <div class="dh-pills">
               <span class="pill ${isBlocked ? 'amber' : isProgress ? 'acc' : isDone ? 'ok' : ''}">${st === 'in_progress' ? 'in progress' : escapeHtml(st)}</span>
               ${pr ? `<span class="pill ${pr === 'critical' ? 'crit' : pr === 'high' ? 'amber' : ''}">${escapeHtml(pr)}</span>` : ''}
-              <span class="dh-words">${escapeHtml(e.assignee || 'Unassigned')} · created ${when} by ${who(creator)}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}</span>
+              <span class="dh-words">${escapeHtml(e.assignee || 'Unassigned')} · created ${when}${by}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}</span>
             </div>
             <div class="dh-acts">${acts}</div>
           </div>
@@ -215,7 +216,7 @@
             <div class="dh-pills">
               <span class="pill ${sev === 'critical' ? 'crit' : sev === 'high' ? 'amber' : ''}">${escapeHtml(sev)}</span>
               <span class="pill ${st === 'resolved' ? 'ok' : st === 'mitigated' ? 'amber' : ''}">${escapeHtml(st)}</span>
-              <span class="dh-words"><span class="mono">${escapeHtml(e.service || 'infrastructure')}</span>${(e.hosts && e.hosts.length) ? ` on <span class="mono">${e.hosts.map(escapeHtml).join(', ')}</span>` : ''} · opened ${when} by ${who(creator)}</span>
+              <span class="dh-words"><span class="mono">${escapeHtml(e.service || 'infrastructure')}</span>${(e.hosts && e.hosts.length) ? ` on <span class="mono">${e.hosts.map(escapeHtml).join(', ')}</span>` : ''} · opened ${when}${by}</span>
             </div>
             <div class="dh-acts">${st !== 'resolved' ? `<button class="btn sm success" onclick="openResolveIncidentModal(${jsArg(e.key)}, ${jsArg(e.title)})">Resolve Incident</button>` : ''}</div>
           </div>
@@ -226,10 +227,10 @@
       }
 
       // knowledge
-      const changed = lastVer && lastVer.author !== creator ? ` · last changed by ${who(lastVer.author)}` : '';
+      const changed = lastVer && lastVer.author && lastVer.author !== creator ? ` · last changed by ${who(lastVer.author)}` : '';
       return `
         <div class="dh-state">
-          <div class="dh-pills"><span class="dh-words">Written ${when} by ${who(creator)}${changed}${(e.refs && e.refs.length) ? ` · refs: ${e.refs.map(r => `<span class="mono">${escapeHtml(r)}</span>`).join(', ')}` : ''}</span></div>
+          <div class="dh-pills"><span class="dh-words">Written ${when}${by}${changed}${(e.refs && e.refs.length) ? ` · refs: ${e.refs.map(r => `<span class="mono">${escapeHtml(r)}</span>`).join(', ')}` : ''}</span></div>
         </div>`;
     }
 
@@ -263,7 +264,6 @@
                   <button onclick="copyToClipboard(${jsArg('kyb get ' + e.key)}, 'CLI command copied!')">Copy CLI command</button>
                   <button onclick="copyEntryBody(${jsArg(e.key)})">Copy as Markdown</button>
                   <button onclick="copyToClipboard(${jsArg(e.key)}, 'Key copied!')">Copy key</button>
-                  <a href="#/graph/${encodeURIComponent(e.key)}" onclick="navigateToGraphNode(event, ${jsArg(e.key)})">Show in Topology</a>
                 </div>
               </div>
             </div>
@@ -273,6 +273,7 @@
         <div class="detail-body" id="detailBodyContent">
           ${renderEntityHeroBanner(e, historyList)}
           <div class="prose">${renderMarkdown(e.body)}</div>
+          <div id="relatedBox" data-key="${escapeHtml(e.key)}">${relatedHtml(e.key)}</div>
         </div>
 
         <div class="detail-body" id="detailBodyHistory" style="display:none;">
@@ -286,6 +287,7 @@
 
       // The pane is rebuilt on every 4s refresh; the reader's tab must survive it.
       App.currentHistoryList = historyList;
+      if (!isSkeleton) loadRelated(e.key);
       const sameKey = App.verKey === e.key;
       if (!sameKey) { App.detailTab = 'content'; App.verTextOpen = new Set(); }
       App.verKey = e.key;

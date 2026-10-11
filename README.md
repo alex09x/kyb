@@ -170,7 +170,10 @@ KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
 |---|---|---|
 | `KYB_DATA` | `./kyb-data` | git canon directory |
 | `KYB_INDEX` | `./index` | Tantivy cache (safe to delete) |
-| `KYB_ADDR` | `127.0.0.1:9310` | **no auth by design** — run on a private network |
+| `KYB_ADDR` | `127.0.0.1:9310` | where to listen; with `KYB_AUTH=off` anyone who can reach it can write |
+| `KYB_AUTH` | `off` | `off` trusts the network, `compat` honours a token but does not ask for one (for rollout, on a trusted bind — it protects nothing), `required` refuses callers without one |
+| `KYB_AUTH_FILE` | `./auth.json` (Docker: `/data/auth.json`) | the token book; keep it on persistent storage beside the data, never inside `kyb-data` |
+| `KYB_ANON` | *(unset)* | `read`: with `KYB_AUTH=required`, callers without a token may read (a public demo) |
 | `KYB_PUBLISH_ADDR` | `127.0.0.1` | Docker Compose host interface; set one exact private IP for remote clients |
 | `KYB_MODEL` | *(unset)* | dir with `model.onnx` + `tokenizer.json`; absent = lexical-only |
 | `KYB_AUDIT` | `audit.jsonl` | JSONL request log |
@@ -265,7 +268,9 @@ any other write, and a route that changes changes here with it.
 It is stateless: no sessions, no server-initiated stream, `GET` and `DELETE` answer `405` and
 say so. Batches work. `?readonly=1` on the URL drops the six writing tools for that
 registration — a guard rail for an agent, not a security boundary, since nothing stops a
-caller from omitting it.
+caller from omitting it. The boundary is the token: `/mcp` passes the caller's
+`Authorization` header to every tool call it replays, so a tool can do exactly what the same
+token can do over REST.
 
 `rm` and `reindex` are not exposed over MCP at all: retracting an entry and rebuilding the
 index should not be something an agent reaches for mid-thought.
@@ -281,12 +286,63 @@ need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses 
 
 ---
 
+## Access: tokens and roles
+
+Out of the box KYB asks nobody for anything (`KYB_AUTH=off`) and relies on the network it
+listens on. To know who wrote what, and to let some callers only read, turn tokens on.
+
+Tokens tell callers apart; they do not hide traffic. KYB itself speaks plain HTTP, and a
+token sent over plain HTTP can be read and replayed by anyone who can watch the network. On a
+network you trust against eavesdropping (loopback, a private LAN, a VPN) that is enough. To
+serve anyone beyond it, put a TLS-terminating proxy in front and point clients at it with
+`KYB_URL=https://kyb.example`.
+
+With Docker Compose the three settings are passed through from `.env` (`KYB_AUTH`, `KYB_ANON`,
+`KYB_AUTH_FILE`), and the book defaults to `/data/auth.json` - on the persistent volume, outside
+the git canon (`data/` and `auth.json` are in `.gitignore`; the server refuses to start with a
+book inside `KYB_DATA`). Issue tokens with `docker compose exec kyb kyb-server auth add ...`. The server
+prints the mode in force when it starts (`kyb: auth required - 3 principals in ...`); check that
+line, or `kyb whoami`, rather than assuming.
+
+```bash
+# on the server, next to the data (the book is the root of trust; it is not in git)
+kyb-server auth add --id alex    --name "Alex"    --role admin
+kyb-server auth add --id agent-a --name "Agent A" --role write --label build-box
+kyb-server auth list                 # ids, roles, token ids — never tokens
+kyb-server auth token  --id agent-a  # a second token: rotate with an overlap
+kyb-server auth revoke --token t_1a2b3c4d      # or --id agent-a for the whole principal
+
+# on each client
+echo "$TOKEN" | kyb login            # checked against the server, then kept in ~/.config/kyb/token (0600)
+kyb whoami
+```
+
+A token is 256 random bits, shown once; the book keeps its SHA-256. Changes to the book take
+effect without a restart. Three roles, each including the one before:
+
+| Role | May |
+|---|---|
+| `read` | search, read, history, diffs, relations |
+| `write` | add and edit entries; file, resolve and archive incidents and tasks |
+| `admin` | retract a knowledge entry (`kyb rm`), `reindex`, read the raw request log (`/api/audit`: client addresses and everyone's queries) |
+
+The git commit a write produces is authored by the token's principal, so `kyb history` and the
+Versions tab say who changed what. A commit made without a token (before tokens, or under
+`off`/`compat`) names nobody. This is attribution, not proof: anyone with direct access to the
+repository can write any author. Rolling out: start with `KYB_AUTH=compat` on the trusted bind,
+give every agent a token, watch the `actor` field of the audit log until no `-` remains, then
+switch to `required`. Never leave `compat` on an address reachable from outside: it lets a
+caller through by leaving the token out. A public read-only demo is its own instance, with its
+own synthetic data, started with `KYB_AUTH=required KYB_ANON=read`. The web UI asks for a token when the server does and hides what the
+token's role would be refused.
+
 ## Web UI and Control Room
 
 `kyb-server` embeds a zero-dependency, dark-mode Web UI served directly at `http://<host>:9310/`:
 
 * **Live Fleet Feed**: real-time activity stream of agent reads, writes, and tool executions from the audit log.
-* **Interactive Topology Graph**: 2D force-directed map visualizing services, hosts, dependencies, and linked incidents.
+* **Services and hosts**: for each service or host an incident names, what is open on it right now, the notes those incidents cite and the open tasks pointing at them. Every row says why it is listed.
+* **Related entries**: each card lists what it refers to and what refers to it, taken only from typed fields (`knowledge`, `parent_task`) and internal links in the text (`[[key]]`, `[text](key)`). Shared tags are a filter, not a relation.
 * **Incident Control Center**: status board (Open / Mitigated / Resolved), executable detection check commands, and mandatory post-mortem resolutions.
 * **Agent Task Kanban**: columns for Backlog, In Progress, Blocked (with reasons highlighted), and Closed tasks.
 * **Knowledge Explorer**: instant search, full Markdown document rendering, revision histories, and line-by-line visual git diffs.
@@ -300,6 +356,9 @@ need the CLI, and MCP reaches none of them. Anything that cannot speak MCP uses 
 | `GET` | `/` | Web UI & Control Room (zero-dependency single-page application) |
 | `GET` | `/api/audit` | `?limit=50` — recent operations from the JSONL audit log, newest first |
 | `GET` | `/knowledge/{key}/diff` | `?from=<sha>&to=<sha>` — unified git diff between two revisions |
+| `GET` | `/knowledge/{key}/related` | what the entry refers to and what refers to it, each with how (`knowledge`, `parent_task`, `link`) |
+| `GET` | `/places` | services and hosts named by incidents, with open and total counts |
+| `GET` | `/impact` | `?service=<name>` or `?host=<name>` — incidents on it, the notes they cite, the open tasks pointing at them |
 | `POST` | `/knowledge` | upsert by key. Body: `{key, title, body, tags?, refs?}` → `{key, sha, changed, action}`. Identical content = `changed:false`, no commit |
 | `GET` | `/knowledge/{key}` | the entry (kind-specific fields included); archived incidents/tasks come back with `archived:true`; `?at=<sha>` returns a version from history |
 | `GET` | `/knowledge/{key}/history` | `{key, versions:[{sha, committed_at, message, change}]}`, newest first |

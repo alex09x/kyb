@@ -103,6 +103,8 @@ async fn mcp_post(State(st): State<Arc<McpState>>, req: ExtractRequest) -> Respo
         q.split('&').any(|p| matches!(p, "readonly" | "readonly=1" | "readonly=true"))
     });
     let connect = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
+    // the caller's token travels with each replayed call: the API decides, per tool, what it may do
+    let bearer = req.headers().get(header::AUTHORIZATION).cloned();
 
     let body: Bytes = match axum::body::to_bytes(req.into_body(), MAX_BODY).await {
         Ok(b) => b,
@@ -137,7 +139,7 @@ async fn mcp_post(State(st): State<Arc<McpState>>, req: ExtractRequest) -> Respo
 
     let mut out = Vec::new();
     for msg in &messages {
-        if let Some(resp) = handle_one(&st, readonly, connect.as_ref(), msg).await {
+        if let Some(resp) = handle_one(&st, readonly, connect.as_ref(), bearer.as_ref(), msg).await {
             out.push(resp);
         }
     }
@@ -155,6 +157,7 @@ async fn handle_one(
     st: &McpState,
     readonly: bool,
     connect: Option<&ConnectInfo<SocketAddr>>,
+    bearer: Option<&axum::http::HeaderValue>,
     msg: &Value,
 ) -> Option<Value> {
     // No id, or a null one, means a notification: the spec forbids answering it.
@@ -169,7 +172,7 @@ async fn handle_one(
         "initialize" => rpc_ok(id, initialize(&params)),
         "ping" => rpc_ok(id, json!({})),
         "tools/list" => rpc_ok(id, json!({"tools": tools(readonly)})),
-        "tools/call" => match call_tool(st, readonly, connect, &params).await {
+        "tools/call" => match call_tool(st, readonly, connect, bearer, &params).await {
             Ok(value) => rpc_ok(id, value),
             Err((code, message)) => rpc_error(id, code, &message),
         },
@@ -228,6 +231,7 @@ async fn call_tool(
     st: &McpState,
     readonly: bool,
     connect: Option<&ConnectInfo<SocketAddr>>,
+    bearer: Option<&axum::http::HeaderValue>,
     params: &Value,
 ) -> Result<Value, (i64, String)> {
     let name = match params.get("name").and_then(Value::as_str) {
@@ -248,7 +252,7 @@ async fn call_tool(
         Ok(call) => call,
         Err(message) => return Ok(tool_error(message)),
     };
-    let (status, text) = forward(st, connect, call).await;
+    let (status, text) = forward(st, connect, bearer, call).await;
     if status.is_success() {
         Ok(tool_text(text.trim().to_string()))
     } else {
@@ -259,6 +263,7 @@ async fn call_tool(
 async fn forward(
     st: &McpState,
     connect: Option<&ConnectInfo<SocketAddr>>,
+    bearer: Option<&axum::http::HeaderValue>,
     call: Call,
 ) -> (StatusCode, String) {
     let mut uri = call.path;
@@ -280,6 +285,9 @@ async fn forward(
     // to the machine that asked for it rather than to nobody.
     if let Some(info) = connect {
         req.extensions_mut().insert(*info);
+    }
+    if let Some(token) = bearer {
+        req.headers_mut().insert(header::AUTHORIZATION, token.clone());
     }
 
     let resp = st.api.clone().oneshot(req).await.expect("the router is infallible");

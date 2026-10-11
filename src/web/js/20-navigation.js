@@ -14,26 +14,6 @@
       }
     }
 
-    function handleGraphChipClick(event, id) {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
-      event.preventDefault();
-      focusNodeById(id);
-    }
-
-    function handleDrawerOpenFullClick(event, key) {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
-      event.preventDefault();
-      closeGraphDrawer();
-      switchTab('search', false);
-      selectEntry(key, true);
-    }
-
-    function navigateToGraphNode(event, key) {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
-      event.preventDefault();
-      window.location.hash = `#/graph/${encodeURIComponent(key)}`;
-    }
-
     function handleTagClick(event, tag) {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
       event.preventDefault();

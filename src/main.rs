@@ -1,7 +1,9 @@
 mod audit;
+mod auth;
 mod config;
 mod embed;
 mod index;
+mod links;
 mod mcp;
 mod model;
 mod store;
@@ -41,9 +43,90 @@ pub struct AppState {
     /// Bumped by every invalidation. A scan that began before a write must not
     /// put its pre-write answer into the cache after the write dropped it.
     history_gen: std::sync::atomic::AtomicU64,
+    /// Relations between entries, derived from the repository. Kept until the
+    /// next write (the generation it was built at no longer matches).
+    links_cache: std::sync::Mutex<Option<LinksCache>>,
+    /// Keys archived since the link index last took note. A key can be filed and
+    /// closed between two builds, so comparing trees alone would miss it.
+    /// Each note carries its own number, so a build removes exactly the notes it
+    /// read and never a later one that happens to name the same key.
+    archived_since: std::sync::Mutex<Vec<(u64, String)>>,
+    note_seq: std::sync::atomic::AtomicU64,
+    pub(crate) auth: auth::Auth,
+}
+
+/// The link index with what it takes to rebuild it without re-reading history.
+struct LinksCache {
+    gen: u64,
+    index: Arc<links::LinkIndex>,
+    archived: Arc<std::collections::HashMap<String, model::Entry>>,
 }
 
 impl AppState {
+    /// A closed incident or task left the tree: remembered for the next link-index build.
+    fn note_archived(&self, key: &str) {
+        let n = self.note_seq.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.archived_since.lock().unwrap().push((n, key.to_string()));
+    }
+
+    /// Remove exactly the notes a build read - by number, so a note for the same
+    /// key pushed after the build read its snapshot is left for the next build.
+    fn settle_notes(&self, read: &[(u64, String)]) {
+        let mut since = self.archived_since.lock().unwrap();
+        since.retain(|(n, _)| !read.iter().any(|(r, _)| r == n));
+    }
+
+    /// The link index for the current state of the repository.
+    ///
+    /// The tree is cheap to read; the archive is not - finding the last version
+    /// of every closed incident and task walks the whole history. That walk
+    /// happens once per process. After it, a rebuild only looks at the keys the
+    /// server archived since the previous build: each one's last version is a
+    /// short walk back from HEAD, and a key that came back into the tree leaves
+    /// the archive. (Retracted knowledge is never in the archive: only closing an
+    /// incident or task archives.)
+    fn links(&self) -> Result<Arc<links::LinkIndex>> {
+        use std::sync::atomic::Ordering;
+        let gen = self.history_gen.load(Ordering::Acquire);
+        let prev = {
+            let held = self.links_cache.lock().unwrap();
+            match held.as_ref() {
+                Some(c) if c.gen == gen => return Ok(c.index.clone()),
+                Some(c) => Some(((), c.archived.clone())),
+                None => None,
+            }
+        };
+        // noted before the tree is read: an archive that lands after this is a later build's
+        let noted: Vec<(u64, String)> = self.archived_since.lock().unwrap().clone();
+        let head = self.store.list_head()?;
+        let head_kinds: HashSet<String> = head.iter().map(|e| e.key.clone()).collect();
+        let archived: Arc<std::collections::HashMap<String, model::Entry>> = match prev {
+            None => Arc::new(self.store.archived_latest()?.into_iter().map(|e| (e.key.clone(), e)).collect()),
+            Some((_, archived)) => {
+                let mut next = (*archived).clone();
+                next.retain(|k, _| !head_kinds.contains(k));
+                for key in noted.iter().map(|(_, k)| k).filter(|k| !head_kinds.contains(*k)) {
+                    if let Some(last) = self.store.latest_version(key)? {
+                        next.insert(key.clone(), last);
+                    }
+                }
+                Arc::new(next)
+            }
+        };
+        let archived_list: Vec<model::Entry> = archived.values().cloned().collect();
+        let index = Arc::new(links::LinkIndex::build(&head, &archived_list));
+        // a write that landed while we were reading makes this answer stale: serve it once, do not keep it
+        if self.history_gen.load(Ordering::Acquire) == gen {
+            *self.links_cache.lock().unwrap() = Some(LinksCache { gen, index: index.clone(), archived });
+            // Every note this build read is settled: a note is pushed only after its
+            // archive commit, so a key that is nonetheless in the tree was filed again
+            // since, and the live entry supersedes the archived one. Notes pushed while
+            // we were building stay for the next build.
+            self.settle_notes(&noted);
+        }
+        Ok(index)
+    }
+
     fn history_cached(&self, key: &str) -> Result<Vec<store::VersionInfo>> {
         use std::sync::atomic::Ordering;
         if let Some(v) = self.history_cache.lock().unwrap().get(key) {
@@ -129,7 +212,13 @@ async fn rebuild_vectors(st: &AppState) {
 }
 
 fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
+    build_state_with(cfg, auth::Auth::from_env()?)
+}
+
+fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppState>> {
     let store = store::Store::open(&cfg.data_dir)?;
+    // after the canon exists: a link into it is then seen leading there
+    auth.refuse_inside(&cfg.data_dir)?;
     let index = index::SearchIndex::open_or_create(&cfg.index_dir)?;
     let mut writer = index.writer()?;
     // the canon may have been hand-edited while the service was down —
@@ -161,6 +250,10 @@ fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
         audit_path: cfg.audit_path.clone(),
         history_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
         history_gen: std::sync::atomic::AtomicU64::new(0),
+        links_cache: std::sync::Mutex::new(None),
+        archived_since: std::sync::Mutex::new(Vec::new()),
+        note_seq: std::sync::atomic::AtomicU64::new(0),
+        auth,
     }))
 }
 
@@ -178,10 +271,14 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/api/audit", get(web::api_audit))
         .route("/api/activity", get(web::api_activity))
         .route("/healthz", get(healthz))
+        .route("/whoami", get(auth::whoami))
         .route("/knowledge", post(upsert))
         .route("/knowledge/{key}", get(get_one).delete(remove))
         .route("/knowledge/{key}/history", get(history))
         .route("/knowledge/{key}/diff", get(diff))
+        .route("/knowledge/{key}/related", get(related))
+        .route("/places", get(places))
+        .route("/impact", get(impact))
         .route("/incidents", post(upsert_incident).get(list_incidents))
         .route("/incidents/{key}/resolve", post(resolve_incident))
         .route("/tasks", post(upsert_task).get(list_tasks))
@@ -190,6 +287,8 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/search", get(search))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
+        // auth inside audit: a refused request is logged too, with who it was refused to
+        .layer(middleware::from_fn_with_state(state.clone(), auth::auth_mw))
         .layer(middleware::from_fn_with_state(state.clone(), audit::audit_mw))
         .with_state(state)
 }
@@ -210,10 +309,23 @@ async fn main() -> Result<()> {
     // the per-document indexing that is linear in history.
     let boot = std::time::Instant::now();
     let cfg = config::Config::from_env();
+    // `kyb-server auth ...` edits the token book and exits; it never starts the service.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("auth") {
+        match auth::cli(&args[1..]) {
+            Ok(out) => println!("{out}"),
+            Err(e) => {
+                eprintln!("{e:#}");
+                std::process::exit(2);
+            }
+        }
+        return Ok(());
+    }
     let state = build_state(&cfg)?;
     let indexed = boot.elapsed();
     rebuild_vectors(&state).await;
     let ready = boot.elapsed();
+    let state_auth_line = state.auth.describe();
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(&cfg.addr).await?;
     eprintln!(
@@ -223,6 +335,7 @@ async fn main() -> Result<()> {
         (ready - indexed).as_secs_f64()
     );
     eprintln!("kyb: listening on http://{}", cfg.addr);
+    eprintln!("kyb: {}", state_auth_line);
     // ConnectInfo so the audit log sees the real client IP
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
     Ok(())
@@ -576,6 +689,10 @@ fn archive_locked(st: &AppState, _w: &mut IndexWriter, key: &str, reply: &mut Re
         Err(e) => eprintln!("kyb: archive failed for {key}: {e:#}"),
         Ok(None) => {} // already archived
         Ok(Some(sha)) => {
+            // noted only once the deletion is committed: a rebuild that reads the note
+            // then finds the key gone from the tree, and the caller's generation bump
+            // that follows invalidates any index built in between
+            st.note_archived(key);
             if let Some(obj) = reply.1.as_object_mut() {
                 obj.insert("archived".into(), json!(true));
                 obj.insert("archive_sha".into(), json!(sha));
@@ -1274,6 +1391,45 @@ async fn history(State(st): St, Path(key): Path<String>) -> Reply {
     }
 }
 
+/// What an entry points at and what points at it.
+async fn related(State(st): St, Path(key): Path<String>) -> Reply {
+    if let Some(r) = bad_key(&key) {
+        return r;
+    }
+    match st.links() {
+        Err(e) => err500(e),
+        Ok(ix) => (StatusCode::OK, Json(ix.related(&key))),
+    }
+}
+
+/// Services and hosts named by incidents, the ones with open incidents first.
+async fn places(State(st): St) -> Reply {
+    match st.links() {
+        Err(e) => err500(e),
+        Ok(ix) => (StatusCode::OK, Json(ix.places())),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImpactQ {
+    service: Option<String>,
+    host: Option<String>,
+}
+
+/// What is affected on one service or host, each row with the reason it is listed.
+async fn impact(State(st): St, Q(q): Q<ImpactQ>) -> Reply {
+    let (by_host, name) = match (&q.service, &q.host) {
+        (Some(s), None) if !s.trim().is_empty() => (false, s.clone()),
+        (None, Some(h)) if !h.trim().is_empty() => (true, h.clone()),
+        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error": "pass exactly one of ?service= or ?host="}))),
+    };
+    match st.links() {
+        Err(e) => err500(e),
+        Ok(ix) => (StatusCode::OK, Json(ix.impact(by_host, &name))),
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SearchQ {
@@ -1510,6 +1666,11 @@ async fn remove(State(st): St, Path(key): Path<String>) -> Reply {
         }
         Ok(Some(e)) => e,
     };
+    // Archiving an incident or task is everyday work. Deleting knowledge is a
+    // retraction - it leaves the default search - and takes the admin role.
+    if entry.kind == model::KIND_KNOWLEDGE && auth::role() < auth::Role::Admin {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "retracting a knowledge entry needs the admin role", "needs": "admin"})));
+    }
     // both branches change the key's git history: a deletion or an archive commit.
     // Forgotten before (no stale answer is served meanwhile) and after (no scan
     // that began meanwhile can cache the pre-commit history).
@@ -1552,6 +1713,8 @@ async fn remove_committed(
                 (StatusCode::NOT_FOUND, Json(json!({"error": format!("no entry '{key}'")})))
             }
             Ok(Some(sha)) => {
+                // after the commit, before the caller's generation bump (see archive_locked)
+                st.note_archived(key);
                 (StatusCode::OK, Json(json!({"key": key, "archived": true, "sha": sha})))
             }
         }
@@ -1660,8 +1823,140 @@ mod api_tests {
             model_dir: idx.path().join("no-model"),
             addr: String::new(),
         };
-        let state = build_state(&cfg).unwrap();
+        // the tests must not depend on what KYB_AUTH happens to be in the environment
+        let state = build_state_with(&cfg, auth::Auth::off()).unwrap();
         (build_app(state.clone()), state, data, idx)
+    }
+
+    /// An app that asks for tokens, with one principal per role. Returns the
+    /// tokens as (read, write, admin).
+    fn app_with_auth(mode: auth::Mode, anon: Option<auth::Role>) -> (Router, [String; 3], tempfile::TempDir, tempfile::TempDir) {
+        let data = tempfile::tempdir().unwrap();
+        let idx = tempfile::tempdir().unwrap();
+        let cfg = config::Config {
+            data_dir: data.path().to_path_buf(),
+            index_dir: idx.path().to_path_buf(),
+            audit_path: idx.path().join("audit.jsonl"),
+            model_dir: idx.path().join("no-model"),
+            addr: String::new(),
+        };
+        let mut book = auth::Book::default();
+        let read = book.add("reader", "Rita Reader", "", auth::Role::Read, "").unwrap();
+        let write = book.add("agent-w", "Agent W", "w@fleet", auth::Role::Write, "").unwrap();
+        let admin = book.add("owner", "The Owner", "o@fleet", auth::Role::Admin, "").unwrap();
+        let book_path = idx.path().join("auth.json");
+        book.save(&book_path).unwrap();
+        let state = build_state_with(&cfg, auth::Auth::new(mode, anon, book_path)).unwrap();
+        (build_app(state), [read, write, admin], data, idx)
+    }
+
+    async fn call_as(app: &Router, token: Option<&str>, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+        let mut b = Request::builder().method(method).uri(uri);
+        if let Some(t) = token {
+            b = b.header("authorization", format!("Bearer {t}"));
+        }
+        let req = match body {
+            Some(v) => b.header("content-type", "application/json").body(Body::from(v.to_string())).unwrap(),
+            None => b.body(Body::empty()).unwrap(),
+        };
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test]
+    async fn required_auth_holds_every_route_to_a_role_and_signs_commits() {
+        let (app, [read, write, admin], _data, idx) = app_with_auth(auth::Mode::Required, None);
+        let (r, w, a) = (Some(read.as_str()), Some(write.as_str()), Some(admin.as_str()));
+
+        // nameless: only the page, the probe and whoami
+        assert_eq!(call_as(&app, None, "GET", "/search?q=x", None).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(call_as(&app, None, "POST", "/knowledge", Some(upsert_body("n", "b"))).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(call_as(&app, None, "GET", "/healthz", None).await.0, StatusCode::OK);
+        let (st, me) = call_as(&app, None, "GET", "/whoami", None).await;
+        assert_eq!((st, me["auth"].clone(), me["role"].clone(), me["actor"].clone()), (StatusCode::OK, json!("required"), json!("read"), Value::Null));
+        let (st, e) = call_as(&app, Some("kyb_never-issued"), "GET", "/search?q=x", None).await;
+        assert_eq!(st, StatusCode::UNAUTHORIZED);
+        assert!(e["error"].as_str().unwrap().contains("not known"));
+
+        // read: reads, cannot write
+        assert_eq!(call_as(&app, r, "GET", "/search?q=x", None).await.0, StatusCode::OK);
+        let (st, e) = call_as(&app, r, "POST", "/knowledge", Some(upsert_body("note", "body"))).await;
+        assert_eq!((st, e["needs"].clone(), e["role"].clone()), (StatusCode::FORBIDDEN, json!("write"), json!("read")));
+        let (_, me) = call_as(&app, r, "GET", "/whoami", None).await;
+        assert_eq!((me["role"].clone(), me["actor"]["id"].clone(), me["actor"]["name"].clone()), (json!("read"), json!("reader"), json!("Rita Reader")));
+
+        // write: writes, files and resolves; the commit carries its name
+        assert_eq!(call_as(&app, w, "POST", "/knowledge", Some(upsert_body("note", "body"))).await.0, StatusCode::OK);
+        let (_, h) = call_as(&app, r, "GET", "/knowledge/note/history", None).await;
+        assert_eq!(h["versions"][0]["author"], "Agent W <w@fleet>");
+        assert_eq!(call_as(&app, w, "POST", "/incidents", Some(json!({"key": "inc-a", "title": "A", "service": "s", "severity": "low", "body": "b"}))).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, w, "POST", "/incidents/inc-a/resolve", Some(json!({"resolution": "ok"}))).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, w, "POST", "/incidents", Some(json!({"key": "inc-b", "title": "B", "service": "s", "severity": "low", "body": "b"}))).await.0, StatusCode::OK);
+        // archiving an open incident is write work; retracting knowledge and reindexing are not
+        assert_eq!(call_as(&app, w, "DELETE", "/knowledge/inc-b", None).await.0, StatusCode::OK);
+        let (st, e) = call_as(&app, w, "DELETE", "/knowledge/note", None).await;
+        assert_eq!((st, e["needs"].clone()), (StatusCode::FORBIDDEN, json!("admin")));
+        assert_eq!(call_as(&app, w, "POST", "/reindex", None).await.0, StatusCode::FORBIDDEN);
+
+        // admin: everything; a second author on the same entry is its own version
+        assert_eq!(call_as(&app, a, "POST", "/knowledge", Some(upsert_body("note", "body two"))).await.0, StatusCode::OK);
+        let (_, h) = call_as(&app, a, "GET", "/knowledge/note/history", None).await;
+        assert_eq!((h["versions"][0]["author"].clone(), h["versions"][1]["author"].clone()), (json!("The Owner <o@fleet>"), json!("Agent W <w@fleet>")));
+        assert_eq!(call_as(&app, a, "POST", "/reindex", None).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, a, "DELETE", "/knowledge/note", None).await.0, StatusCode::OK);
+
+        // MCP: the token travels with the tool call, and the API decides
+        let mcp = |token: Option<&str>, name: &str, args: Value| {
+            let app = app.clone();
+            let token = token.map(str::to_string);
+            let payload = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}});
+            async move { call_as(&app, token.as_deref(), "POST", "/mcp", Some(payload)).await.1 }
+        };
+        let add = json!({"key": "via-mcp", "title": "T", "body": "b"});
+        let refused = mcp(r, "kyb_add", add.clone()).await;
+        assert_eq!(refused["result"]["isError"], json!(true));
+        assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("403"), "{refused}");
+        let nameless = mcp(None, "kyb_get", json!({"key": "via-mcp"})).await;
+        assert!(nameless["result"]["content"][0]["text"].as_str().unwrap().contains("401"), "{nameless}");
+        assert_ne!(mcp(w, "kyb_add", add).await["result"]["isError"], json!(true));
+        let (_, h) = call_as(&app, r, "GET", "/knowledge/via-mcp/history", None).await;
+        assert_eq!(h["versions"][0]["author"], "Agent W <w@fleet>");
+
+        // the raw request log (addresses, other callers' queries) is the admin's alone
+        assert_eq!(call_as(&app, r, "GET", "/api/audit", None).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&app, w, "GET", "/api/audit", None).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&app, a, "GET", "/api/audit", None).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, r, "GET", "/api/activity", None).await.0, StatusCode::OK);
+
+        // the audit log says who, including who was refused
+        let log = std::fs::read_to_string(idx.path().join("audit.jsonl")).unwrap();
+        let actors: Vec<String> = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).map(|v| v["actor"].as_str().unwrap_or("?").to_string()).collect();
+        for who in ["reader", "agent-w", "owner", "refused"] {
+            assert!(actors.iter().any(|a| a == who), "no audit line for {who}: {actors:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn compat_keeps_the_nameless_working_and_a_demo_reads_without_a_token() {
+        let (app, [read, write, _], _data, _idx) = app_with_auth(auth::Mode::Compat, None);
+        // no token: as before, and the commit is unattributed
+        assert_eq!(call_as(&app, None, "POST", "/knowledge", Some(upsert_body("old-client", "b"))).await.0, StatusCode::OK);
+        let (_, h) = call_as(&app, None, "GET", "/knowledge/old-client/history", None).await;
+        assert_eq!(h["versions"][0]["author"], "");
+        let (_, me) = call_as(&app, None, "GET", "/whoami", None).await;
+        assert_eq!((me["auth"].clone(), me["role"].clone()), (json!("compat"), json!("admin")));
+        // a token that is sent is believed and held to its role
+        assert_eq!(call_as(&app, Some(&write), "POST", "/knowledge", Some(upsert_body("new-client", "b"))).await.0, StatusCode::OK);
+        assert_eq!(call_as(&app, Some(&read), "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::FORBIDDEN);
+
+        let (demo, [_, write, _], _d, _i) = app_with_auth(auth::Mode::Required, Some(auth::Role::Read));
+        assert_eq!(call_as(&demo, None, "GET", "/search?q=x", None).await.0, StatusCode::OK);
+        // a visitor of the demo cannot read what other visitors asked, or from where
+        assert_eq!(call_as(&demo, None, "GET", "/api/audit", None).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&demo, None, "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call_as(&demo, Some(&write), "POST", "/knowledge", Some(upsert_body("x", "b"))).await.0, StatusCode::OK);
     }
 
     pub(super) fn app_with_tmp() -> (Router, tempfile::TempDir, tempfile::TempDir) {
@@ -1757,6 +2052,105 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
         let (st, _) = call(&app, "GET", "/knowledge/nope/history", None).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn relations_follow_the_repository() {
+        let (app, state, _data, _idx) = app_with_state();
+        let state_of = |_: &Router| state.clone();
+        call(&app, "POST", "/knowledge", Some(upsert_body("redis-runbook", "How to restart redis."))).await;
+        let (st, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!((v["known"].clone(), v["incoming"].as_array().unwrap().len()), (json!(true), 0));
+
+        // an incident citing the runbook appears as a backlink right after the write (the cached index is dropped)
+        let (st, _) = call(&app, "POST", "/incidents", Some(json!({
+            "key": "inc-redis-oom", "title": "Redis OOM", "service": "Redis", "hosts": ["cache-01"],
+            "severity": "high", "knowledge": ["redis-runbook"], "body": "See [[redis-runbook]]."
+        }))).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert_eq!(v["incoming"][0]["key"], "inc-redis-oom");
+        assert_eq!((v["incoming"][0]["via"].clone(), v["incoming"][0]["live"].clone()), (json!("knowledge"), json!(true)));
+
+        let (st, p) = call(&app, "GET", "/places", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!((p["services"][0]["name"].clone(), p["services"][0]["open"].clone(), p["hosts"][0]["name"].clone()), (json!("redis"), json!(1), json!("cache-01")));
+
+        let (st, i) = call(&app, "GET", "/impact?service=redis", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!((i["open"].clone(), i["incidents"][0]["key"].clone(), i["runbooks"][0]["key"].clone()), (json!(1), json!("inc-redis-oom"), json!("redis-runbook")));
+        assert_eq!(i["runbooks"][0]["because"], json!(["inc-redis-oom"]));
+        let (_, h) = call(&app, "GET", "/impact?host=cache-01", None).await;
+        assert_eq!((h["kind"].clone(), h["incidents"].as_array().unwrap().len()), (json!("host"), 1));
+
+        // resolved: archived, no longer open, still a backlink
+        let (st, _) = call(&app, "POST", "/incidents/inc-redis-oom/resolve", Some(json!({"resolution": "raised maxmemory"}))).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert_eq!((v["incoming"][0]["live"].clone(), v["incoming"][0]["archived"].clone()), (json!(false), json!(true)));
+        let (_, p) = call(&app, "GET", "/places", None).await;
+        assert_eq!((p["services"][0]["open"].clone(), p["services"][0]["total"].clone()), (json!(0), json!(1)));
+
+        // a second incident closed after the index exists is picked up without a history walk,
+        // a retracted note takes its edges with it, and a key filed again is live again
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-two", "title": "Two", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        call(&app, "GET", "/places", None).await;
+        call(&app, "POST", "/incidents/inc-two/resolve", Some(json!({"resolution": "ok"}))).await;
+        // filed and closed with no build in between: the tree never showed it to the index
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-flash", "title": "Flash", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        call(&app, "POST", "/incidents/inc-flash/resolve", Some(json!({"resolution": "ok"}))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        let incoming: Vec<(String, bool)> = v["incoming"].as_array().unwrap().iter().map(|r| (r["key"].as_str().unwrap().to_string(), r["archived"] == json!(true))).collect();
+        assert!(incoming.contains(&("inc-two".to_string(), true)) && incoming.contains(&("inc-redis-oom".to_string(), true)) && incoming.contains(&("inc-flash".to_string(), true)), "{incoming:?}");
+        call(&app, "POST", "/knowledge", Some(upsert_body("pointer", "See [[redis-runbook]]."))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert!(v["incoming"].as_array().unwrap().iter().any(|r| r["key"] == "pointer"));
+        call(&app, "DELETE", "/knowledge/pointer", None).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        assert!(!v["incoming"].as_array().unwrap().iter().any(|r| r["key"] == "pointer"), "a retracted note keeps no edges");
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-two", "title": "Two again", "service": "redis", "severity": "high", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        let again = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-two").unwrap().clone();
+        assert_eq!((again["archived"].clone(), again["live"].clone(), again["title"].clone()), (json!(false), json!(true), json!("Two again")));
+
+        // archived and filed again before any build: the live entry wins and the note is settled, not kept forever
+        let st = state_of(&app);
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-refile", "title": "R", "service": "redis", "severity": "low", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        call(&app, "POST", "/incidents/inc-refile/resolve", Some(json!({"resolution": "ok"}))).await;
+        call(&app, "POST", "/incidents", Some(json!({"key": "inc-refile", "title": "R again", "service": "redis", "severity": "high", "knowledge": ["redis-runbook"], "body": "b"}))).await;
+        let noted = |k: &str| st.archived_since.lock().unwrap().iter().any(|(_, key)| key == k);
+        assert!(noted("inc-refile"), "the archive was noted");
+        let (_, v) = call(&app, "GET", "/knowledge/redis-runbook/related", None).await;
+        let r = v["incoming"].as_array().unwrap().iter().find(|r| r["key"] == "inc-refile").cloned().unwrap();
+        assert_eq!((r["archived"].clone(), r["live"].clone(), r["title"].clone()), (json!(false), json!(true), json!("R again")));
+        assert!(!noted("inc-refile"), "the note is settled by the build that saw the key live");
+        // a note pushed while a build runs is not lost: it is simply next
+        st.note_archived("inc-pushed-later");
+        call(&app, "GET", "/places", None).await;                                  // a cache hit: no build, the note waits
+        assert_eq!(st.archived_since.lock().unwrap().len(), 1);
+        st.forget_history("anything");                                              // the next write; the next build settles it
+        call(&app, "GET", "/places", None).await;
+        assert!(st.archived_since.lock().unwrap().is_empty(), "a note for a key nowhere in the tree is settled by the next build");
+        // two builds overlapping: the older one settles only the notes it read, never a newer note for the same key
+        st.note_archived("inc-twice");
+        let snapshot = st.archived_since.lock().unwrap().clone();     // what an older build read
+        st.note_archived("inc-twice");                                 // archived again after that build's snapshot
+        st.settle_notes(&snapshot);
+        let left = st.archived_since.lock().unwrap().clone();
+        assert_eq!(left.len(), 1, "the newer note survives: {left:?}");
+        assert!(left[0].0 > snapshot[0].0 && left[0].1 == "inc-twice");
+        st.settle_notes(&left);
+        assert!(st.archived_since.lock().unwrap().is_empty());
+
+        for bad in ["/impact", "/impact?service=a&host=b", "/impact?service=%20", "/impact?host="] {
+            let (st, v) = call(&app, "GET", bad, None).await;
+            assert_eq!(st, StatusCode::BAD_REQUEST, "{bad}: {v}");
+        }
+        let (st, _) = call(&app, "GET", "/knowledge/Bad_Key/related", None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, v) = call(&app, "GET", "/knowledge/never-written/related", None).await;
+        assert_eq!((st, v["known"].clone()), (StatusCode::OK, json!(false)));
     }
 
     #[tokio::test]
@@ -3532,7 +3926,7 @@ mod published_claims {
         let bytes = http_body_util::BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
         let body_str = String::from_utf8_lossy(&bytes);
         assert!(body_str.contains("KYB — Fleet Memory & Control Room"));
-        assert!(body_str.contains("topoCanvas"));
+        assert!(body_str.contains("placesList"));
     }
 
     #[tokio::test]

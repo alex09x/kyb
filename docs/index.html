@@ -235,7 +235,7 @@
       <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--good); font-size: 18px; margin-bottom: 16px;">⌂</div>
         <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Local, private, no secrets</h3>
-        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Binds to <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">127.0.0.1</span> by default. To serve a trusted LAN, opt into one exact private interface; there is <strong style="color: var(--text); font-weight: 600;">no auth</strong>, so never publish port 9310 to the internet. Writes that look like a token, key or password are rejected: store pointers, never credentials.</p>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Binds to <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">127.0.0.1</span> by default. To serve a trusted LAN, opt into one exact private interface; out of the box there are <strong style="color: var(--text); font-weight: 600;">no tokens</strong> and the service speaks plain HTTP, so never publish port 9310 to the internet as it is: turn tokens on and put TLS in front first. Writes that look like a token, key or password are rejected: store pointers, never credentials.</p>
       </div>
       <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--incident); font-size: 18px; margin-bottom: 16px;">🦀</div>
@@ -549,7 +549,7 @@
       <span style="color: var(--incident); font-size: 20px; line-height: 1.2;">⚠</span>
       <div>
         <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Two things to know before you expose it</h3>
-        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">There is <strong style="color: var(--text); font-weight: 600;">no auth by design</strong> — keep port 9310 on a private network. And run the container as <strong style="color: var(--text); font-weight: 600;">your host uid</strong>: otherwise the git canon ends up root-owned and unreadable by hand, and git-as-truth is the whole point.</p>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Tokens are <strong style="color: var(--text); font-weight: 600;">off by default</strong> — keep port 9310 on a private network. Tokens with read, write and admin roles tell callers apart and sign their commits; they do not encrypt the traffic, so beyond a trusted network add TLS in front. And run the container as <strong style="color: var(--text); font-weight: 600;">your host uid</strong>: otherwise the git canon ends up root-owned and unreadable by hand, and git-as-truth is the whole point.</p>
       </div>
     </div>
 

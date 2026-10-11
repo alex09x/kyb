@@ -77,7 +77,7 @@
         } else if (e.key === '3') {
           switchTab('tasks', true);
         } else if (e.key === '4') {
-          switchTab('graph', true);
+          switchTab('services', true);
         } else if (e.key === '5') {
           switchTab('feed', true);
         } else if (e.key === 'n' || e.key === 'N') {
@@ -177,22 +177,12 @@
           } else {
             document.title = 'KYB — Fleet Tasks';
           }
-        } else if (root === 'graph' || root === 'topology') {
-          const nodeKey = paramKey || params.get('node') || params.get('key');
-          if (App.activeTab !== 'graph') switchTab('graph', false);
-          if (nodeKey) {
-            // Focus now if the graph exists, else leave it for the first build.
-            // Never both: a pending node left behind would re-open the drawer
-            // on every 4-second rebuild after the person closed it.
-            if (App.graphNodes && App.graphNodes.length > 0) {
-              focusNodeById(nodeKey);
-            } else {
-              App.pendingGraphNode = nodeKey;
-            }
-            document.title = `KYB — Graph: ${nodeKey}`;
-          } else {
-            document.title = 'KYB — Cyber Topology';
-          }
+        } else if (root === 'services' || root === 'hosts' || root === 'graph' || root === 'topology') {
+          // #/graph and #/topology are old links to the removed map: they land on the list.
+          const name = (root === 'services' || root === 'hosts') ? paramKey : '';
+          if (App.activeTab !== 'services') switchTab('services', false);
+          if (name) selectPlace(root === 'hosts' ? 'host' : 'service', name, false);
+          document.title = name ? `KYB — ${name}` : 'KYB — Services';
         } else if (root === 'search') {
           const q = params.get('q') || params.get('query') || '';
           const tag = params.get('tag') || '';
@@ -234,7 +224,7 @@
       window.addEventListener('popstate', applyRoute);
 
       // Initial load & 4s polling
-      refreshAll().then(() => {
+      loadWhoami().then(refreshAll).then(() => {
         applyRoute();
       });
       App.refreshTimer = setInterval(refreshAll, 4000);  // kept so the loop can be paused (the UI test drives refreshes itself)

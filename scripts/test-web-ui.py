@@ -84,7 +84,7 @@ def wait_http(url, seconds=30):
     return False
 
 
-def start_sandbox(tmp):
+def start_sandbox(tmp, extra_env=None):
     binary = os.environ.get("KYB_SERVER_BIN")
     if not binary:
         for cand in (REPO / "target/release/kyb-server", REPO / "target/debug/kyb-server"):
@@ -99,6 +99,9 @@ def start_sandbox(tmp):
     env = dict(os.environ,
                KYB_DATA=str(tmp / "data"), KYB_INDEX=str(tmp / "index"), KYB_AUDIT=str(tmp / "audit.jsonl"),
                KYB_MODEL=str(tmp / "no-model"), KYB_ADDR=f"127.0.0.1:{port}", KYB_UI_PATH=str(ui))
+    env.pop("KYB_AUTH", None); env.pop("KYB_ANON", None)   # the main sandbox asks nobody for anything, whatever the shell has set
+    env.update(extra_env or {})
+    tmp.mkdir(parents=True, exist_ok=True)
     log = open(tmp / "server.log", "w")
     proc = subprocess.Popen([binary], env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
@@ -106,6 +109,13 @@ def start_sandbox(tmp):
         proc.kill()
         sys.exit("sandbox server did not come up:\n" + (tmp / "server.log").read_text())
     return proc, base
+
+
+def issue_token(tmp, ident, name, role):
+    """A principal and its token, made the way an operator makes them: with the server binary."""
+    binary = os.environ.get("KYB_SERVER_BIN") or str(next(c for c in (REPO / "target/release/kyb-server", REPO / "target/debug/kyb-server") if c.exists()))
+    out = subprocess.run([binary, "auth", "add", "--id", ident, "--name", name, "--role", role], env=dict(os.environ, KYB_AUTH_FILE=str(tmp / "auth.json")), capture_output=True, text=True, check=True)
+    return out.stdout.splitlines()[0].strip()
 
 
 def api(base, method, path, body=None):
@@ -131,9 +141,9 @@ window.__t = {
   // runner calls it after each step that touched one, whether the step threw or not.
   orig: null,
   capture() { this.orig = {fetch: window.fetch, apiFetch: window.apiFetch, refreshAll: window.refreshAll, selectEntry: window.selectEntry, ledLoadVisible: window.ledLoadVisible, ledFetchDiffs: window.ledFetchDiffs,
-    verLoadDiffs: window.verLoadDiffs, buildTopology: window.buildTopology, execCommand: document.execCommand, escape: CSS.escape, writeText: navigator.clipboard && navigator.clipboard.writeText, clipboard: Object.getOwnPropertyDescriptor(navigator, 'clipboard'),
+    verLoadDiffs: window.verLoadDiffs, execCommand: document.execCommand, escape: CSS.escape, writeText: navigator.clipboard && navigator.clipboard.writeText, clipboard: Object.getOwnPropertyDescriptor(navigator, 'clipboard'),
     scrollIfNeeded: Element.prototype.scrollIntoViewIfNeeded}; },
-  restore() { const o = this.orig; for (const k of ['fetch', 'apiFetch', 'refreshAll', 'selectEntry', 'ledLoadVisible', 'ledFetchDiffs', 'verLoadDiffs', 'buildTopology']) window[k] = o[k];
+  restore() { const o = this.orig; for (const k of ['fetch', 'apiFetch', 'refreshAll', 'selectEntry', 'ledLoadVisible', 'ledFetchDiffs', 'verLoadDiffs']) window[k] = o[k];
     document.execCommand = o.execCommand; CSS.escape = o.escape; if (o.clipboard) Object.defineProperty(navigator, 'clipboard', o.clipboard); else delete navigator.clipboard;
     if (navigator.clipboard && o.writeText) navigator.clipboard.writeText = o.writeText; if (o.scrollIfNeeded) Element.prototype.scrollIntoViewIfNeeded = o.scrollIfNeeded; },
   // Every control a person can see must be the thing under the cursor at its own centre:
@@ -289,7 +299,7 @@ def run(base, headed, coverage=None):
         # Records the test invents (made-up keys and shas) have nothing on the server. A 404 for
         # exactly such a path is the test's own doing; any other status on it, or a 404 anywhere
         # else, is reported like every other error.
-        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh", "/knowledge/k-anon")
+        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh", "/knowledge/k-anon", "/knowledge/k-mail")
         expected_404 = set()
         page.on("response", lambda r: expected_404.add(r.url) if r.status == 404 and any(x in r.url for x in synthetic) else None)
         # The ledger check invents an event for key k1 at sha s2; a diff fetch the ledger's observer
@@ -324,7 +334,7 @@ def run(base, headed, coverage=None):
         page.wait_for_function("document.querySelectorAll('#knowledgeList .item-card').length > 0", timeout=10000)
 
         # --- every screen renders, no script errors
-        for tab, probe in (("search", "#tab-search"), ("incidents", "#incidentRows .inc-r"), ("tasks", "#tab-tasks .inc-r"), ("feed", "#ledBody"), ("graph", "#tab-graph canvas, #tab-graph svg")):
+        for tab, probe in (("search", "#tab-search"), ("incidents", "#incidentRows .inc-r"), ("tasks", "#tab-tasks .inc-r"), ("feed", "#ledBody"), ("services", "#placesList")):
             page.evaluate(f"switchTab('{tab}')")
             page.wait_for_timeout(600)
             check(f"screen {tab} renders", page.locator(probe).count() > 0 or tab == "feed", probe)
@@ -555,48 +565,7 @@ def run(base, headed, coverage=None):
         page.evaluate("handleSearchFeedClick(new MouseEvent('click'), 'alpha probe')")
         check("clicking a logged search runs it", page.evaluate("App.activeTab") == "search" and page.evaluate("document.getElementById('globalSearch').value") == "alpha probe")
 
-        # topology: state, not pixels
-        page.evaluate("switchTab('graph')")
-        page.wait_for_function("(App.graphNodes || []).length > 0", timeout=8000)
-        n_all = page.evaluate("App.graphNodes.length")
-        page.evaluate("setGraphFilter('incident')")
-        check("graph filter records its state", page.evaluate("App.graphFilter") == "incident")
-        page.evaluate("setGraphFilter('all'); setGraphLayout('grid')")
-        check("graph layout switches and marks its button", page.evaluate("App.graphLayout") == "grid" and page.evaluate("document.getElementById('layoutGridBtn').classList.contains('active')"))
-        page.evaluate("setGraphLayout('orbit')")
-        node = page.evaluate(f"(App.graphNodes.find(n => n.id === '{N}') || {{}}).id")
-        check("the knowledge entry is a graph node", node == N, node)
-        page.evaluate(f"focusNodeById('{N}')")
-        check("focusNodeById opens the drawer on that node", page.evaluate("document.getElementById('graphDrawer').classList.contains('open')") and page.evaluate("document.getElementById('drawerKey').textContent") == N and page.evaluate("location.hash") == f"#/graph/{N}")
-        page.evaluate("closeGraphDrawer()")
-        check("closeGraphDrawer closes it", not page.evaluate("document.getElementById('graphDrawer').classList.contains('open')"))
-        page.evaluate(f"location.hash = '#/graph/{N}'")
-        page.wait_for_function(f"document.getElementById('graphDrawer').classList.contains('open') && document.getElementById('drawerKey').textContent === '{N}'", timeout=8000)
-        page.evaluate("closeGraphDrawer(); buildTopology()")
-        page.wait_for_timeout(400)
-        check("a closed drawer stays closed through the next graph rebuild", not page.evaluate("document.getElementById('graphDrawer').classList.contains('open')") and page.evaluate("App.pendingGraphNode") is None)
-        page.evaluate("location.hash = '#/graph'")
-        page.evaluate("setTopoSearch('ui-test')")
-        cnt = page.locator("#topoSearchCount").inner_text()
-        check("topology search counts matching nodes", cnt.startswith(str(page.evaluate("App.graphNodes.filter(n => n.id.toLowerCase().includes('ui-test') || n.label.toLowerCase().includes('ui-test')).length"))), cnt)
-        page.evaluate("setTopoSearch('')")
-        z0, tz = page.evaluate("(() => { const z = graphCamera().zoom; zoomGraph(2); return [z, graphCamera().targetZoom]; })()")
-        check("zoomGraph aims the camera at twice the zoom", abs(tz - min(3.2, z0 * 2)) < 1e-6, (z0, tz))
-        page.wait_for_function(f"graphCamera().zoom > {z0} * 1.5", timeout=5000)
-        check("and the camera gets there", True)
-        page.evaluate("resetGraphCamera(); fitGraphCamera(); toggleGraphPhysics(); unpinAllGraphNodes(); reheatSimulation(0.5)")
-        page.evaluate(f"navigateToGraphNode(new MouseEvent('click'), '{N}')")
-        check("Topology link from a row deep-links to the node", page.evaluate("location.hash") == f"#/graph/{N}")
-        page.evaluate("filterFleetByHub('svc:ui-test')")
-        check("a hub chip searches by its service", page.evaluate("document.getElementById('globalSearch').value") == "ui-test" and page.evaluate("App.activeTab") == "search")
-
-        # the thin click wrappers behind chips and drawer links
-        page.evaluate("switchTab('graph')")
-        page.evaluate(f"handleGraphChipClick(new MouseEvent('click'), '{N}')")
-        check("a connected-node chip focuses that node", page.evaluate("document.getElementById('drawerKey').textContent") == N and page.evaluate("document.getElementById('graphDrawer').classList.contains('open')"))
-        page.evaluate(f"handleDrawerOpenFullClick(new MouseEvent('click'), '{N}')")
-        page.wait_for_function(f"App.selectedKey === '{N}' && App.activeTab === 'search'", timeout=5000)
-        check("'Open full' from the drawer lands on the entry", not page.evaluate("document.getElementById('graphDrawer').classList.contains('open')"), page.evaluate("[location.hash, App.activeTab, App.selectedKey, App.drawerNode && App.drawerNode.id]"))
+        # the thin click wrappers behind badges and rows
         page.evaluate("handleTagClick(new MouseEvent('click'), 'kyb')")
         check("a tag badge filters by its tag", page.evaluate("location.hash") == "#/search?tag=kyb" and page.evaluate("[...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.dataset.key)") == ["kyb-service"])
         page.evaluate("setGlobalSearchQuery('')")
@@ -625,7 +594,7 @@ def run(base, headed, coverage=None):
         # ------------------------------------------------------------------
         # Every function has a contract; here each one is held to it directly.
         # ------------------------------------------------------------------
-        patches = ("window.fetch =", "window.apiFetch =", "window.refreshAll =", "window.selectEntry =", "window.ledLoadVisible =", "window.ledFetchDiffs =", "window.verLoadDiffs =", "window.buildTopology =",
+        patches = ("window.fetch =", "window.apiFetch =", "window.refreshAll =", "window.selectEntry =", "window.ledLoadVisible =", "window.ledFetchDiffs =", "window.verLoadDiffs =",
                    "document.execCommand =", "CSS.escape =", "writeText =", "'clipboard'", "scrollIntoViewIfNeeded")
 
         def ev(js):
@@ -712,7 +681,7 @@ def run(base, headed, coverage=None):
         page.wait_for_function(f"App.selectedKey === '{K}' && [...document.querySelectorAll('.task-hero-panel .btn')].some(b => b.textContent.includes('Start Progress'))", timeout=5000)
         acts = ev("[...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim())")
         check("open task offers Start, Block, Resolve", "Start Progress" in acts and "Block Task" in acts and "Resolve Task" in acts, acts)
-        check("detail header shows Edit and a More menu with the copy actions", ev("!!document.getElementById('btnCopyDirectLink') && !!document.getElementById('btnEditEntry') && document.querySelectorAll('.more .menu button, .more .menu a').length === 5"))
+        check("detail header shows Edit and a More menu with the copy actions", ev("!!document.getElementById('btnCopyDirectLink') && !!document.getElementById('btnEditEntry') && document.querySelectorAll('.more .menu button, .more .menu a').length === 4"))
         more = ev("""(() => { const m = document.querySelector('.more'); const was = getComputedStyle(m.querySelector('.menu')).display; m.querySelector('.btn').click(); const open = getComputedStyle(m.querySelector('.menu')).display; document.body.click(); return [was, open, getComputedStyle(m.querySelector('.menu')).display]; })()""")
         check("More opens its menu and a click elsewhere closes it", more == ["none", "flex", "none"], more)
         ev(f"selectEntry('{I}-seed')")
@@ -774,7 +743,7 @@ def run(base, headed, coverage=None):
 
         # keyboard: global, incidents, tasks
         page.mouse.click(5, 400)  # drop focus from any input
-        for key, tab in (("2", "incidents"), ("3", "tasks"), ("4", "graph"), ("5", "feed"), ("1", "search")):
+        for key, tab in (("2", "incidents"), ("3", "tasks"), ("4", "services"), ("5", "feed"), ("1", "search")):
             page.keyboard.press(key)
             check(f"key {key} opens {tab}", ev("App.activeTab") == tab)
         page.keyboard.press("/")
@@ -836,7 +805,7 @@ def run(base, headed, coverage=None):
         check("tasks: Enter opens the doc", ev("location.hash") == "#/knowledge/" + ev("taskFiltered()[0].key"))
 
         # router: every hash form lands where it says
-        for h, want in ((f"#/knowledge/{N}", ("search", N)), ("#/incidents", ("incidents", None)), (f"#/tasks/{K}", ("tasks", None)), ("#/feed", ("feed", None)), ("#/graph", ("graph", None)), ("#/search?tag=kyb", ("search", None))):
+        for h, want in ((f"#/knowledge/{N}", ("search", N)), ("#/incidents", ("incidents", None)), (f"#/tasks/{K}", ("tasks", None)), ("#/feed", ("feed", None)), ("#/graph", ("services", None)), ("#/search?tag=kyb", ("search", None))):
             ev(f"location.hash = '{h}'")
             page.wait_for_function(f"App.activeTab === '{want[0]}'", timeout=5000)
             if want[1]:
@@ -854,38 +823,14 @@ def run(base, headed, coverage=None):
         check("route tag -> query search drops the tag filter and finds the mention", "mentions-kyb" in ev("App.entries.map(e => e.key)"))
         ev("document.getElementById('globalSearch').value = ''; document.getElementById('globalSearch').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))")
         page.wait_for_function("App.isBackendSearchResults === false", timeout=8000)
-        ev(f"location.hash = '#/graph/{N}'")
-        page.wait_for_function(f"App.activeTab === 'graph' && document.getElementById('drawerKey').textContent === '{N}'", timeout=8000)
-        check("route #/graph/<node> opens the drawer on it", True)
         ev("location.hash = '#/search'")
-
-        # topology graph: built from the data, drawn on the canvas
-        ev("App.isBackendSearchResults = false; App.searchQuery = ''; document.getElementById('globalSearch').value = ''")
-        ev("refreshAll()")
-        page.wait_for_function("App.entries.length >= 7", timeout=8000)
-        ev("switchTab('graph'); buildTopology()")
-        g = ev("({nodes: App.graphNodes.length, hubs: App.graphNodes.filter(n => n.isHub).length, entries: App.graphNodes.filter(n => !n.isHub).length, links: App.graphLinks.length, hosts: App.graphNodes.filter(n => n.type === 'host').map(n => n.label), svcs: App.graphNodes.filter(n => n.type === 'service').map(n => n.label), n: App.entries.length})")
-        check("every entry is a node and hubs come from hosts/services", g["entries"] == g["n"] and "h1" in g["hosts"] and "SVC" in g["svcs"] and g["links"] >= g["entries"], g)
-        check("each entry links to its service or host hub", ev(f"App.graphLinks.some(l => (l.source.id === '{I}-seed' && l.target.id === 'svc:svc') || (l.target.id === '{I}-seed' && l.source.id === 'svc:svc') || (l.source.id === '{I}-seed' && l.target.id === 'host:h1') || (l.target.id === '{I}-seed' && l.source.id === 'host:h1'))"))
-        page.wait_for_timeout(800)
-        check("the canvas has something drawn on it", ev("(() => { const c = document.getElementById('topoCanvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n > 1000; })()"))
-        ev("setGraphLayout('grid'); calculateLayoutTargets('grid')")
-        check("layout targets are set for every node", ev("App.graphNodes.every(n => Number.isFinite(n.targetX) && Number.isFinite(n.targetY))"))
-        ev("setGraphLayout('orbit')")
-        ev(f"focusNode(App.graphNodes.find(n => n.id === '{N}'))")
-        check("focusNode aims the camera at the node with zoom >= 1.3", ev("graphCamera().targetZoom") >= 1.3)
-        ev(f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
-        check("openGraphDrawer fills key, title, badge, links and body", ev(f"document.getElementById('drawerKey').textContent === '{N}' && document.getElementById('drawerTitle').textContent.length > 0 && document.getElementById('drawerBadge').textContent === 'KNOWLEDGE' && document.getElementById('drawerLinks').children.length > 0") and ev("document.getElementById('drawerOpenFullBtn').style.display") == "inline-block")
-        ev("openGraphDrawer(App.graphNodes.find(n => n.id === 'svc:svc'))")
-        check("a hub drawer hides entry-only actions", ev("document.getElementById('drawerOpenFullBtn').style.display") == "none" and ev("document.getElementById('drawerBadge').textContent") == "SERVICE HUB")
-        ev("closeGraphDrawer()")
-        check("highlightCard reports whether it found a card", ev("highlightCard('tasks', 'no-such-key')") is False)
-
 
         # ------------------------------------------------------------------
         # Usability fixes the owner asked for, held in place.
         # ------------------------------------------------------------------
         ev("switchTab('search'); setGlobalSearchQuery('')")
+        # the search just cleared is refreshing the list; the tag check below needs the full list back
+        page.wait_for_function("App.entries.some(e => e.key === 'kyb-service')", timeout=8000)
         ev("const el = document.getElementById('globalSearch'); el.value = '#kyb'; el.dispatchEvent(new Event('input', {bubbles: true}))")
         check("typing #tag in the search box filters by that tag", ev("App.tagFilter") == "kyb" and ev("[...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.dataset.key)") == ["kyb-service"])
         ev("const el = document.getElementById('globalSearch'); el.value = 'kyb'; el.dispatchEvent(new Event('input', {bubbles: true}))")
@@ -1018,15 +963,17 @@ def run(base, headed, coverage=None):
           renderDetailView({key: 'p-mit', kind: 'incident', status: 'mitigated', title: 'x'}, []); out.pills.push(document.querySelectorAll('.dh-pills .pill')[1].className.replace('pill', '').trim());
           for (const pr of ['critical', 'high', 'low']) { renderDetailView({key: 'p-' + pr, kind: 'task', priority: pr, title: 'x'}, []); out.pills.push(document.querySelectorAll('.dh-pills .pill')[1].className.replace('pill', '').trim()); }
           renderDetailView({key: 'p-done', kind: 'task', status: 'done', title: 'x'}, []); out.pills.push(pill());
-          // an author field that is empty is shown as nothing, not as 'undefined'
-          renderDetailView({key: 'k-anon', title: 'K'}, [{sha: 'g'.repeat(40), author: '', committed_at: new Date().toISOString()}, {sha: 'h'.repeat(40), author: 'First <f>', committed_at: new Date().toISOString()}]); out.unknown = txt().includes('undefined') ? 'undefined' : (txt().includes('last changed by') ? '' : 'missing');
+          // a last version with no author (made without a token) names nobody: no 'last changed by', no 'undefined'
+          renderDetailView({key: 'k-anon', title: 'K'}, [{sha: 'g'.repeat(40), author: '', committed_at: new Date().toISOString()}, {sha: 'h'.repeat(40), author: 'First <f>', committed_at: new Date().toISOString()}]); out.unknown = txt().includes('undefined') ? 'undefined' : (txt().includes('last changed by') ? 'shown' : '');
+          // an author that is only an address is shown as written
+          renderDetailView({key: 'k-mail', title: 'M'}, [{sha: 'h'.repeat(40), author: '<only@mail>', committed_at: new Date().toISOString()}]); out.mailOnly = txt().includes('by <only@mail>');
           // markRequired tolerates a missing element and a field outside a form group
           const t0 = document.getElementById('newTitle'); if (t0) t0.id = 'newTitle__gone'; try { markRequired(['newTitle']); } finally { if (t0) t0.id = 'newTitle'; } markRequired(['globalSearch']); out.loose = document.getElementById('globalSearch').classList.contains('invalid'); document.getElementById('globalSearch').classList.remove('invalid');
           return out; })()""")
         check("an open incident without a check gets the 'No detection' callout with an Add check button", "No detection" in cal["noDet"] and cal["addCheck"] == ["Add check"] and cal["loose"] is True, cal)
         check("a resolved incident without a check gets no such callout but shows its resolution", "No detection" not in cal["resolved"] and cal["resolvedCallout"] == ["Resolved", "r"], cal["resolved"][:200])
         check("an incident with a check shows it with a Copy button and names its hosts", "Is it still happening? true" in cal["det"] and cal["copy"] == ["Copy"] and "h1, h2" in cal["det"], cal["det"][:200])
-        check("a blocked task shows the reason in a callout with Unblock", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == ["Unblock"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
+        check("a blocked task shows the reason in a callout with Unblock", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == ["Unblock"] and cal["mailOnly"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
         ev(f"selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
 
@@ -1089,8 +1036,7 @@ def run(base, headed, coverage=None):
 
         # a click with a modifier held is the browser's (new tab), not ours
         mods = ev(f"""(() => {{ const e = () => new MouseEvent('click', {{metaKey: true, cancelable: true}}); const before = [location.hash, App.selectedKey, App.activeTab, document.getElementById('globalSearch').value];
-          handleCardClick(e(), 'kyb-service', 'knowledge'); navigateToGraphNode(e(), 'kyb-service'); handleTagClick(e(), 'kyb'); handleSearchFeedClick(e(), 'x');
-          handleGraphChipClick(e(), 'kyb-service'); handleDrawerOpenFullClick(e(), 'kyb-service');
+          handleCardClick(e(), 'kyb-service', 'knowledge'); openPlace(e(), 'service', 'x'); handleTagClick(e(), 'kyb'); handleSearchFeedClick(e(), 'x');
           const after = [location.hash, App.selectedKey, App.activeTab, document.getElementById('globalSearch').value];
           return [before, after]; }})()""")
         check("modifier-clicks change nothing", mods[0] == mods[1], mods)
@@ -1166,7 +1112,7 @@ def run(base, headed, coverage=None):
                               ("#/tasks", "App.activeTab === 'tasks' && document.title.includes('Fleet Tasks')", "#/tasks without a key"),
                               (f"#/incidents?key={I}-open0", "App.activeTab === 'incidents' && document.title.includes('Incident:')", "#/incidents?key= names the incident"),
                               ("#/activity", "App.activeTab === 'feed'", "#/activity is the ledger"),
-                              ("#/topology", "App.activeTab === 'graph' && document.title.includes('Topology')", "#/topology is the graph"),
+                              ("#/topology", "App.activeTab === 'services' && document.title.includes('Services')", "#/topology, a link to the removed map, lands on Services"),
                               ("#/no-such-place", "App.activeTab === 'search'", "an unknown route falls back to Knowledge")):
             ev(f"location.hash = {h!r}")
             page.wait_for_function(cond, timeout=6000)
@@ -1220,9 +1166,6 @@ def run(base, headed, coverage=None):
           const h = App.currentHistoryList; App.currentHistoryList = null; renderVersions(); out.verNull = document.querySelector('#verList .ver-empty') !== null; await verLoadDiffs(); App.currentHistoryList = h; renderVersions();
           out.feedNoEl = __t.without('ledBody', () => {{ renderFeed(); ledLoadVisible(); return true; }});
           out.tasksNoEl = __t.without('taskTop', () => {{ renderTasks(); return true; }});
-          out.drawerNoEl = __t.without('graphDrawer', () => {{ openGraphDrawer({{id: 'x', label: 'x', type: 'knowledge'}}); closeGraphDrawer(); return true; }});
-          openGraphDrawer(null); focusNode(null);
-          out.topoNoCount = __t.without('topoSearchCount', () => {{ setTopoSearch('x'); setTopoSearch(''); return true; }});
           return out; }}""")
         check("empty keys, a throwing fetch and missing panes are all survived", all(g.values()), g)
 
@@ -1373,12 +1316,12 @@ def run(base, headed, coverage=None):
         check("a new incident with nothing chosen is medium on 'infrastructure' and carries no detection", by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium" and "detection" not in by["incidents:inc-defaults"], by.get("incidents:inc-defaults"))
         check("a segment pressed and a detection typed go out with the incident", by["incidents:inc-detect"]["severity"] == "high" and by["incidents:inc-detect"]["detection"] == "true", by.get("incidents:inc-detect"))
         check("the edit form marks the stored severity and keeps the detection", all(f"data-value=\"{sev}\" " in frm["sev-" + sev] and 'class="on"' in frm["sev-" + sev] for sev in ("critical", "high", "low")) and by["incidents:e-inc"]["detection"] == "d", by.get("incidents:e-inc"))
-        check("a new task with no assignee typed gets the default one and no priority", by["tasks:task-defaults"]["assignee"] == "Alexander Panasenko" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
+        check("a new task with no assignee typed is unclaimed and unranked", by["tasks:task-defaults"]["assignee"] == "" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
         check("a new knowledge entry with no tags sends none", by["knowledge:k-defaults"]["tags"] == [], by.get("knowledge:k-defaults"))
-        check("editing a bare incident, task and note fills honest defaults and a default author", by["incidents:e-inc"]["author"].startswith("Alexander") and by["tasks:e-task"]["assignee"] == "Alexander Panasenko" and by["knowledge:e-know"]["tags"] == [] and "Author" not in frm["incHtml"] and "Author" not in frm["taskHtml"] and "Author" not in frm["knowHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
+        check("editing a bare incident, task and note fills honest defaults and sends no author: the server takes it from the token", "author" not in by["incidents:e-inc"] and by["tasks:e-task"]["assignee"] == "" and by["knowledge:e-know"]["tags"] == [] and "Author" not in frm["incHtml"] and "Author" not in frm["taskHtml"] and "Author" not in frm["knowHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
         req = ev("""(() => { const out = {}; openNewModal('incident'); __t.set('newTitle', ''); __t.set('newKey', 'k'); __t.set('newBody', '');
-          submitNewModal(); out.marked = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errs = document.querySelectorAll('#newModalBody .form-err').length; out.focus = document.activeElement.id;
-          __t.set('newTitle', 'T'); submitNewModal(); out.after = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errsAfter = document.querySelectorAll('#newModalBody .form-err').length;
+          submitNewModal(); out.marked = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errs = document.querySelectorAll('#newModalBody .form-err.req').length; out.focus = document.activeElement.id;
+          __t.set('newTitle', 'T'); submitNewModal(); out.after = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errsAfter = document.querySelectorAll('#newModalBody .form-err.req').length;
           // a key the user typed into is not overwritten by the title
           const key = document.getElementById('newKey'); key.value = 'inc-mine'; key.dispatchEvent(new Event('input')); autoSlugIncident('Other title'); out.keptInc = key.value;
           openNewModal('task'); document.getElementById('newKey').value = 'task-mine'; document.getElementById('newKey').dispatchEvent(new Event('input')); autoSlugTask('Other'); out.keptTask = document.getElementById('newKey').value;
@@ -1404,13 +1347,10 @@ def run(base, headed, coverage=None):
         check("j on an empty list does nothing", ev("App.selectedKey") == N)
         ev("setGlobalSearchQuery('')")
         rt = ev(f"""async () => {{ const out = {{}}; const realEsc = CSS.escape;
-          const nodes = App.graphNodes; App.graphNodes = []; location.hash = '#/graph/{N}'; await __t.wait(150); out.pending = App.pendingGraphNode; App.graphNodes = nodes; buildTopology(); await __t.wait(250);
-          out.consumed = App.pendingGraphNode === null && document.getElementById('drawerKey').textContent === '{N}'; closeGraphDrawer();
           CSS.escape = () => {{ throw new Error('no'); }}; location.hash = '#/knowledge/kyb-service'; await __t.wait(200); CSS.escape = realEsc; out.survivedEscape = App.selectedKey === 'kyb-service';
           const real = window.fetch; window.fetch = (u, o) => String(u).includes('/search?q=') ? Promise.reject(new Error('down')) : real(u, o);
           location.hash = '#/search?q=whatever'; await __t.wait(300); window.fetch = real; out.searchDown = App.activeTab === 'search'; return out; }}""")
         forgive_console(0, "GET /search?q=whatever&limit=100")
-        check("a graph deep-link before the graph exists waits for the first build", rt["pending"] == N and rt["consumed"], rt)
         check("routes survive an unusable CSS.escape and a search that cannot be reached", rt["survivedEscape"] and rt["searchDown"], rt)
         ev("document.querySelector('.nav-tab[data-tab=\"incidents\"]').click()")
         check("a real click on a tab switches to it", ev("App.activeTab") == "incidents" and ev("location.hash") == "#/incidents")
@@ -1418,170 +1358,230 @@ def run(base, headed, coverage=None):
 
 
         # ------------------------------------------------------------------
-        # The graph, driven with a real mouse; and the last defaults.
+        # Who is at the console: the token, the role, and what a reader is not offered.
         # ------------------------------------------------------------------
-        ev("location.hash = '#/graph'")
-        page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
+        check("a server that asks for nothing shows no name and no role", ev("[App.me.auth, App.me.role, document.getElementById('whoLabel').textContent, document.body.dataset.role]") == ["off", "admin", "", "admin"], ev("App.me"))
+        page.click("#whoBtn")
+        check("the status chip opens the token dialog, which says a token is not needed here", ev("__t.open()") == ["tokenModal"] and "does not ask for tokens" in ev("document.getElementById('tokenWhy').textContent"))
+        page.click("#tokenModal .btn.primary")
+        check("an empty token is marked, not sent", ev("document.getElementById('tokenInput').classList.contains('invalid')") and ev("__t.open()") == ["tokenModal"])
+        tok = ev("""async () => { const out = {}; const real = window.fetch; const seen = []; const json = (o, status = 200) => Promise.resolve(new Response(JSON.stringify(o), {status}));
+          const me = (role, name) => ({auth: 'required', role, actor: name ? {id: 'x', name} : null});
+          let answer = () => json({error: 'no'}, 401);
+          window.fetch = (u, o) => { if (String(u).endsWith('/whoami')) { seen.push((o && o.headers && o.headers.Authorization) || ''); return answer(); } return real(u, o); };
+          __t.set('tokenInput', 'kyb_wrong'); await submitToken(); out.unknown = [document.getElementById('tokenErr').textContent, localStorage.getItem('kyb.token')];
+          answer = () => Promise.reject(new Error('down')); await submitToken(); out.down = document.getElementById('tokenErr').textContent;
+          // a reader: named, marked read-only, offered nothing it would be refused
+          answer = () => json(me('read', 'Rita Reader')); __t.set('tokenInput', ' kyb_reader '); await submitToken();
+          out.reader = [localStorage.getItem('kyb.token'), seen[seen.length - 1], document.getElementById('whoLabel').textContent, document.body.dataset.role, __t.open().length, getComputedStyle(document.getElementById('btnOpenNew')).display];
+          const errs = () => document.querySelectorAll('#toastContainer .toast.error').length; const before = errs();
+          openNewModal(); await openEditModal('kyb-service'); openResolveIncidentModal('i', 't'); openResolveTaskModal('t', 't'); promptBlockTask('t', 't'); await transitionTask('t', 'open');
+          out.refused = [errs() - before, __t.open().length];
+          // the request log is the admin's: a reader's refresh does not ask for it
+          { const asked = []; const r3 = window.fetch; window.fetch = (u, o) => { asked.push(String(u)); return r3(u, o); }; await refreshAll(); window.fetch = r3; out.readerAudit = asked.some(u => u.includes('/api/audit')); }
+          // every request carries the token
+          let carried = null; const real2 = window.fetch; window.fetch = (u, o) => { if (String(u).includes('/tags')) carried = o && o.headers && o.headers.Authorization; return real2(u, o); }; await apiFetch('/tags'); window.fetch = real2; out.carried = carried;
+          // the label in each state
+          answer = () => json(me('read', null)); await loadWhoami(); out.anonReader = document.getElementById('whoLabel').textContent;
+          answer = () => json(me('write', null)); await loadWhoami(); out.noToken = document.getElementById('whoLabel').textContent;
+          answer = () => json(me('write', 'Agent W')); await loadWhoami(); out.writer = [document.getElementById('whoLabel').textContent, getComputedStyle(document.getElementById('btnOpenNew')).display !== 'none'];
+          openNewModal('task'); out.assignee = document.getElementById('newAssignee').value; closeModal('newModal');
+          openTokenModal(); out.signedIn = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          // a failed whoami keeps what was known; a page without the label is survived
+          answer = () => json({}, 500); const kept = await loadWhoami(); out.kept = kept && kept.role;
+          const lbl = document.getElementById('whoLabel'); lbl.id = 'gone'; await loadWhoami(); lbl.id = 'whoLabel';
+          // nothing known at all (the very first whoami failed): no role, and the dialog still opens
+          const known = App.me; App.me = null; await loadWhoami(); out.blank = [App.me, document.body.dataset.role]; openTokenModal(); out.blankWhy = document.getElementById('tokenWhy').textContent; closeModal('tokenModal'); App.me = known;
+          // a token for a role with no name on it
+          answer = () => json(me('write', null)); openTokenModal(); __t.set('tokenInput', 'kyb_nameless'); await submitToken(); out.nameless = [...document.querySelectorAll('#toastContainer .toast')].pop().textContent; localStorage.setItem('kyb.token', 'kyb_reader');
+          // a 401 on any read or write asks for a token, once
+          window.fetch = (u, o) => String(u).includes('/probe') ? json({error: 'x'}, 401) : real(u, o);
+          await apiFetch('/probe'); out.asked = [__t.open(), document.getElementById('tokenWhy').textContent]; closeModal('tokenModal');
+          await apiPost('/probe', {}); out.askedOnce = __t.open().length;
+          App.askedForToken = false; localStorage.removeItem('kyb.token'); await apiPost('/probe', {}); out.askedBare = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          openTokenModal('custom reason'); out.custom = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          App.me = {auth: 'required', role: 'write', actor: null}; openTokenModal(); out.paste = document.getElementById('tokenWhy').textContent; closeModal('tokenModal');
+          // a browser that refuses storage: the console still works for this page
+          const S = Storage.prototype; const g = S.getItem, st = S.setItem, rm = S.removeItem;
+          S.getItem = S.setItem = S.removeItem = () => { throw new Error('denied'); };
+          try { out.noStore = [storedToken(), Object.keys(authHeaders()).length]; answer = () => json(me('write', 'Agent W'));
+            window.fetch = (u, o) => String(u).endsWith('/whoami') ? answer() : real(u, o); openTokenModal(); __t.set('tokenInput', 'kyb_x'); await submitToken(); out.noStoreSaved = __t.open().length; await forgetToken(); }
+          finally { S.getItem = g; S.setItem = st; S.removeItem = rm; }
+          // forgetting: back to what the server says for nobody
+          window.fetch = real; localStorage.setItem('kyb.token', 'kyb_old'); await forgetToken(); out.forgot = [localStorage.getItem('kyb.token'), App.me.auth, document.getElementById('whoLabel').textContent, document.body.dataset.role];
+          return out; }""")
+        forgive_console(0)
+        check("a token the server does not know is said so and not kept; an unreachable server is said so", tok["unknown"] == ["The server does not know this token.", None] and tok["down"] == "Could not reach the server.", tok)
+        check("a reader's token is trimmed, tried, kept, named, and the console goes read-only", tok["reader"] == ["kyb_reader", "Bearer kyb_reader", "· Rita Reader (read-only)", "read", 0, "none"], tok["reader"])
+        check("every write entry point refuses a reader with a reason, keyboard or not", tok["refused"] == [6, 0], tok["refused"])
+        check("the token goes out with every request", tok["carried"] == "Bearer kyb_reader", tok["carried"])
+        check("a reader's console does not ask for the request log", tok["readerAudit"] is False, tok["readerAudit"])
+        check("the chip says who: an anonymous reader, a caller without a token, a named writer", [tok["anonReader"], tok["noToken"], tok["writer"]] == ["· read-only", "· no token", ["· Agent W", True]], tok)
+        check("a new task is offered to whoever is signed in; the dialog says who that is", tok["assignee"] == "Agent W" and tok["signedIn"] == "Signed in as Agent W, role write.", tok)
+        check("a failed whoami keeps the last known answer; with nothing known there is no role and the dialog still explains itself", tok["kept"] == "write" and tok["blank"] == [None, ""] and "Paste the token" in tok["blankWhy"] and "Token saved" in tok["nameless"], tok)
+        check("a 401 opens the token dialog once, with the reason that fits", tok["asked"] == [["tokenModal"], "This token is not known to the server, or was revoked."] and tok["askedOnce"] == 0 and tok["askedBare"] == "This server asks for a token." and tok["custom"] == "custom reason" and "Paste the token" in tok["paste"], tok)
+        check("without browser storage the console still signs in for the page", tok["noStore"] == ["", 0] and tok["noStoreSaved"] == 0, tok)
+        check("forgetting the token returns to what the server gives nobody", tok["forgot"] == [None, "off", "", "admin"], tok["forgot"])
+
+        # and against a server that really asks: the same page, real tokens, a real commit
+        with tempfile.TemporaryDirectory(prefix="kyb-ui-auth-") as atmp:
+            atmp = pathlib.Path(atmp)
+            t_read, t_write = issue_token(atmp, "reader", "Rita Reader", "read"), issue_token(atmp, "agent-w", "Agent W", "write")
+            aproc, abase = start_sandbox(atmp, {"KYB_AUTH": "required", "KYB_AUTH_FILE": str(atmp / "auth.json")})
+            try:
+                actx = browser.new_context(viewport={"width": 1440, "height": 900})   # its own storage: no token carried over
+                ap_ = actx.new_page()
+                aerr = []
+                ap_.on("pageerror", lambda e: aerr.append(str(e)))
+                ap_.goto(abase + "/")
+                ap_.wait_for_selector("#tokenModal.open", timeout=8000)
+                check("auth server: the page loads for anyone and asks for a token", ap_.inner_text("#tokenWhy") == "This server asks for a token.")
+                ap_.fill("#tokenInput", "kyb_" + "0" * 64); ap_.click("#tokenModal .btn.primary")
+                ap_.wait_for_function("document.getElementById('tokenErr').textContent !== ''", timeout=5000)
+                check("auth server: a made-up token is refused", ap_.inner_text("#tokenErr") == "The server does not know this token.")
+                ap_.fill("#tokenInput", t_read); ap_.click("#tokenModal .btn.primary")
+                ap_.wait_for_function("document.body.dataset.role === 'read' && !document.querySelector('.modal-backdrop.open')", timeout=8000)
+                check("auth server: a reader signs in, is named, and is offered no write control", ap_.inner_text("#whoLabel") == "· Rita Reader (read-only)" and not ap_.is_visible("#btnOpenNew"))
+                ap_.keyboard.press("n")
+                check("auth server: the keyboard cannot open a form for a reader", ap_.evaluate("document.querySelectorAll('.modal-backdrop.open').length") == 0)
+                st_, e_ = api(abase, "POST", "/knowledge", {"key": "sneak", "title": "t", "body": "b"})
+                check("auth server: without a token the API itself refuses", st_ == 401, (st_, e_))
+                ap_.reload(); ap_.wait_for_function("document.body.dataset.role === 'read'", timeout=8000)
+                check("auth server: the token survives a reload", ap_.inner_text("#whoLabel") == "· Rita Reader (read-only)")
+                ap_.click("#whoBtn"); ap_.fill("#tokenInput", t_write); ap_.click("#tokenModal .btn.primary")
+                ap_.wait_for_function("document.body.dataset.role === 'write'", timeout=8000)
+                ap_.click("#btnOpenNew"); ap_.fill("#newTitle", "Signed Note"); ap_.fill("#newBody", "Written through the form."); ap_.click("#newModalSubmitBtn")
+                ap_.wait_for_function("App.selectedKey === 'signed-note'", timeout=8000)
+                ap_.wait_for_function("document.querySelector('.dh-words') && document.querySelector('.dh-words').textContent.includes('Agent W')", timeout=8000)
+                check("auth server: a writer's entry is authored by the token's name, in the card and in git", "by Agent W" in ap_.inner_text(".dh-words"), ap_.inner_text(".dh-words"))
+                req = urllib.request.Request(abase + "/knowledge/signed-note/history", headers={"authorization": "Bearer " + t_read})
+                hist = json.loads(urllib.request.urlopen(req, timeout=10).read())
+                check("auth server: the commit carries the writer", hist["versions"][0]["author"] == "Agent W <agent-w@kyb>", hist["versions"][0])
+                check("auth server: no script errors", not aerr, aerr[:3])
+                actx.close()
+            finally:
+                aproc.terminate()
+
+        # ------------------------------------------------------------------
+        # Relations: Related in the card, Services and hosts. Every row says why it is there.
+        # ------------------------------------------------------------------
+        RN, RI, RT, SVC, HOST = f"rel-note-{stamp}", f"inc-rel-{stamp}", f"task-rel-{stamp}", f"relsvc{stamp}", f"relhost{stamp}"
+        for path, body in (("/knowledge", {"key": RN, "title": "Rel runbook", "body": f"See [[kyb-service]] and [[gone-{stamp}]]."}),
+                           ("/incidents", {"key": RI, "title": "Rel incident", "service": SVC.upper(), "hosts": [HOST], "severity": "critical", "knowledge": [RN], "body": "It broke."}),
+                           ("/incidents", {"key": RI + "-b", "title": "Rel incident two", "service": SVC, "severity": "low", "body": "Also."}),
+                           ("/tasks", {"key": RT, "title": "Rel task", "body": f"Fix [[{RI}]].", "assignee": "a"})):
+            st_, e_ = api(base, "POST", path, body)
+            check(f"seed relation {body['key']}", st_ == 200, (st_, e_))
+        api(base, "POST", f"/tasks/{RT}/transition", {"status": "blocked", "blocked_reason": "x"})
+        api(base, "POST", f"/incidents/{RI}-b/resolve", {"resolution": "done"})
         ev("refreshAll()")
-        page.wait_for_timeout(700)
-        ev("""(() => { window.__t.xy = id => { const n = App.graphNodes.find(x => x.id === id); const r = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
-                 return [r.left + n.x * c.zoom + c.x, r.top + n.y * c.zoom + c.y]; };
-               window.__t.pinAll = () => App.graphNodes.forEach(n => { n.pinned = true; n.vx = 0; n.vy = 0; });
-               // a node the mouse can reach unambiguously: on screen, off the minimap, and nearer to the cursor than any other node's hit radius
-               window.__t.reachable = pred => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera(); const hit = n => n.width ? Math.max(n.width / 2, n.height / 2) + 6 : n.radius + 12;
-                 for (const n of App.graphNodes) { if (!pred(n)) continue; const sx = n.x * c.zoom + c.x, sy = n.y * c.zoom + c.y;
-                   if (sx < 60 || sx > b.width - 60 || sy < 60 || sy > b.height - 60) continue; if (sx < 190 && sy > b.height - 135) continue;
-                   if (App.graphNodes.every(o => o === n || Math.hypot(o.x - n.x, o.y - n.y) > hit(o) + 4)) return n.id; }
-                 return null; }; })()""")
-        for layout in ("radar", "hierarchy", "grid", "orbit"):
-            ev(f"setGraphLayout('{layout}')")
-            page.wait_for_timeout(250)
-            check(f"layout {layout}: every node has a finite target and position", ev("App.graphNodes.every(n => Number.isFinite(n.targetX) && Number.isFinite(n.targetY) && Number.isFinite(n.x) && Number.isFinite(n.y))") and ev("App.graphLayout") == layout)
-        ev("setGraphFilter('task')")
-        page.wait_for_timeout(250)
-        check("filter 'task' marks its button and is drawn without error", ev("document.getElementById('gFilterTasks').classList.contains('active')"))
-        ev("fitGraphCamera()")
-        check("fit with a filter aims at the visible nodes", ev("Number.isFinite(graphCamera().targetZoom)"))
-        # A hundred seeded nodes overlap; put four where the mouse can reach each unambiguously
-        # and park the rest far away. Positions and pins survive the 4-second rebuild.
-        ev("setGraphFilter('all')")
-        tgt, ent = N, "mentions-kyb"
-        hub = ev("App.graphNodes.find(n => n.type === 'host').id")
-        svc = ev("App.graphNodes.find(n => n.type === 'service').id")
-        ev(f"""(() => {{ window.__t.stage = () => {{ const c = graphCamera(); const w = (sx, sy) => [(sx - c.x) / c.zoom, (sy - c.y) / c.zoom];
-            const spot = {{'{tgt}': [420, 200], '{hub}': [760, 200], '{svc}': [760, 440], '{ent}': [420, 440]}};
-            App.graphNodes.forEach((n, i) => {{ const p = spot[n.id] ? w(...spot[n.id]) : w(20000 + (i % 10) * 900, 20000 + Math.floor(i / 10) * 900); n.x = n.targetX = p[0]; n.y = n.targetY = p[1]; n.vx = n.vy = 0; n.pinned = true; }}); }}; }})()""")
-        page.wait_for_timeout(1800)  # let the camera settle; it is not touched again while the mouse works
-        ev("__t.stage()")
-        page.wait_for_timeout(300)
+        page.wait_for_function(f"App.places.services.some(s => s.name === '{SVC}')", timeout=8000)
+        pl = ev(f"""(() => {{ const s = App.places.services.find(s => s.name === '{SVC}'); const b = document.getElementById('badgeServicesCount');
+          return {{row: s, badge: b.textContent, red: b.className, burning: App.places.services.filter(x => x.open).length, first: App.places.services[0].open > 0, listDrawn: document.getElementById('placesList').children.length}}; }})()""")
+        check("places: the service is counted once per incident, case folded, open and total apart, worst severity kept", pl["row"]["open"] == 1 and pl["row"]["total"] == 2 and pl["row"]["worst"] == "critical", pl["row"])
+        check("the Services badge counts services with something open and turns red; the list is not drawn while its tab is hidden", pl["badge"] == str(pl["burning"]) and "red" in pl["red"] and pl["first"], pl)
+        ev("App.place = null; App.impact = null; document.getElementById('placeDetail').innerHTML = ''")
+        page.click(".nav-tab[data-tab='services']")
+        page.wait_for_function("document.querySelector('#placeDetail h1')", timeout=8000)
+        check("opening Services picks the worst place without touching the address", ev("[location.hash, App.place.kind, !!App.place.name, document.querySelector('#placesList .place.on') !== null]") == ["#/services", "service", True, True], ev("[location.hash, App.place]"))
+        page.click(f"#placesList .place:has-text('{SVC}')")
+        page.wait_for_function(f"document.querySelector('#placeDetail h1').textContent === '{SVC}'", timeout=8000)
+        imp = ev("""({hash: location.hash, sum: document.querySelector('.place-sum').textContent, hot: document.querySelector('.place-sum').className, rows: [...document.querySelectorAll('#placeDetail .rel-row')].map(r => r.textContent.replace(/\\s+/g, ' ').trim()), heads: [...document.querySelectorAll('#placeDetail .rel-h')].map(h => h.textContent.replace(/\\s+/g, ' ').trim()), on: document.querySelector('#placesList .place.on .mono').textContent, pill: document.querySelector('#placesList .place.on .pill').className})""")
+        check("a place pressed shows it and puts it in the address", imp["hash"] == f"#/services/{SVC}" and imp["on"] == SVC and "crit" in imp["pill"], imp)
+        check("the summary says what is open right now", imp["sum"] == "1 open incident right now" and "hot" in imp["hot"], imp["sum"])
+        check("incidents: the open one first with its severity, the closed one after, each naming the service", imp["heads"][0] == "Incidents 2" and "Rel incident" in imp["rows"][0] and "critical" in imp["rows"][0] and "names this service" in imp["rows"][0] and "resolved" in imp["rows"][1], imp["rows"][:2])
+        check("runbooks: the cited note, because of the incident citing it", imp["heads"][1] == "Runbooks and notes 1" and "Rel runbook" in imp["rows"][2] and f"because of {RI}" in imp["rows"][2], imp["rows"][2:3])
+        check("tasks: the task pointing at the incident, blocked, with the reason it is listed", imp["heads"][2] == "Open tasks 1" and "Rel task" in imp["rows"][3] and "blocked" in imp["rows"][3] and f"because of {RI}" in imp["rows"][3], imp["rows"][3:])
+        page.click(f"#placesList .place:has-text('{HOST}')")
+        page.wait_for_function(f"document.querySelector('#placeDetail h1').textContent === '{HOST}'", timeout=8000)
+        check("a host is a place too, with its own address and reason", ev("[location.hash, document.querySelector('#placeDetail .pill').textContent, document.querySelector('#placeDetail .rel-row .why').textContent]") == [f"#/hosts/{HOST}", "host", "names this host"])
+        ev(f"location.hash = '#/search'"); ev(f"location.hash = '#/hosts/{HOST}'")
+        page.wait_for_function(f"App.activeTab === 'services' && document.querySelector('#placeDetail h1').textContent === '{HOST}'", timeout=8000)
+        check("route #/hosts/<name> opens that host", ev("App.place.kind") == "host")
+        ev(f"location.hash = '#/services/{SVC}'")
+        page.wait_for_function(f"document.querySelector('#placeDetail h1').textContent === '{SVC}'", timeout=8000)
+        check("route #/services/<name> opens that service", ev("document.title") == f"KYB — {SVC}")
+        ev("switchTab('incidents'); switchTab('services')")
+        check("coming back to Services keeps the place in the address", ev("location.hash") == f"#/services/{SVC}")
+        ev("refreshAll()")
+        page.wait_for_timeout(500)
+        check("a refresh keeps the place and its detail", ev("[App.place.name, document.querySelector('#placeDetail h1').textContent]") == [SVC, SVC])
 
-        def aim(node_id):
-            """Where a node is on screen once the camera has stopped. Pressing a node re-aims the camera at it,
-            so the camera is aimed there first: the press then moves nothing, and the second click of a
-            double-click lands where the first did."""
-            ev(f"focusNode(App.graphNodes.find(n => n.id === '{node_id}'))")
-            page.wait_for_function("!graphCamera().moving", timeout=15000)
-            page.wait_for_timeout(80)
-            return ev(f"__t.xy('{node_id}')")
+        # narrow: the reason for a row moves under its title, it is not dropped
+        page.set_viewport_size({"width": 800, "height": 900})
+        page.wait_for_timeout(150)
+        why = ev("(() => { const w = document.querySelector('#placeDetail .rel-row .why'), t = document.querySelector('#placeDetail .rel-row .t'); const a = w.getBoundingClientRect(), b = t.getBoundingClientRect(); return [getComputedStyle(w).display, a.width > 40, a.top >= b.bottom - 1, w.textContent]; })()")
+        check("at 800px every row still says why it is there, on a second line", why[:3] == ["block", True, True] and why[3] != "", why)
+        page.set_viewport_size({"width": 1440, "height": 900})
 
-        # hover, press, drag, release, double-click - on the canvas, with the mouse
-        x, y = aim(tgt)
-        page.mouse.move(x, y)
-        page.wait_for_timeout(200)
-        check("hovering a node turns the cursor into a pointer", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
-        page.mouse.down()
-        check("pressing a node opens its drawer", ev("document.getElementById('graphDrawer').classList.contains('open')") and ev("document.getElementById('drawerKey').textContent") == tgt, ev("document.getElementById('drawerKey').textContent"))
-        page.mouse.move(x + 40, y + 30, steps=4)
-        page.mouse.up()
-        page.wait_for_timeout(200)
-        check("dragging a node moves and pins it", ev(f"App.graphNodes.find(n => n.id === '{tgt}').pinned") and ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Pinned'))"))
-        check("a pinned node says so in its drawer", "PINNED" in ev(f"(openGraphDrawer(App.graphNodes.find(n => n.id === '{tgt}')), document.getElementById('drawerMeta').textContent)"))
-        x, y = aim(tgt)
-        page.mouse.dblclick(x, y)
-        page.wait_for_timeout(200)
-        check("double-clicking a pinned node unpins it", ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Unpinned'))"))
-        ev("closeGraphDrawer(); __t.pinAll()")
-        hx, hy = aim(hub)
-        page.mouse.move(hx, hy)
-        page.wait_for_timeout(250)
-        check("hovering a host hub", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
-        page.mouse.click(hx, hy)
-        check("a host hub's drawer is labelled as a host", ev("document.getElementById('drawerBadge').textContent") == "HOST BLADE")
-        ev("closeGraphDrawer()")
-        # empty space: pan, wheel, minimap
-        r = ev("(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()")
-        page.wait_for_function("!graphCamera().moving", timeout=15000)  # pressing the hub re-aimed the camera
-        empty = ev("""(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
-          for (let px = 320; px < 940; px += 40) for (let py = 90; py < b.height - 160; py += 40) {
-            const gx = (px - c.x) / c.zoom, gy = (py - c.y) / c.zoom;
-            if (App.graphNodes.every(n => Math.hypot(n.x - gx, n.y - gy) > 160)) return [b.left + px, b.top + py]; }
-          return null; })()""")
-        check("there is empty canvas to pan on", empty is not None)
-        c0 = ev("graphCamera()")
-        page.mouse.move(empty[0], empty[1]); page.mouse.down(); page.mouse.move(empty[0] - 60, empty[1] + 40, steps=3)
-        c1 = ev("graphCamera()")
-        page.mouse.up()
-        check("dragging empty space pans the camera", ((c1["x"] - c0["x"]) ** 2 + (c1["y"] - c0["y"]) ** 2) ** 0.5 > 40 and c1["zoom"] == c0["zoom"], (c0, c1))
-        check("releasing restores the grab cursor", ev("document.getElementById('topoCanvas').style.cursor") == "grab")
-        page.mouse.move(empty[0] - 60, empty[1] + 40)
-        z0 = ev("graphCamera().zoom")
-        page.mouse.wheel(0, -200)
-        page.wait_for_timeout(100)
-        z1 = ev("graphCamera().zoom")
-        page.mouse.wheel(0, 200)
-        page.wait_for_timeout(100)
-        check("the wheel zooms in and out", z1 > z0 and ev("graphCamera().zoom") < z1, (z0, z1))
-        page.mouse.click(r[0] + 18 + 75, r[1] + r[3] - 18 - 45)
-        check("clicking the minimap aims the camera there", ev("graphCamera().targetZoom") == ev("graphCamera().zoom"))
-        page.wait_for_timeout(1800)
-        ev("__t.stage()")
-        page.wait_for_timeout(300)
-        # double-click on a hub searches by it; on an entry opens it
-        ev("closeGraphDrawer()")
-        sx, sy = aim(svc)
-        ev(f"App.graphNodes.find(n => n.id === '{svc}').pinned = false")  # pinned would mean 'unpin', not 'search'
-        page.mouse.dblclick(sx, sy)
-        page.wait_for_function("App.activeTab === 'search'", timeout=5000)
-        check("double-clicking a hub searches for its service", ev("document.getElementById('globalSearch').value") == svc.split(":", 1)[1])
-        ev("setGlobalSearchQuery(''); location.hash = '#/graph'")
-        page.wait_for_function("App.activeTab === 'graph'", timeout=5000)
+        # from the place to the card, and the card's own Related
+        page.click(f"#placeDetail .rel-row:has-text('Rel runbook')")
+        page.wait_for_function(f"App.selectedKey === '{RN}' && document.querySelectorAll('#relatedBox .rel-row').length === 3", timeout=8000)
+        rel = ev("""({tab: App.activeTab, heads: [...document.querySelectorAll('#relatedBox .rel-h')].map(h => h.textContent.replace(/\\s+/g, ' ').trim()), rows: [...document.querySelectorAll('#relatedBox .rel-row')].map(r => r.textContent.replace(/\\s+/g, ' ').trim())})""")
+        check("a row pressed opens the card", rel["tab"] == "search")
+        check("the card lists who refers to it, open incidents counted", rel["heads"][0] == "Referenced by 1 · 1 open incident" and "Rel incident" in rel["rows"][0] and "cited" in rel["rows"][0], rel)
+        check("and what it refers to: a link in the text, and a key that is not in the base said so", rel["heads"][1] == "Refers to 2" and "linked in the text" in rel["rows"][1] and "not in the base" in rel["rows"][2] and f"gone-{stamp}" in rel["rows"][2], rel["rows"][1:])
+        ev("refreshAll()")
         page.wait_for_timeout(600)
-        ev("closeGraphDrawer()")
-        page.wait_for_timeout(1800)
-        ev("__t.stage()")
-        page.wait_for_timeout(300)
-        x, y = aim(ent)
-        ev(f"App.graphNodes.find(n => n.id === '{ent}').pinned = false")  # a pinned node would be unpinned by the double-click instead of opened
-        page.mouse.dblclick(x, y)
-        page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{ent}'", timeout=5000)
-        check("double-clicking an entry opens it", True)
+        check("Related survives the refresh that rebuilds the card", ev("document.querySelectorAll('#relatedBox .rel-row').length") == 3)
+        page.click("#relatedBox a.rel-row >> nth=0")
+        page.wait_for_function(f"App.selectedKey === '{RI}' && document.querySelectorAll('#relatedBox .rel-row').length === 2", timeout=8000)
+        check("Related is walked: the incident shows the task that points at it and the note it cites", ev("[...document.querySelectorAll('#relatedBox .rel-row .why')].map(w => w.textContent)") == ["linked in the text", "cited"])
+        ev(f"location.hash = '#/incidents'; filterIncidentsSeverity('critical'); const i = incFiltered().findIndex(x => x.key === '{RI}'); App.incidentCursor = i; App.incidentCursorKey = '{RI}'; renderIncidents(true)")
+        page.click("#incidentRows a:text-is('Service')")
+        page.wait_for_function(f"App.activeTab === 'services' && document.querySelector('#placeDetail h1') && document.querySelector('#placeDetail h1').textContent === '{SVC}'", timeout=8000)
+        check("Service in an incident's peek opens that service", ev("location.hash") == f"#/services/{SVC}")
+        ev("filterIncidentsSeverity('all')")
 
-        # drawer buttons, pressed
-        ev("location.hash = '#/graph'")
-        page.wait_for_function("App.activeTab === 'graph'", timeout=5000)
-        ev(f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
-        page.click("#drawerCopyBtn")
-        page.wait_for_timeout(150)
-        check("drawer: Copy copies the key", ev("navigator.clipboard.readText()") == N)
-        page.click("#drawerCopyLinkBtn")
-        page.wait_for_timeout(150)
-        check("drawer: Link copies a graph link", ev("navigator.clipboard.readText()") == f"{base}/#/graph/{N}")
-        page.click("#drawerCenterBtn")
-        check("drawer: Center aims the camera at the node", ev("graphCamera().targetZoom") >= 1.3)
-        page.click("#drawerEditBtn")
-        page.wait_for_function("document.querySelector('#editModal.open')", timeout=5000)
-        check("drawer: Edit opens the editor on the node", ev("document.getElementById('editKey').value") == N)
-        page.keyboard.press("Escape")
-        page.click("#drawerOpenFullBtn")
-        page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{N}'", timeout=5000)
-        check("drawer: Open full lands on the entry", True)
-
-        # drawer and graph over data of every shape
-        gs = ev("""__t.swap({entries: [{key: 'g-plain'}, {key: 'g-hosttag', tags: ['host-zeta', 'api'], title: 'Host by tag'}, {key: 'task-g-child', kind: 'task', parent_task: 'g-plain', tags: [7]},
-                                     {key: 'inc-g', kind: 'incident', hosts: ['alpha', '', 5], service: 'api', knowledge: ['g-plain', 'missing']}]}, () => {
-          const out = {}; const saveNodes = App.graphNodes, saveLinks = App.graphLinks; App.graphNodes = null; buildTopology();
-          const id = n => typeof n === 'string' ? n : n.id; const has = (a, b) => App.graphLinks.some(l => (id(l.source) === a && id(l.target) === b));
-          out.hosts = App.graphNodes.filter(n => n.type === 'host').map(n => n.label).sort(); out.label = App.graphNodes.find(n => n.id === 'g-plain').label;
-          out.links = [has('task-g-child', 'g-plain'), has('inc-g', 'g-plain'), has('inc-g', 'host:alpha'), has('g-hosttag', 'host:host-zeta'), has('inc-g', 'missing')];
-          openGraphDrawer(App.graphNodes.find(n => n.id === 'g-plain')); out.loading = document.getElementById('drawerContent').textContent;
-          const lonely = {id: 'lonely', type: 'knowledge', data: {body: 'has body'}}; openGraphDrawer(lonely); out.noLinks = document.getElementById('drawerLinks').textContent; out.title = document.title;
-          for (const mode of ['orbit', 'radar', 'hierarchy', 'grid']) calculateLayoutTargets(mode);
-          App.entries = []; App.graphNodes = null; buildTopology(); out.empty = App.graphNodes.length;
-          for (const mode of ['orbit', 'radar', 'hierarchy', 'grid']) calculateLayoutTargets(mode);
-          App.graphNodes = null; calculateLayoutTargets('orbit'); unpinAllGraphNodes(); reheatSimulation(0.5); focusNodeById(null); focusNodeById('nobody'); setTopoSearch('x'); setTopoSearch(''); fitGraphCamera();
-          const saveFilter = App.graphFilter; App.graphNodes = [{id: 'only', type: 'knowledge', label: 'only', x: 0, y: 0}]; App.graphFilter = 'incident'; fitGraphCamera(); App.graphFilter = saveFilter;
-          const lay = App.graphLayout; App.graphLayout = ''; App.graphNodes = saveNodes; App.graphLinks = saveLinks; closeGraphDrawer(); App.graphLayout = lay; return out; })""")
-        check("hosts come from hosts[] and host-* tags; non-string values are ignored", gs["hosts"] == ["alpha", "host-zeta"], gs["hosts"])
-        check("links: task to parent, incident to knowledge and host, entry to its host tag; nothing to a missing key", gs["links"] == [True, True, True, True, False], gs["links"])
-        check("a node without a title is labelled by its key; a body-less node says it is loading; a node without links says so", gs["label"] == "g-plain" and "Loading document body" in gs["loading"] and "No active links" in gs["noLinks"] and "lonely" in gs["title"], gs)
-        check("an empty base builds an empty graph and every layout tolerates it", gs["empty"] == 0)
-        ev("buildTopology()")
-        hid = ev("""(() => { const c = document.getElementById('graphContainer'); const d = c.style.display; c.style.display = 'none'; const n = App.graphNodes[0];
-          focusNode(n); const a = graphCamera().targetZoom; zoomGraph(1.1); fitGraphCamera(); c.style.display = d;
-          const noCanvas = __t.without('topoCanvas', () => { fitGraphCamera(); focusNode(n); zoomGraph(1.1); initCanvasGraph(); return true; }); return [a >= 1.3, noCanvas]; })()""")
-        check("the camera math survives a hidden container and a missing canvas", hid == [True, True], hid)
-        page.wait_for_function("!graphCamera().moving", timeout=15000)
-        check("a settled camera reports its own zoom as the target", ev("graphCamera().targetZoom === graphCamera().zoom"))
+        # the corners: nothing to show, a server that fails, an answer that arrives late
+        cor = ev(f"""async () => {{ const out = {{}}; const real = window.fetch; const body = o => Promise.resolve(new Response(JSON.stringify(o), {{status: 200}}));
+          const keep = [App.places, App.place, App.impact];
+          App.places = {{services: [], hosts: []}}; await renderPlaces(); out.empty = document.getElementById('placesList').textContent.trim(); out.badge = document.getElementById('badgeServicesCount').className;
+          App.places = {{services: [], hosts: [{{name: 'only-host', open: 0, total: 3, worst: '', last: ''}}]}}; App.place = null; App.impact = null;
+          window.fetch = u => String(u).includes('/impact') ? Promise.resolve(new Response('x', {{status: 500}})) : real(u);
+          await renderPlaces(); out.hostOnly = [App.place.kind, document.querySelector('#placesList .quiet').textContent, document.getElementById('placeDetail').textContent.trim()];
+          // an answer for a place nobody is looking at any more is dropped
+          let release; window.fetch = u => String(u).includes('/impact') ? new Promise(r => {{ release = () => r(new Response(JSON.stringify({{kind: 'service', name: 'late', open: 0, incidents: [], runbooks: [], tasks: []}}), {{status: 200}})); }}) : real(u);
+          const p = selectPlace('service', 'late', false); App.place = {{kind: 'host', name: 'only-host'}}; release(); await p; out.late = App.impact;
+          // the same place asked twice (a refresh landing on a slow answer): the older answer, arriving last, is dropped
+          {{ const held = []; const imp = n => new Response(JSON.stringify({{kind: 'host', name: 'only-host', open: n, incidents: [], runbooks: [], tasks: []}}), {{status: 200}});
+            window.fetch = u => String(u).includes('/impact') ? new Promise(r => held.push(r)) : real(u);
+            App.place = {{kind: 'host', name: 'only-host'}}; const first = loadImpact(); const second = loadImpact(); held[1](imp(2)); await second; held[0](imp(1)); await first; out.sameOrder = App.impact.open; }}
+          // and the same card: its older Related answer does not replace the newer one
+          {{ const held = []; const rel = k => new Response(JSON.stringify({{outgoing: [], incoming: [{{key: k, kind: 'knowledge', title: k, via: 'link'}}]}}), {{status: 200}});
+            window.fetch = u => String(u).includes('/related') ? new Promise(r => held.push(r)) : real(u);
+            const first = loadRelated('ordered'); const second = loadRelated('ordered'); held[1](rel('newer')); await second; held[0](rel('older')); await first; out.sameCard = App.related.get('ordered').incoming[0].key; }}
+          window.fetch = real;   // the held-back answer above must not hold this one back too
+          App.places = {{services: [{{name: 'solo', open: 0, total: 1, worst: '', last: ''}}], hosts: []}}; App.place = {{kind: 'service', name: 'solo'}}; await renderPlaces(); out.noHosts = [...document.querySelectorAll('#placesList .rel-h')].length;
+          out.missingOdd = (() => {{ const d = document.createElement('div'); d.innerHTML = relRow({{key: 'm', missing: true, via: 'odd'}}); return d.textContent; }})();
+          // a quiet place, and rows of every tone
+          window.fetch = u => String(u).includes('/impact') ? body({{kind: 'service', name: 'quiet', open: 0, incidents: [], runbooks: [], tasks: []}}) : real(u);
+          await selectPlace('service', 'quiet', false); out.quiet = [document.querySelector('.place-sum').textContent, document.querySelector('.place-sum').className.trim(), [...document.querySelectorAll('#placeDetail .rel-none')].length];
+          const rows = [{{key: 'a', kind: 'incident', live: true, severity: 'high', via: 'service'}}, {{key: 'b', kind: 'incident', live: true, via: 'odd'}}, {{key: 'c', kind: 'task', live: true, status: 'in_progress', via: 'link'}}, {{key: 'd', kind: 'task', live: true, via: 'link'}}, {{key: 'e', kind: 'task', live: false, via: 'link'}}, {{key: 'f', kind: 'knowledge', live: false, title: 'F', via: 'knowledge'}}];
+          out.tones = rows.map(r => {{ const d = document.createElement('div'); d.innerHTML = relRow(r); const pill = d.querySelector('.pill'); return (pill ? pill.className.replace('pill', '').trim() + ':' + pill.textContent : '-') + '|' + d.querySelector('.why').textContent; }});
+          // panes that are not there
+          const pd = document.getElementById('placeDetail'); pd.id = 'gone1'; renderPlaceDetail(); pd.id = 'placeDetail';
+          const bd = document.getElementById('badgeServicesCount'); bd.id = 'gone2'; await renderPlaces(); bd.id = 'badgeServicesCount';
+          // Related: a failed request leaves the card alone; an answer for another card is kept but not drawn; an unchanged answer does not redraw
+          const box = document.getElementById('relatedBox'); const before = box.innerHTML;
+          window.fetch = u => String(u).includes('/related') ? Promise.resolve(new Response('x', {{status: 500}})) : real(u); await loadRelated('{RI}'); out.failKept = box.innerHTML === before;
+          window.fetch = u => String(u).includes('/related') ? body({{outgoing: [], incoming: [{{key: 'z', kind: 'knowledge', title: 'Z', via: 'link'}}]}}) : real(u); await loadRelated('other-card'); out.otherKept = box.innerHTML === before && App.related.get('other-card').incoming.length === 1;
+          window.fetch = real; box.innerHTML = 'marker'; await loadRelated('{RI}'); out.unchanged = box.innerHTML === 'marker'; box.innerHTML = relatedHtml('{RI}');
+          const gone = document.getElementById('relatedBox'); gone.id = 'gone3'; App.related.delete('{RI}'); await loadRelated('{RI}'); gone.id = 'relatedBox'; out.noBox = App.related.has('{RI}');
+          out.noRel = [relatedHtml('never-loaded'), (App.related.set('bare', {{outgoing: [], incoming: []}}), relatedHtml('bare'))];
+          App.related.set('two', {{outgoing: [], incoming: [{{key: 'i1', kind: 'incident', live: true, via: 'knowledge'}}, {{key: 'i2', kind: 'incident', live: true, via: 'knowledge'}}]}}); out.plural = relatedHtml('two').includes('2 open incidents');
+          window.fetch = u => String(u).includes('/impact') ? body({{kind: 'service', name: 'two', open: 2, incidents: [], runbooks: [], tasks: []}}) : real(u); await selectPlace('service', 'two', false); out.plural2 = document.querySelector('.place-sum').textContent;
+          window.fetch = real; [App.places, App.place, App.impact] = keep; await renderPlaces(); return out; }}""")
+        forgive_console(0)
+        check("with no incident naming a place the list says so and the badge is calm", "No incident names a service or a host yet" in cor["empty"] and "red" not in cor["badge"], cor)
+        check("hosts alone are listed; a place with nothing open shows its closed count; a failed load says so", cor["hostOnly"] == ["host", "3 closed", "Could not load only-host."] and cor["noHosts"] == 1 and cor["missingOdd"] == "modd · not in the base", cor)
+        check("an impact answer for a place no longer selected is dropped", cor["late"] is None, cor["late"])
+        check("for one place and for one card only the answer to the latest question is used", cor["sameOrder"] == 2 and cor["sameCard"] == "newer", cor)
+        check("a quiet place says nothing is open and explains each empty section", cor["quiet"] == ["Nothing open right now", "place-sum", 3], cor["quiet"])
+        check("rows colour by state: high amber, default open amber, task in progress accent, done green, a note no pill; an unknown reason is shown as written", cor["tones"] == ["amber:high|names this service", "amber:open|odd", "acc:in progress|linked in the text", "acc:open|linked in the text", "ok:done|linked in the text", "-|cited"], cor["tones"])
+        check("Related: a failed load keeps the card, another card's answer is stored not drawn, an unchanged answer does not redraw, a missing box is survived", cor["failKept"] and cor["otherKept"] and cor["unchanged"] and cor["noBox"], cor)
+        check("no relations, no block; counts are pluralised", cor["noRel"] == ["", ""] and cor["plural"] and cor["plural2"] == "2 open incidents right now", cor)
+        ev("location.hash = '#/search'")
 
         # the last defaults in lists, forms and routes
         ev("switchTab('incidents'); filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentCursor = 0; renderIncidents()")
@@ -1606,7 +1606,7 @@ def run(base, headed, coverage=None):
           await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
           window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
         forgive_console(0, "POST /knowledge")
-        check("resolve, done and block go out with the owner as author", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
+        check("resolve, done and block go out without an author field", len(sub[0]) == 3 and "author" not in sub[0][2][1] and sub[0][2][1].get("blocked_reason") == "r", sub[0])
         check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
         dv = ev("""(() => { const out = {};
           renderDetailView({key: 'inc-nodate', kind: 'incident', resolution: 'fixed', title: 'No dates'}, []); out.inc = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
@@ -1646,9 +1646,8 @@ def run(base, headed, coverage=None):
                   ("incidents: a queue selected", "incSelectQueue('unverifiable')", "App.incidentQueue === 'unverifiable'"),
                   ("tasks", "incClearCell(); location.hash = '#/tasks'", "App.activeTab === 'tasks' && document.querySelector('#taskRows .inc-r')"),
                   ("ledger", "location.hash = '#/feed'", "App.activeTab === 'feed' && document.querySelector('#ledBody .led-ev')"),
-                  ("graph", "location.hash = '#/graph'; closeGraphDrawer()", "App.activeTab === 'graph'"),
-                  ("graph with the drawer open", f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))", "document.getElementById('graphDrawer').classList.contains('open')"),
-                  ("new-entry dialog: knowledge", "closeGraphDrawer(); location.hash = '#/search'; openNewModal('knowledge')", "document.querySelector('#newModal.open')"),
+                  ("services", "location.hash = '#/services'", "App.activeTab === 'services' && document.querySelector('#placeDetail .rel-h')"),
+                  ("new-entry dialog: knowledge", "location.hash = '#/search'; openNewModal('knowledge')", "document.querySelector('#newModal.open')"),
                   ("new-entry dialog: incident", "switchNewModalType('incident')", "App.newModalKind === 'incident'"),
                   ("new-entry dialog: task", "switchNewModalType('task')", "App.newModalKind === 'task'"),
                   ("edit dialog", f"closeModal('newModal'); openEditModal('{K}')", "document.querySelector('#editModal.open')"),
@@ -1682,17 +1681,7 @@ def run(base, headed, coverage=None):
         page.set_viewport_size({"width": 1440, "height": 900})
 
         # and the controls are pressed for real: Playwright refuses to click what is hidden, disabled or covered
-        ev(f"location.hash = '#/graph'; openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
-        page.wait_for_timeout(450)
-        for label in ("Stabilize", "Fit to View", "+ Zoom", "- Zoom", "Unpin All", "Reset"):
-            page.click(f".graph-controls-bar button:text-is('{label}')")
-        check("graph bar: all six controls can be pressed with the drawer open", True)
-        for btn in ("layoutRadarBtn", "layoutHierarchyBtn", "layoutGridBtn", "layoutOrbitBtn", "gFilterKnowledge", "gFilterIncidents", "gFilterTasks", "gFilterAll"):
-            page.click(f"#{btn}")
-        check("graph panel: layout and filter buttons pressed", ev("App.graphLayout") == "orbit" and ev("App.graphFilter") == "all")
-        page.click("#graphDrawer button[onclick='closeGraphDrawer()']")
-        check("drawer: its close button closes it", not ev("document.getElementById('graphDrawer').classList.contains('open')"))
-        for tab in ("incidents", "tasks", "graph", "feed", "search"):
+        for tab in ("incidents", "tasks", "services", "feed", "search"):
             page.click(f".nav-tab[data-tab='{tab}']")
             check(f"nav: pressing {tab}", ev("App.activeTab") == tab)
         page.click("#refreshBtn")
@@ -1765,32 +1754,6 @@ def run(base, headed, coverage=None):
 
 
         # the last two dozen blocks
-        ev("location.hash = '#/graph'")
-        page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
-        last = ev(f"""async () => {{ const out = {{}}; const cv = document.getElementById('topoCanvas'); const b = cv.getBoundingClientRect();
-          // a frame, a mouse and a rebuild with no graph at all
-          // the 4-second refresh rebuilds the graph; hold it off so "no graph" stays true for these frames
-          const rebuild = window.buildTopology; window.buildTopology = () => {{}};
-          const nodes = App.graphNodes, links = App.graphLinks; App.graphNodes = null; App.graphLinks = null; await __t.wait(120);
-          const at = (x, y) => ({{clientX: b.left + x, clientY: b.top + y, preventDefault() {{}}, deltaY: -1}});
-          cv.onmousedown(at(60, b.height - 60)); window.onmouseup(); cv.onmousedown(at(500, 300)); window.onmousemove(at(520, 310)); window.onmouseup(); window.onmousemove(at(500, 300)); cv.ondblclick(at(500, 300));
-          openGraphDrawer({{id: 'no-links', label: 'n', type: 'knowledge', data: {{body: 'b'}}}}); out.noLinks = document.getElementById('drawerLinks').textContent.includes('No active links'); closeGraphDrawer();
-          out.noCanvasLayout = __t.without('topoCanvas', () => {{ App.graphNodes = nodes; calculateLayoutTargets('orbit'); return true; }});
-          App.graphNodes = nodes; App.graphLinks = links;   // the rebuild stays held off: the steps below edit this same node list
-          // physics with two nodes on the same spot and a link of zero length
-          const [a, c] = nodes.filter(n => !n.isHub); const keep = [a.x, a.y, c.x, c.y, a.pinned, c.pinned]; c.x = a.x; c.y = a.y; a.pinned = c.pinned = false; links.push({{source: a, target: c}}); reheatSimulation(1); await __t.wait(150);
-          out.finite = [a.x, a.y, c.x, c.y].every(Number.isFinite); links.pop(); [a.x, a.y, c.x, c.y, a.pinned, c.pinned] = keep;
-          // a node with no label is drawn, a search dims the rest
-          nodes.push({{id: 'nolabel', type: 'knowledge', x: 300, y: 300, vx: 0, vy: 0, radius: 9, pinned: true}}); await __t.wait(120); nodes.pop();
-          setTopoSearch('kyb'); await __t.wait(200); out.searchCount = document.getElementById('topoSearchCount').textContent; setTopoSearch('');
-          // a drawer for a node that carries no body fetches it
-          openGraphDrawer({{id: '{N}', label: 'x', type: 'knowledge'}}); await __t.wait(600); out.fetchedBody = document.getElementById('drawerContent').textContent.includes('UI test'); closeGraphDrawer();
-          // radar with entries that belong to no service; a rebuild with no layout chosen
-          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; try {{ rebuild(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); }} finally {{ App.graphNodes = n2; App.graphLinks = l2; }} }});
-          window.buildTopology = rebuild; buildTopology(); return out; }}""")
-        check("the graph survives having no data mid-frame, a missing canvas, coincident nodes, an unlabelled node and orphans", last["noLinks"] and last["noCanvasLayout"] and last["finite"] and last["orphans"], last)
-        check("graph search counts its matches while drawing", "matching node" in last["searchCount"], last["searchCount"])
-        check("a drawer opened on a bare node fetches the body", last["fetchedBody"], last)
         led3 = ev("""async () => { switchTab('feed'); const calls = []; const real = window.ledFetchDiffs; window.ledFetchDiffs = async evs => { calls.push(evs.length); return false; };
           renderFeed(); await __t.wait(30);                                   // the ordinary load, through the stub, finishes first
           App.ledEvents = null; App.ledLoading = false; ledLoadVisible(); const asked = calls[calls.length - 1];   // the loader calls the fetcher synchronously

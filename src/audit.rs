@@ -65,6 +65,7 @@ pub async fn audit_mw(State(st): State<Arc<AppState>>, req: Request, next: Next)
         "query": query,
         "status": resp.status().as_u16(),
         "ms": start.elapsed().as_millis() as u64,
+        "actor": resp.extensions().get::<crate::auth::ActorTag>().map(|t| t.0.clone()).unwrap_or_else(|| "-".into()),
     }));
     resp
 }

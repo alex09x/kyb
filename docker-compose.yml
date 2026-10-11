@@ -7,8 +7,16 @@ services:
     # and can't be read/edited by hand (and git-as-truth is the whole point).
     user: "1000:1000"
     ports:
-      # Safe by default: the API has no application auth. Operators that need
-      # remote private-network clients must opt into one exact interface IP.
+      # Safe by default: loopback only. Operators that need remote private-network
+      # clients must opt into one exact interface IP - and should turn tokens on.
       - "${KYB_PUBLISH_ADDR:-127.0.0.1}:9310:9310"
+    environment:
+      # Compose reads .env for ${...} below; nothing reaches the container unless
+      # it is named here. off | compat | required (see README: Access).
+      KYB_AUTH: "${KYB_AUTH:-off}"
+      # The token book: on the persistent volume, outside the git canon.
+      KYB_AUTH_FILE: "${KYB_AUTH_FILE:-/data/auth.json}"
+      # "read" lets callers without a token read (a public demo); empty = nobody.
+      KYB_ANON: "${KYB_ANON:-}"
     volumes:
-      - ./data:/data # ./data/kyb-data — git canon, ./data/index — Tantivy
+      - ./data:/data # ./data/kyb-data — git canon, ./data/index — Tantivy, ./data/auth.json — token book
