@@ -60,6 +60,8 @@ digest=$(docker image inspect --format '{{join .RepoDigests "\n"}}' "$image:$sha
 sed -i "s|^\( *image: \).*|\1$image@$digest|" docker-compose.yml.new
 grep -q "image: $image@$digest" docker-compose.yml.new || { echo "could not pin the image in the compose" >&2; exit 1; }
 docker compose -f docker-compose.yml.new config -q
+# the bind comes from the host-local .env (owner's decision), never from the repo: show what will be published
+docker compose -f docker-compose.yml.new config | grep -E "host_ip|published" | sed 's/^/  bind: /' >&2
 # What is running, by pullable digest: the rollback compose names exactly that, not `latest`.
 old_id=$(docker inspect --format '{{.Image}}' kyb 2>/dev/null || true)
 old_digest=$(docker image inspect --format '{{join .RepoDigests "\n"}}' "$old_id" 2>/dev/null | grep "^$image@" | head -1 || true)
