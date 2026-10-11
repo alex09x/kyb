@@ -12,7 +12,8 @@
 # puts the session id, the agent and the workspace into the tool call as `_ctx`,
 # which the server takes out of the arguments and records as trailers on the
 # commit (`kyb history <key>` shows them as `by`). Nothing else changes: the
-# model's arguments pass through untouched, and the hook never blocks a call.
+# model's arguments pass through untouched, the hook never blocks a call and
+# never allows one - the permission decision stays with the person's policy.
 #
 # Registered by skills/install.sh in ~/.claude/settings.json:
 #   PreToolUse, matcher "mcp__kyb__.*", command ~/.local/bin/kyb-hook
@@ -26,9 +27,14 @@ import sys
 
 
 def workspace(cwd):
+    """The repository's name and the path inside it; never an absolute path.
+
+    Both ends are canonicalised and the directory must really be inside the
+    repository: a symlinked cwd must not turn into `../../Users/...`."""
     env = os.environ.get("KYB_WORKSPACE")
     if env:
-        return env
+        return env.lstrip("/").rsplit("/", 1)[-1] if env.startswith("/") else env
+    cwd = os.path.realpath(cwd)
     try:
         top = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
@@ -37,9 +43,13 @@ def workspace(cwd):
     except (OSError, subprocess.SubprocessError):
         top = ""
     if top:
-        rel = os.path.relpath(cwd, top)
+        top = os.path.realpath(top)
         name = os.path.basename(top)
-        return name if rel in ("", ".") else f"{name}/{rel}"
+        if cwd == top:
+            return name
+        if cwd.startswith(top + os.sep):
+            return f"{name}/{os.path.relpath(cwd, top)}"
+        return name
     return os.environ.get("PROD_WORKSPACE_NAME") or os.path.basename(cwd.rstrip("/")) or ""
 
 
@@ -60,11 +70,11 @@ def main():
     }
     updated = dict(tool_input)
     updated["_ctx"] = ctx
+    # Only the input changes. No permission decision: whether the call may run
+    # stays with the person's own policy, exactly as without this hook.
     json.dump({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": "kyb: attribution added",
             "updatedInput": updated,
         }
     }, sys.stdout)

@@ -2406,6 +2406,30 @@ mod api_tests {
             Some(json!({"claudecode/toolUseId": "toolu_2"}))))).await;
         let (_, h) = call(&app, "GET", "/knowledge/task-by-both/history", None).await;
         assert_eq!(h["versions"][0]["by"]["via"], "meta");
+        // a partial _ctx (workspace only) is completed from the metadata: agent from there, via names the agent's source
+        call(&app, "POST", "/mcp", Some(rpc(6, "kyb_task", json!({"key": "task-by-part", "title": "T", "body": "b", "_ctx": {"workspace": "btcr"}}),
+            Some(json!({"antigravity.google/conversation_id": "conv-9"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-part/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-9", "workspace": "btcr", "via": "meta"}));
+        // Codex may send its turn metadata JSON-encoded as a string
+        call(&app, "POST", "/mcp", Some(rpc(7, "kyb_task", json!({"key": "task-by-cxs", "title": "T", "body": "b"}),
+            Some(json!({"x-codex-turn-metadata": "{\"thread_id\": \"thr-s\"}"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-cxs/history", None).await;
+        assert_eq!(h["versions"][0]["by"]["session"], "thr-s");
+        // a client with neither hook nor metadata: the X-Kyb headers on the MCP request itself
+        let req = Request::builder().method("POST").uri("/mcp").header("content-type", "application/json")
+            .header("x-kyb-agent", "cursor").header("x-kyb-workspace", "landing-rs")
+            .body(Body::from(rpc(8, "kyb_task", json!({"key": "task-by-hdr", "title": "T", "body": "b"}), None).to_string())).unwrap();
+        assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-hdr/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "cursor", "workspace": "landing-rs", "via": "headers"}));
+        // and those headers only fill what the call itself did not say
+        let req = Request::builder().method("POST").uri("/mcp").header("content-type", "application/json")
+            .header("x-kyb-agent", "cursor").header("x-kyb-workspace", "landing-rs")
+            .body(Body::from(rpc(9, "kyb_task", json!({"key": "task-by-hdr2", "title": "T", "body": "b"}), Some(json!({"antigravity.google/conversation_id": "conv-h"}))).to_string())).unwrap();
+        app.clone().oneshot(req).await.unwrap();
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-hdr2/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-h", "workspace": "landing-rs", "via": "meta"}));
     }
 
     #[tokio::test]

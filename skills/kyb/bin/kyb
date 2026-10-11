@@ -95,41 +95,73 @@ urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.arg
 # KYB_SESSION, KYB_WORKSPACE. The workspace is a name and a path inside the
 # repository, never an absolute path: machines and home directories stay out
 # of the shared history.
-# An agent's own markers come before PROD_PROVIDER: a Codex started from inside a
-# Claude Code shell inherits that shell's PROD_PROVIDER=claude, but CODEX_* is its
-# own. Agents nested the other way round cannot be told apart from here; KYB_AGENT
-# settles it when it matters.
-by_agent() {
-  if [ -n "${KYB_AGENT:-}" ]; then printf '%s' "$KYB_AGENT"
-  elif [ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}${CODEX_SANDBOX:-}" ]; then printf 'codex'
-  elif [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}${ANTIGRAVITY_SESSION_ID:-}${ANTIGRAVITY_AGENT:-}" ]; then printf 'antigravity'
-  elif [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then printf 'claude'
-  elif [ -n "${PROD_PROVIDER:-}" ]; then printf '%s' "$PROD_PROVIDER"
-  elif [ -n "${GEMINI_CLI:-}" ]; then printf 'gemini'
-  else printf 'shell'
+# The agent and its session are decided together: first which agent this is,
+# then that agent's own session variable and no other's. A Codex started from
+# inside a Claude Code shell inherits CLAUDE_CODE_SESSION_ID and PROD_PROVIDER=claude,
+# but CODEX_THREAD_ID is its own, so the agent's own markers come first; nested
+# the other way round the two cannot be told apart from here, and KYB_AGENT
+# settles it - the session then comes from that agent's variable or KYB_SESSION,
+# never from another agent's.
+by_context() { # sets BY_AGENT and BY_SESSION
+  BY_AGENT="${KYB_AGENT:-}"
+  if [ -z "$BY_AGENT" ]; then
+    if [ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]; then BY_AGENT=codex
+    elif [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}${ANTIGRAVITY_AGENT:-}" ]; then BY_AGENT=antigravity
+    elif [ -n "${CLAUDECODE:-}${CLAUDE_CODE_SESSION_ID:-}" ]; then BY_AGENT=claude
+    elif [ -n "${PROD_PROVIDER:-}" ]; then BY_AGENT="$PROD_PROVIDER"
+    else BY_AGENT=shell
+    fi
   fi
+  case "$BY_AGENT" in
+    codex)       BY_SESSION="${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}" ;;
+    antigravity) BY_SESSION="${ANTIGRAVITY_CONVERSATION_ID:-}" ;;
+    claude)      BY_SESSION="${CLAUDE_CODE_SESSION_ID:-}" ;;
+    *)           BY_SESSION="${PROD_PRIMARY_SESSION_KEY:-}" ;;
+  esac
+  BY_SESSION="${KYB_SESSION:-$BY_SESSION}"
 }
-by_session() {
-  printf '%s' "${KYB_SESSION:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-${ANTIGRAVITY_CONVERSATION_ID:-${ANTIGRAVITY_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${PROD_PRIMARY_SESSION_KEY:-}}}}}}}"
-}
+# The repository's name and the path inside it; never an absolute path. Both ends
+# are the physical paths and the directory must really be inside the repository:
+# a symlinked working directory must not turn into the whole path from /.
 by_workspace() {
-  if [ -n "${KYB_WORKSPACE:-}" ]; then printf '%s' "$KYB_WORKSPACE"; return; fi
-  local top rel
+  if [ -n "${KYB_WORKSPACE:-}" ]; then
+    case "$KYB_WORKSPACE" in /*) basename "$KYB_WORKSPACE" ;; *) printf '%s' "$KYB_WORKSPACE" ;; esac
+    return
+  fi
+  local top here
+  here="$(pwd -P)"
   if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; then
-    rel="${PWD#"$top"}"; rel="${rel#/}"
-    printf '%s%s' "$(basename "$top")" "${rel:+/$rel}"
+    top="$(cd "$top" && pwd -P)"
+    if [ "$here" = "$top" ]; then basename "$top"
+    else
+      case "$here" in "$top"/*) printf '%s/%s' "$(basename "$top")" "${here#"$top"/}" ;; *) basename "$top" ;; esac
+    fi
   elif [ -n "${PROD_WORKSPACE_NAME:-}" ]; then
     printf '%s' "$PROD_WORKSPACE_NAME"
   else
-    basename "$PWD"
+    basename "$here"
   fi
+}
+# One curl config line `header = "<name>: <value>"`. The value goes through the
+# config file's quoted-string syntax, so a quote or a backslash in it is escaped
+# and control characters are dropped: a value can never end the line and start
+# another option, which is what would send the headers - token included - to a
+# URL of its choosing.
+cfg_header() { # cfg_header <name> <value>
+  local v
+  v="$(printf '%s' "$2" | tr -d '\000-\037\177')"
+  v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
+  printf 'header = "%s: %s"\n' "$1" "$v"
 }
 # curl config lines: every header the server reads, token included, in a file
 # descriptor rather than on the command line, where `ps` could show them
 request_headers() {
-  [ -n "$KYB_TOKEN" ] && printf 'header = "authorization: Bearer %s"\n' "$KYB_TOKEN"
-  printf 'header = "x-kyb-agent: %s"\nheader = "x-kyb-session: %s"\nheader = "x-kyb-workspace: %s"\nheader = "x-kyb-via: cli"\n' \
-    "$(by_agent)" "$(by_session)" "$(by_workspace)"
+  by_context
+  [ -n "$KYB_TOKEN" ] && cfg_header authorization "Bearer $KYB_TOKEN"
+  cfg_header x-kyb-agent "$BY_AGENT"
+  cfg_header x-kyb-session "$BY_SESSION"
+  cfg_header x-kyb-workspace "$(by_workspace)"
+  cfg_header x-kyb-via cli
 }
 
 # This is a pure HTTP client for the kyb server — no ssh, no attempts to

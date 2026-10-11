@@ -43,17 +43,18 @@ except ValueError:
     raise SystemExit(f"kyb: {path} is not valid JSON; the hook was not registered")
 hooks = settings.setdefault("hooks", {})
 pre = hooks.setdefault("PreToolUse", [])
-entry = {"matcher": "mcp__kyb__.*", "hooks": [{"type": "command", "command": hook, "timeout": 5, "statusMessage": "kyb attribution"}]}
-# ours is the one whose command is the kyb hook: replace it in place, add it once, leave every other hook alone
-mine = [i for i, h in enumerate(pre) if any("kyb-hook" in str(c.get("command", "")) for c in h.get("hooks", []))]
-if mine:
-    pre[mine[0]] = entry
-    for i in reversed(mine[1:]):
-        del pre[i]
-else:
-    pre.append(entry)
+handler = {"type": "command", "command": hook, "timeout": 5, "statusMessage": "kyb attribution"}
+# Ours is exactly the handler whose command is this hook's path. It is taken out of
+# wherever it sits (a group keeps its other handlers; a group left empty goes), then
+# added once in its own group. Nothing else in the file is touched.
+for group in pre:
+    group["hooks"] = [c for c in group.get("hooks", []) if c.get("command") != hook]
+pre[:] = [g for g in pre if g.get("hooks")]
+pre.append({"matcher": "mcp__kyb__.*", "hooks": [handler]})
 path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text(json.dumps(settings, indent=2) + "\n")
+tmp = path.with_name(path.name + ".kyb-tmp")
+tmp.write_text(json.dumps(settings, indent=2) + "\n")
+tmp.replace(path)
 PY
   echo "✓ HOOKREG  $claude_settings (PreToolUse mcp__kyb__.*)"
 fi

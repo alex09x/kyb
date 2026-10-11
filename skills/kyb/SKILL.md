@@ -448,8 +448,12 @@ ran in, as far as the client could tell. `kyb history <key>` shows them as `by`:
   `CODEX_THREAD_ID`, `ANTIGRAVITY_CONVERSATION_ID` or `PROD_PRIMARY_SESSION_KEY`; the workspace
   from the git repository the command ran in (`<repo>/<path inside it>`), never an absolute path.
 - `via: hook` — Claude Code calls the kyb MCP tools over HTTP, so a PreToolUse hook
-  (`~/.local/bin/kyb-hook`, registered by the installer) adds the same three to each call.
+  (`~/.local/bin/kyb-hook`, registered by the installer) adds the same three to each call. It
+  changes only the call's input; whether the call may run stays with your permission policy.
 - `via: meta` — the MCP client's own call metadata named the conversation (Antigravity, Codex).
+- `via: headers` — a client that sent `X-Kyb-Agent` / `X-Kyb-Session` / `X-Kyb-Workspace` with its
+  MCP requests and had neither a hook nor metadata. A field one source left empty is filled from
+  the next (hook, then metadata, then headers); `via` names where the agent came from.
 - `kyb whoami` shows what a write from here would be attributed to. Override with `KYB_AGENT`,
   `KYB_SESSION`, `KYB_WORKSPACE` when the environment is not yours (a script acting for an agent,
   or an agent started from inside another agent's shell, which inherits the outer one's markers).
