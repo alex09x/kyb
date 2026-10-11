@@ -372,7 +372,7 @@ def run(base, headed, coverage=None):
 
         # --- create incident / resolve it
         page.evaluate(f"""async () => {{ openNewModal('incident'); await __t.wait(200);
-          __t.set('newTitle', 'UI test incident'); __t.set('newKey', '{I}'); __t.set('newBody', 'Symptom: test.'); __t.set('newService', 'ui-test');
+          __t.set('newTitle', 'UI test incident'); __t.set('newKey', '{I}'); __t.set('newBody', 'Symptom: test.'); __t.set('newService', 'ui-test'); __t.set('newDetection', 'curl -s localhost/healthz');
           await submitNewModal(); await __t.wait(400); }}""")
         s, e = api(base, "GET", f"/knowledge/{I}")
         check("create incident from the form", s == 200 and e.get("kind") == "incident" and e.get("service") == "ui-test", (s, e))
@@ -1305,7 +1305,8 @@ def run(base, headed, coverage=None):
         frm = ev(f"""async () => {{ const real = window.fetch; const sent = []; const out = {{}};
           window.fetch = (u, o) => {{ if (o && o.method === 'POST') {{ sent.push([String(u), JSON.parse(o.body)]); return Promise.resolve(new Response('{{}}', {{status: 200}})); }} return real(u, o); }};
           const real_refresh = window.refreshAll; window.refreshAll = async () => {{}}; const real_select = window.selectEntry; window.selectEntry = async () => {{}};
-          openNewModal('incident'); __t.set('newTitle', 'T'); __t.set('newKey', 'inc-defaults'); __t.set('newBody', 'b'); __t.set('newService', ''); document.getElementById('newSeverity').value = ''; await submitNewModal();
+          openNewModal('incident'); __t.set('newTitle', 'T'); __t.set('newKey', 'inc-defaults'); __t.set('newBody', 'b'); __t.set('newService', ''); document.getElementById('newSeverity').value = ''; await submitNewModal(); out.noCheck = [__t.open(), document.getElementById('newDetection').classList.contains('invalid')];
+          __t.set('newDetection', 'curl -s x'); await submitNewModal();
           openNewModal('incident'); __t.set('newTitle', 'T'); __t.set('newKey', 'inc-detect'); __t.set('newBody', 'b'); __t.set('newDetection', 'true'); document.querySelector(".seg[data-for='newSeverity'] [data-value='high']").click(); await submitNewModal();
           openNewModal('task'); __t.set('newTitle', 'T'); __t.set('newKey', 'task-defaults'); __t.set('newBody', 'b'); __t.set('newAssignee', ''); await submitNewModal();
           openNewModal('knowledge'); __t.set('newTitle', 'T'); __t.set('newKey', 'k-defaults'); __t.set('newBody', 'b'); await submitNewModal();
@@ -1317,7 +1318,7 @@ def run(base, headed, coverage=None):
           out.knowHtml = await bare({{key: 'e-know'}});
           window.fetch = real; window.refreshAll = real_refresh; window.selectEntry = real_select; out.sent = sent; return out; }}""")
         by = {u.split("/")[-1] + ":" + b["key"]: b for u, b in frm["sent"]}
-        check("a new incident with nothing chosen is medium on 'infrastructure' and carries no detection", by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium" and "detection" not in by["incidents:inc-defaults"], by.get("incidents:inc-defaults"))
+        check("the form refuses an incident without a check and marks the field; with one it goes out medium on 'infrastructure' and without hosts", frm["noCheck"] == [["newModal"], True] and by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium" and by["incidents:inc-defaults"]["detection"] == "curl -s x" and "hosts" not in by["incidents:inc-defaults"], (frm.get("noCheck"), by.get("incidents:inc-defaults")))
         check("a segment pressed and a detection typed go out with the incident", by["incidents:inc-detect"]["severity"] == "high" and by["incidents:inc-detect"]["detection"] == "true", by.get("incidents:inc-detect"))
         check("the edit form marks the stored severity and keeps the detection", all(f"data-value=\"{sev}\" " in frm["sev-" + sev] and 'class="on"' in frm["sev-" + sev] for sev in ("critical", "high", "low")) and by["incidents:e-inc"]["detection"] == "d", by.get("incidents:e-inc"))
         check("a new task with no assignee typed is unclaimed and unranked", by["tasks:task-defaults"]["assignee"] == "" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
@@ -1334,7 +1335,7 @@ def run(base, headed, coverage=None):
           openResolveTaskModal('task-x', 't'); submitResolveTask(); out.doneErr = document.querySelectorAll('#resolveTaskModal .form-err').length; closeModal('resolveTaskModal');
           promptBlockTask('task-x', 't'); submitBlockTask(); out.blockErr = document.querySelectorAll('#blockTaskModal .form-err').length; closeModal('blockTaskModal');
           return out; })()""")
-        check("an empty required field is marked in place, focused, and unmarked once filled", req["marked"] == ["newTitle", "newBody"] and req["errs"] == 2 and req["focus"] == "newTitle" and req["after"] == ["newBody"] and req["errsAfter"] == 1, req)
+        check("an empty required field is marked in place, focused, and unmarked once filled", req["marked"] == ["newTitle", "newDetection", "newBody"] and req["errs"] == 3 and req["focus"] == "newTitle" and req["after"] == ["newDetection", "newBody"] and req["errsAfter"] == 2, req)
         check("a key typed by hand survives the title; an untouched key follows it", req["keptInc"] == "inc-mine" and req["keptTask"] == "task-mine" and req["derived"] == "fresh-note", req)
         check("resolve, done and block mark their one field when it is empty", (req["resolveErr"], req["doneErr"], req["blockErr"]) == (1, 1, 1), req)
         page.wait_for_timeout(300)
