@@ -11,8 +11,8 @@ use tantivy::schema::{
 };
 use tantivy::tokenizer::{Language, LowerCaser, SimpleTokenizer, Stemmer, TextAnalyzer};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::RwLock;
-use tantivy::{Index, IndexReader, IndexWriter, Order, TantivyDocument, Term};
+use std::sync::{Arc, Mutex, RwLock};
+use tantivy::{Index, IndexReader, IndexWriter, Order, ReloadPolicy, TantivyDocument, Term};
 
 /// Russian stemmer: bodies are mostly Russian; latin identifiers
 /// (CreateOrUpdateStream, NATS) pass through unchanged after lowercasing.
@@ -73,18 +73,35 @@ pub struct Fields {
     updated_at: Field,
 }
 
+/// Retracted knowledge: key -> (committed_at, seq) of every deletion. Not a
+/// document - nothing should ever find a tombstone - but the as_of snapshot
+/// needs to know that a key had stopped existing by T.
+type Tombstones = HashMap<String, Vec<(i64, u64)>>;
+
+/// What a search reads: the documents of one commit and the tombstones that
+/// belong to that same commit, published together by commit_and_reload. A
+/// search holds one generation for its whole run. The two must never be paired
+/// across generations: reindex renumbers every document, so a tombstone's seq
+/// only means something next to the documents it was built with.
+struct Generation {
+    searcher: tantivy::Searcher,
+    tombstones: Tombstones,
+}
+
 pub struct SearchIndex {
     pub index: Index,
+    /// Reloaded only by commit_and_reload, never on its own: a reader that
+    /// reloads behind our back would publish documents without their tombstones
+    /// (and reindex's intermediate empty commit as a generation of its own).
     pub reader: IndexReader,
     fields: Fields,
     /// Next insertion sequence number; rebuilt by reindex(), advanced by
-    /// upsert_head(). Startup always reindexes, so it is never stale.
+    /// upsert_head() and retract(). Startup always reindexes, so it is never stale.
     next_seq: AtomicU64,
-    /// Retracted knowledge: key -> (committed_at, seq) of every deletion. Not a
-    /// document - nothing should ever find a tombstone - but the as_of snapshot
-    /// needs to know that a key had stopped existing by T. Rebuilt by
-    /// reindex(), extended by retract(); startup always reindexes.
-    tombstones: RwLock<HashMap<String, Vec<(i64, u64)>>>,
+    /// The tombstones the next commit_and_reload will publish, mutated only by
+    /// whoever holds the IndexWriter: rebuilt by reindex(), extended by retract().
+    pending_tombstones: Mutex<Tombstones>,
+    generation: RwLock<Arc<Generation>>,
 }
 
 #[derive(serde::Serialize)]
@@ -272,13 +289,15 @@ impl SearchIndex {
             is_head: f("is_head"),
             updated_at: f("updated_at"),
         };
-        let reader = index.reader()?;
+        let reader = index.reader_builder().reload_policy(ReloadPolicy::Manual).try_into()?;
+        let generation = Generation { searcher: reader.searcher(), tombstones: HashMap::new() };
         Ok(SearchIndex {
             index,
             reader,
             fields,
             next_seq: AtomicU64::new(1),
-            tombstones: RwLock::new(HashMap::new()),
+            pending_tombstones: Mutex::new(HashMap::new()),
+            generation: RwLock::new(Arc::new(generation)),
         })
     }
 
@@ -391,12 +410,30 @@ impl SearchIndex {
     /// snapshot no longer has a current version of it.
     pub fn retract(&self, key: &str, committed_at: i64) {
         let seq = self.next_seq.fetch_add(1, AtomicOrdering::SeqCst);
-        self.tombstones.write().unwrap().entry(key.to_string()).or_default().push((committed_at, seq));
+        self.pending_tombstones
+            .lock()
+            .unwrap()
+            .entry(key.to_string())
+            .or_default()
+            .push((committed_at, seq));
     }
 
+    /// The generation searches read right now.
+    fn generation(&self) -> Arc<Generation> {
+        self.generation.read().unwrap().clone()
+    }
+
+    /// Publish: the committed documents and the pending tombstones become one
+    /// generation, swapped in as a unit. A search already holding the previous
+    /// generation finishes with the previous documents and the previous tombstones.
     pub fn commit_and_reload(&self, w: &mut IndexWriter) -> Result<()> {
         w.commit()?;
         self.reader.reload()?;
+        let generation = Generation {
+            searcher: self.reader.searcher(),
+            tombstones: self.pending_tombstones.lock().unwrap().clone(),
+        };
+        *self.generation.write().unwrap() = Arc::new(generation);
         Ok(())
     }
 
@@ -422,12 +459,12 @@ impl SearchIndex {
             w.add_document(self.make_doc(&h.entry, &h.sha, h.committed_at, false, seq))?;
             last.insert(h.entry.key.clone(), (h.entry.clone(), h.sha.clone(), h.committed_at, seq));
         }
-        // a retraction after `n` documents outranks seq n and everything before it
-        let mut tombstones: HashMap<String, Vec<(i64, u64)>> = HashMap::new();
+        // a retraction after `n` documents outranks seq n and everything before
+        // it; published together with these documents by commit_and_reload below
+        let mut tombstones: Tombstones = HashMap::new();
         for r in retractions {
             tombstones.entry(r.key).or_default().push((r.committed_at, r.after as u64));
         }
-        *self.tombstones.write().unwrap() = tombstones;
         let heads = store.list_head()?;
         let mut live = 0usize;
         let mut alive: HashSet<&str> = HashSet::new();
@@ -448,6 +485,7 @@ impl SearchIndex {
             live += 1;
         }
         self.next_seq.store(seq + 1, AtomicOrdering::SeqCst);
+        *self.pending_tombstones.lock().unwrap() = tombstones;
         self.commit_and_reload(w)?;
         Ok((live, hist.len()))
     }
@@ -467,7 +505,11 @@ impl SearchIndex {
     }
 
     pub fn search(&self, q: &str, opts: &SearchOpts) -> Result<Vec<Hit>> {
-        let searcher = self.reader.searcher();
+        self.search_in(&self.generation(), q, opts)
+    }
+
+    fn search_in(&self, generation: &Generation, q: &str, opts: &SearchOpts) -> Result<Vec<Hit>> {
+        let searcher = generation.searcher.clone();
         let base: Box<dyn Query> = if q.trim().is_empty() {
             Box::new(AllQuery)
         } else {
@@ -591,7 +633,7 @@ impl SearchIndex {
         // a superseded version answer for a key whose current version at T no
         // longer says the word, or no longer carries the status.
         let snapshot = match as_of {
-            Some(at) => Some(self.current_version_per_key(&searcher, at, window)?),
+            Some(at) => Some(self.current_version_per_key(generation, at, window)?),
             None => None,
         };
         let top = if collapse {
@@ -613,10 +655,11 @@ impl SearchIndex {
     /// thousands of entries by design, so this is a few milliseconds.
     fn current_version_per_key(
         &self,
-        searcher: &tantivy::Searcher,
+        generation: &Generation,
         at: i64,
         window: Option<(i64, i64)>,
     ) -> Result<HashMap<String, u64>> {
+        let searcher = &generation.searcher;
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![
             (
                 Occur::Must,
@@ -656,8 +699,8 @@ impl SearchIndex {
             }
         }
         // a knowledge entry deleted by T, and not written again since, had no
-        // current version at T
-        let tombstones = self.tombstones.read().unwrap();
+        // current version at T - judged by the tombstones of this very generation
+        let tombstones = &generation.tombstones;
         current.retain(|key, seq| {
             !tombstones
                 .get(key)
@@ -1239,6 +1282,53 @@ mod tests {
         assert!(at("", Some("open")).is_empty(), "status is read from the version current at T");
         let hits = at("", Some("resolved"));
         assert_eq!(hits.iter().map(|h| h.key.as_str()).collect::<Vec<_>>(), vec!["inc-1"]);
+    }
+
+    /// Documents and tombstones are read from one generation, even across a
+    /// reindex that renumbers everything. The interleaving from the review: live
+    /// write A (seq 1), delete A (2), write B (3), delete B (4); a rebuild gives
+    /// A=1, B=2 with tombstones 1 and 2. A search that began before the rebuild
+    /// must judge B(3) by the old tombstone (4), never by the new one (2), or a
+    /// deleted entry comes back.
+    #[test]
+    fn as_of_pairs_documents_with_the_tombstones_of_their_own_generation() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        let mut w = index.writer().unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let created = |out: crate::store::UpsertOutcome| match out {
+            crate::store::UpsertOutcome::Created(c) => c,
+            _ => panic!("expected a creation"),
+        };
+        for key in ["a", "b"] {
+            let c = created(store.upsert(entry(key, "Short lived", "a fact that was retracted"), "2026-07-19").unwrap());
+            index.upsert_head(&mut w, &c.entry, &c.sha, c.committed_at).unwrap();
+            index.commit_and_reload(&mut w).unwrap();
+            store.delete(key).unwrap();
+            index.delete_head(&mut w, key);
+            index.retract(key, now);
+            index.commit_and_reload(&mut w).unwrap();
+        }
+        let c = created(store.upsert(entry("kept", "Kept", "a fact that stays"), "2026-07-19").unwrap());
+        index.upsert_head(&mut w, &c.entry, &c.sha, c.committed_at).unwrap();
+        index.commit_and_reload(&mut w).unwrap();
+
+        let opts = SearchOpts { as_of: Some(now + 3600), limit: 10, ..Default::default() };
+        let keys = |hits: Vec<Hit>| hits.into_iter().map(|h| h.key).collect::<Vec<_>>();
+        // a search that began before the rebuild holds the live generation …
+        let before = index.generation();
+        assert_eq!(keys(index.search_in(&before, "fact", &opts).unwrap()), vec!["kept"]);
+        // … the rebuild renumbers every document and tombstone …
+        index.reindex(&mut w, &store).unwrap();
+        assert_ne!(
+            before.tombstones, index.generation().tombstones,
+            "the rebuild must have renumbered, or this test proves nothing"
+        );
+        // … and the old search still finishes against its own pair, as a new one does
+        assert_eq!(keys(index.search_in(&before, "fact", &opts).unwrap()), vec!["kept"]);
+        assert_eq!(keys(index.search("fact", &opts).unwrap()), vec!["kept"]);
     }
 
     /// A retracted knowledge entry stops existing at the instant of its deletion:
