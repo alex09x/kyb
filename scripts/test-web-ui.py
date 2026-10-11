@@ -292,6 +292,9 @@ def run(base, headed, coverage=None):
         synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh", "/knowledge/k-anon")
         expected_404 = set()
         page.on("response", lambda r: expected_404.add(r.url) if r.status == 404 and any(x in r.url for x in synthetic) else None)
+        # The ledger check invents an event for key k1 at sha s2; a diff fetch the ledger's observer
+        # schedules for it can land after that check restored the real loader, and its 404 is ours.
+        synthetic = synthetic + ("/knowledge/k1/diff",)
 
         def on_console(m):
             if m.type != "error":
