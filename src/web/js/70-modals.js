@@ -24,8 +24,8 @@
     // Forms ask only what cannot be derived. The key is derived from the title and shown as
     // one editable mono line. The author is not asked for and not sent: the server takes it
     // from the token the console presents.
-    const SEVERITIES = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']];
-    const PRIORITIES = [['', 'Unranked'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']];
+    const SEVERITIES = [['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['critical', 'critical']];
+    const PRIORITIES = [['', 'unranked'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['critical', 'critical']];
 
     function segmented(id, options, value) {
       return `<input type="hidden" id="${id}" value="${escapeHtml(value)}"><div class="seg" data-for="${id}">${options.map(([v, l]) =>
@@ -49,6 +49,8 @@
       const bodyEl = document.getElementById('newModalBody');
       const titleEl = document.getElementById('newModalTitle');
       const submitEl = document.getElementById('newModalSubmitBtn');
+      const hintEl = document.getElementById('newModalHint');
+      if (hintEl) hintEl.textContent = { knowledge: 'Every save is a new version; nothing is overwritten.', incident: 'Hosts and tags can be added after saving. Closing it later archives it.', task: 'Done or dropped tasks are archived and stay searchable.' }[type];
 
       if (type === 'knowledge') {
         titleEl.textContent = 'New note';
@@ -67,11 +69,10 @@
           ${field('What broke', `<input type="text" class="form-input" id="newTitle" placeholder="Redis out of memory on cache-01" oninput="autoSlugIncident(this.value)">`)}
           ${keyField('newKey', `inc-${todaySlug}-`, '')}
           <div class="form-row">
-            ${field('Service', `<input type="text" class="form-input" id="newService" placeholder="redis">`)}
-            ${field('Which hosts', `<input type="text" class="form-input" id="newHosts" placeholder="cache-01, worker-02">`)}
+            ${field('Service', `<input type="text" class="form-input mono" id="newService" placeholder="redis">`, 'The thing that broke, as Services lists it.')}
+            ${field('How bad', segmented('newSeverity', SEVERITIES, 'medium'), 'critical = someone must act now; high = today.')}
           </div>
-          ${field('How bad', segmented('newSeverity', SEVERITIES, 'medium'))}
-          ${field('Is it still happening?', `<input type="text" class="form-input mono" id="newDetection" placeholder="curl -fsS http://cache-01:6379/ping">`, 'A command anyone can run to tell. Without it the incident lands in the unverifiable queue.')}
+          ${field('Is it still happening?', `<input type="text" class="form-input mono" id="newDetection" placeholder="curl -fsS http://cache-01:6379/ping">`, 'A command anyone can run to tell. Agents run it before trusting the report.')}
           ${field('What happened', `<textarea class="form-textarea" id="newBody" placeholder="Symptoms, impact, what was done so far."></textarea>`)}
         `;
       } else if (type === 'task') {
@@ -132,7 +133,10 @@
       const key = document.getElementById('newKey')?.value.trim();
       const body = document.getElementById('newBody')?.value.trim();
 
-      if (!markRequired(['newTitle', 'newKey', 'newBody'])) {
+      // the form asks for the check (design 3a): a report that cannot say whether it is still
+      // happening is a story. The API and CLI still accept one; the unverifiable queue shows it.
+      const required = App.newModalKind === 'incident' ? ['newTitle', 'newKey', 'newDetection', 'newBody'] : ['newTitle', 'newKey', 'newBody'];
+      if (!markRequired(required)) {
         showToast('Fill in the marked fields', 'error');
         return;
       }
@@ -150,17 +154,14 @@
       } else if (App.newModalKind === 'incident') {
         const service = document.getElementById('newService')?.value.trim() || 'infrastructure';
         const severity = document.getElementById('newSeverity')?.value || 'medium';
-        const rawHosts = document.getElementById('newHosts')?.value || '';
-        const hosts = rawHosts.split(',').map(s => s.trim()).filter(Boolean);
-        const detection = document.getElementById('newDetection')?.value.trim() || '';
+        const detection = document.getElementById('newDetection').value.trim();   // required: the form refused to get here without it
         res = await apiPost('/incidents', {
           key,
           title,
           service,
           severity,
-          hosts,
           body,
-          ...(detection ? { detection } : {})
+          detection
         });
       } else if (App.newModalKind === 'task') {
         const priority = document.getElementById('newPriority')?.value || '';

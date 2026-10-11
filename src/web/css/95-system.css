@@ -1,0 +1,157 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+    /* ===== One system for every control (design 1a) =====
+       Loaded last on purpose: whatever an older part says about a button, a filter, a pill
+       or a field, this is what it looks like. 32 px controls, 28 px small ones, 7 px radius,
+       one accent, colour only where state demands it. */
+
+    /* --- buttons */
+    .btn {
+      height: 32px; padding: 0 12px; gap: 6px;
+      font: 500 14px/1 var(--font-sans);
+      border-radius: 7px; border: 1px solid var(--border-light);
+      background: var(--card-hover); color: var(--text);
+      justify-content: center; white-space: nowrap; text-decoration: none;
+      transition: background .12s ease, border-color .12s ease, color .12s ease;
+    }
+    .btn:hover { background: #222732; border-color: #3d4352; color: var(--text); filter: none; }
+    .btn:active { transform: translateY(0.5px); }
+    .btn:focus-visible { outline: 2px solid var(--accent-glow); outline-offset: 1px; }
+    .btn.sm { height: 28px; padding: 0 10px; font-size: 13.5px; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #12142a; font-weight: 600; }
+    .btn.primary:hover { background: #9aa3e3; border-color: #9aa3e3; color: #12142a; }
+    .btn.success { background: transparent; color: var(--green); border-color: rgba(95,184,143,.45); }
+    .btn.success:hover { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    .btn.warning { background: transparent; color: var(--amber); border-color: rgba(217,164,65,.45); }
+    .btn.warning:hover { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
+    .btn.danger { background: transparent; color: var(--red); border-color: rgba(224,108,111,.45); }
+    .btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+    .btn.ghost:hover { background: var(--card-hover); border-color: transparent; color: var(--text); }
+    .btn.icon-only { width: 32px; padding: 0; }
+    .btn kbd, .dh-acts .btn kbd {
+      font: 500 12.5px/1 var(--font-mono); color: inherit; opacity: .6;
+      border: 1px solid currentColor; border-radius: 4px; padding: 2px 4px; margin-left: 2px;
+    }
+    .btn.primary kbd { opacity: .55; }
+    #btnOpenNew { height: 32px; padding: 0 14px; }
+
+    /* --- filters: a group of options is one segmented control, not loose chips */
+    .segs, .filter-chips, .ledger .chips, .led-top .chips {
+      display: inline-flex; align-items: stretch; gap: 0; padding: 0;
+      border: 1px solid var(--border-light); border-radius: 7px; overflow: hidden;
+      background: var(--card-subtle); flex: none; height: 32px; width: max-content;
+    }
+    .segs .chip, .filter-chips .chip, .ledger .chips .chip, .led-top .chips .chip {
+      display: inline-flex; align-items: center;
+      border: 0; border-right: 1px solid var(--border); border-radius: 0;
+      background: transparent; color: var(--text-dim);
+      font: 500 13.5px/1 var(--font-sans); padding: 0 12px; height: 100%;
+    }
+    .segs .chip:last-child, .filter-chips .chip:last-child, .ledger .chips .chip:last-child, .led-top .chips .chip:last-child { border-right: 0; }
+    .segs .chip:hover, .filter-chips .chip:hover, .ledger .chips .chip:hover, .led-top .chips .chip:hover { background: var(--card-hover); color: var(--text); }
+    .segs .chip.active, .filter-chips .chip.active, .ledger .chips .chip.active, .led-top .chips .chip.active {
+      background: var(--border); color: var(--text); font-weight: 600;
+    }
+    /* the same control inside forms */
+    .seg { display: flex; height: 36px; border-color: var(--border-light); }
+    .seg button { flex: 1; font-size: 14px; padding: 0 12px; }
+    .seg button.on { background: var(--border); color: var(--text); font-weight: 600; }
+    .seg button.on[data-value="critical"] { color: var(--red); }
+    .seg button.on[data-value="high"] { color: var(--amber); }
+
+    /* --- state pills: one shape everywhere (card, list, rows, places) */
+    .pill { height: 22px; padding: 0 8px; font: 500 13px/1 var(--font-sans); border-radius: 6px; }
+    .item-card .pill { flex: none; }
+
+    /* --- fields */
+    .form-input, .form-select { height: 38px; padding: 0 12px; border-radius: 7px; border-color: var(--border-light); background: var(--card-subtle); }
+    .form-textarea { border-radius: 7px; border-color: var(--border-light); background: var(--card-subtle); padding: 10px 12px; font-family: var(--font-sans); font-size: 14.5px; line-height: 1.5; min-height: 120px; }
+    .form-input::placeholder, .form-textarea::placeholder { color: var(--text-muted); }
+    .form-group { gap: 8px; }
+    .modal-body { gap: 18px; padding: 22px 24px; }
+    /* the key is derived: one quiet line under the title, editable in place */
+    .form-group.key { flex-direction: row; align-items: center; gap: 10px; margin-top: -8px; }
+    .form-group.key .form-label { font-size: 13px; font-weight: 400; color: var(--text-muted); flex: none; }
+    .form-group.key .form-input { height: 28px; flex: 1; padding: 0 8px; border-color: transparent; background: var(--card-hover); color: var(--text-dim); font-size: 13px; }
+    .form-group.key .form-input:focus { border-color: var(--accent); color: var(--text); }
+    .form-row { align-items: start; }
+    .select-sm { height: 28px; border: 0; background: transparent; color: var(--text-dim); font-size: 13px; padding: 0 2px; cursor: pointer; }
+    .select-sm:hover { color: var(--text); }
+    .move-sel { height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border-light); background: var(--card-hover); color: var(--text-dim); font: 500 13.5px/1 var(--font-sans); cursor: pointer; }
+
+    /* --- dialogs: title, the switch and the key in one header; a hint on the left of the footer */
+    .modal-card { border-radius: 12px; border-color: var(--border-light); max-width: 680px; }
+    .modal-header { padding: 18px 24px; gap: 14px; background: var(--card); }
+    .modal-title { font-size: 17px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .modal-switch { height: 30px; }
+    .modal-key { font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+    .modal-close { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
+    .modal-close:hover { background: var(--card-hover); }
+    .modal-footer { padding: 14px 24px; background: var(--card); gap: 8px; }
+    .foot-hint { margin-right: auto; font-size: 13px; color: var(--text-muted); }
+
+    /* --- the card header (2a) */
+    .detail-header { padding: 20px 28px 0; gap: 6px; }
+    .dh-kind { gap: 8px; }
+    .dh-pills { display: inline-flex; gap: 6px; }
+    .dh-meta { font-size: 14px; color: var(--text-dim); margin: 0 0 6px; }
+    .dh-meta .mono { color: var(--text-dim); }
+    .dh-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+    .dh-meta a { color: var(--accent); text-decoration: none; }
+    .dh-meta .dh-tag { font: 13px/1.4 var(--font-mono); color: var(--text-muted); }
+    .dh-meta .dh-tag:hover { color: var(--accent); }
+    .dh-acts { gap: 6px; }
+    .dh-state-acts { display: inline-flex; gap: 6px; }
+    .dh-state-acts:empty { display: none; }
+    .detail-body { padding: 20px 28px 32px; }
+    .detail-body > .callout:first-child, .detail-body > .detect:first-child { margin-top: 0; }
+    .detect, .callout { border-radius: 8px; }
+
+    /* --- the knowledge list: two lines per row, the kind pill on the right */
+    .pane-header { padding: 14px 16px 12px; gap: 10px; }
+    .item-card { padding: 12px 16px; gap: 4px; }
+    .item-card .card-top { align-items: flex-start; }
+    .item-title { font-size: 14.5px; font-weight: 500; line-height: 1.35; }
+    .item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 13px; color: var(--text-muted); margin: 0; }
+    .item-meta .item-key { font: 13px/1.4 var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+    .item-meta .dot-sep { color: var(--border-light); }
+    .item-tag { font: 13px/1.4 var(--font-mono); color: var(--text-muted); }
+    .item-card.selected { box-shadow: inset 3px 0 0 var(--accent); border-left: 0; padding-left: 16px; }
+
+    /* --- incident and task lists (4a): queues on top, then one bar, then the rows */
+    .inc-queue .b { padding: 16px 20px; gap: 6px; font: inherit; color: inherit; text-align: left; background: transparent; border: 0; border-right: 1px solid var(--card-subtle); }
+    .inc-queue .b:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .inc-queue .h b { font-size: 26px; }
+    .inc-queue .h span { font-size: 15px; color: var(--text); }
+    .inc-queue .w { font-size: 13.5px; }
+    .inc-queue .b.on { background: var(--card); box-shadow: inset 0 -2px 0 var(--accent); }
+    .inc-top { align-items: center; gap: 10px; padding: 12px 20px; flex-wrap: wrap; }
+    .inc-top .bar-r { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--text-muted); }
+    .inc-top .bar-r a { color: var(--accent); text-decoration: none; }
+    .inc-r { padding: 12px 20px; row-gap: 4px; }
+    .inc-r .t b { font-size: 14.5px; font-weight: 500; }
+    .inc-r .t span { font-size: 13px; }
+    .inc-note { border-left: 0; padding: 0; margin: 4px 0 0; font-size: 13.5px; }
+    .inc-note b { font-weight: 500; }
+    .inc-note .why { color: var(--text-muted); }
+    .inc-note.det code { font-size: 13px; color: var(--text-muted); }
+    .inc-peek { padding: 4px 20px 16px 72px; background: var(--card); display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+    .inc-peek .callout, .inc-peek .detect { margin: 0; }
+    .inc-peek .k { font-size: 13px; }
+    .inc-peek .row { gap: 6px; margin: 0; }
+    .inc-r .acts { gap: 6px; margin-top: 8px; }
+    .inc-r.cur { background: var(--card); box-shadow: inset 3px 0 0 var(--accent); }
+    .inc-hint { padding: 10px 20px; }
+    .inc-hint kbd { font-size: 12.5px; }
+
+    /* --- the header: every control the same height */
+    .search-input { height: 32px; border-radius: 7px; }
+    .system-status { height: 32px; border-radius: 7px; padding: 0 10px; }
+    .nav-tab { height: 34px; border-radius: 7px; }

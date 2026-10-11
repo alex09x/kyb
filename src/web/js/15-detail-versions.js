@@ -16,7 +16,8 @@
       const el = document.getElementById('verList');
       if (!el) return;
       const h = App.currentHistoryList || [], key = App.verKey;
-      if (!h.length) { el.innerHTML = '<div class="ver-empty">No versions recorded for this entry.</div>'; return; }
+      // while the card is a skeleton its history has not been asked yet: say so, not that there is none
+      if (!h.length) { el.innerHTML = `<div class="ver-empty">${App.verLoading ? 'Loading versions…' : 'No versions recorded for this entry.'}</div>`; return; }
       el.innerHTML = `<div class="ver-h"><span>${h.length} version${h.length === 1 ? '' : 's'} &middot; every change, in full</span><span class="mono">kyb history ${escapeHtml(key)}</span></div>` +
         h.map((v, i) => {
           const n = h.length - i, id = `${key}@${v.sha}`, d = App.verDiffs.get(id);

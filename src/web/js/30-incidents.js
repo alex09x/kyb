@@ -62,34 +62,25 @@
       const high = open.filter(i => i.severity === 'high').length;
       const oldest = open.slice().sort((a, b) => incWhen(a) - incWhen(b))[0];
 
-      // ---- summary
+      // ---- the filter bar: status and severity as segments, what is left, the one action
+      const list = incFiltered();
+      const q = App.incidentQueue && INC_QUEUES.find(x => x.id === App.incidentQueue);
       document.getElementById('incTop').innerHTML = `
-        <b>${open.length}</b><span>open</span>
-        <span style="color:var(--text-muted)">&middot;</span>
-        <span><span class="n" style="color:var(--red)">${crit}</span> critical</span>
-        <span><span class="n" style="color:var(--amber)">${high}</span> high</span>
-        ${oldest ? `<span style="color:var(--text-muted)">oldest open: ${incAgeLabel(oldest)} &middot; <span class="mono">${escapeHtml(oldest.service || 'infrastructure')}</span></span>` : ''}
-        <span style="color:var(--text-muted)">30d: <span style="color:var(--red)">+${App.incidents.filter(i => Date.now() - incWhen(i) < 30 * 86400e3).length}</span> / <span style="color:var(--green)">&minus;${App.incidents.filter(i => i.resolved_at && Date.now() - new Date(i.resolved_at).getTime() < 30 * 86400e3).length}</span></span>
-        <span class="inc-chips">
-          ${['all','open','mitigated','resolved'].map(st => `<button class="chip ${App.incidentStatusFilter === st ? 'active' : ''}" onclick="filterIncidents('${st}')">${st === 'all' ? 'open + mitigated' : st}</button>`).join('')}
-          <span class="sep"></span>
-          ${['all','critical','high','medium','low'].map(sv => `<button class="chip ${App.incidentSeverityFilter === sv ? 'active' : ''}" onclick="filterIncidentsSeverity('${sv}')">${sv === 'all' ? 'any severity' : sv}</button>`).join('')}
-          <span class="sep"></span>
-          <button class="btn sm primary" onclick="openNewModal('incident')">+ Report incident</button>
+        <span class="segs">${['all','open','mitigated','resolved'].map(st => `<button class="chip ${App.incidentStatusFilter === st ? 'active' : ''}" onclick="filterIncidents('${st}')">${st === 'all' ? 'open + mitigated' : st}</button>`).join('')}</span>
+        <span class="segs">${['all','critical','high','medium','low'].map(sv => `<button class="chip ${App.incidentSeverityFilter === sv ? 'active' : ''}" onclick="filterIncidentsSeverity('${sv}')">${sv === 'all' ? 'any severity' : sv}</button>`).join('')}</span>
+        <span class="bar-r">
+          <span class="cnt"><span id="incCount">${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' · open and mitigated' : ''}</span>${q ? ` · ${q.label} · <a href="javascript:void(0)" onclick="incClearCell()">clear</a>` : ''}</span>
+          <button class="btn sm" data-write onclick="openNewModal('incident')">Report incident</button>
         </span>`;
 
       // ---- attention queue
       document.getElementById('incQueue').innerHTML = INC_QUEUES.map(q => {
         const n = App.incidents.filter(q.test).length;
-        return `<div class="b ${App.incidentQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" onclick="incSelectQueue('${q.id}')">
+        return `<button type="button" class="b ${App.incidentQueue === q.id ? 'on' : ''} ${n ? '' : 'zero'}" aria-pressed="${App.incidentQueue === q.id}" onclick="incSelectQueue('${q.id}')">
           <div class="h"><b style="color:${n ? q.color : ''}">${n}</b><span>${q.label}</span></div>
-          <div class="w">${q.why}</div>
-          <div class="k">${escapeHtml(q.flag)}</div></div>`;
+          <div class="w">${q.why}</div></button>`;
       }).join('');
 
-      // ---- the count of what the filter left, in the footer
-      const list = incFiltered();
-      document.getElementById('incCount').textContent = `${list.length} of ${App.incidents.length}${App.incidentStatusFilter === 'all' ? ' · open and mitigated' : ''}`;
 
       // ---- rows + peek under the cursor
       // A background refresh may reorder the list; the selection is an incident, not a row number.
@@ -108,18 +99,19 @@
         let peek = '';
         if (cur) {
           const hist = (App.detailCache.get(inc.key) || {}).history;
+          const K = jsArg(inc.key), svc = (inc.service || 'infrastructure').toLowerCase();
           peek = `<div class="inc-peek">
-            ${inc.detection ? `<div class="k">detection &middot; is it still happening?</div><code>${escapeHtml(inc.detection)}</code>`
-                              : `<div class="k" style="color:var(--amber)">no detection recorded &middot; a report that cannot say whether it is still happening is a story</div>`}
+            ${inc.detection ? `<div class="detect"><span><span class="l">Is it still happening? </span><code>${escapeHtml(inc.detection)}</code></span><button class="btn sm" onclick="event.stopPropagation(); copyToClipboard(${jsArg(inc.detection)}, 'Check command copied!')">Copy</button></div>`
+              : inc.status !== 'resolved' ? `<div class="callout"><b>no detection</b><span>Add a command that shows whether this is still happening - the report is a story until then.</span><button class="btn sm" data-write onclick="event.stopPropagation(); openEditModal(${K})">Add check</button></div>` : ''}
             <div class="k">${inc.status} &middot; ${escapeHtml(inc.service || 'infrastructure')}${(inc.hosts || []).length ? ' &middot; ' + escapeHtml(inc.hosts.join(', ')) : ''} &middot; detected ${timeAgo(inc.detected_at || inc.started_at)}${inc.open_followups ? ` &middot; ${inc.open_followups} open follow-up${inc.open_followups > 1 ? 's' : ''}` : ''}</div>
             ${inc.resolution ? `<div><span style="color:var(--green)">Resolution:</span> ${escapeHtml(inc.resolution)}</div>` : ''}
             <div class="row">
-              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(inc.key)}, 'knowledge')">&#9166; Full report</a>
-              ${inc.status !== 'resolved' ? `<button class="btn sm" onclick="event.stopPropagation(); openResolveIncidentModal(${jsArg(inc.key)}, ${jsArg(inc.title)})">r Resolve</button>` : ''}
-              <button class="btn sm" onclick="event.stopPropagation(); openDiffForEntry(${jsArg(inc.key)})">d Diff</button>
-              <button class="btn sm" onclick="event.stopPropagation(); openHistoryForEntry(${jsArg(inc.key)})">h History${hist ? ` (${hist.length})` : ''}</button>
-              <button class="btn sm" onclick="event.stopPropagation(); openEditModal(${jsArg(inc.key)})">e Edit</button>
-              <a href="${placeHash({kind: 'service', name: (inc.service || 'infrastructure').toLowerCase()})}" class="btn sm" onclick="openPlace(event, 'service', ${jsArg((inc.service || 'infrastructure').toLowerCase())})">Service</a>
+              <a href="#/knowledge/${encodeURIComponent(inc.key)}" class="btn sm primary" onclick="handleCardClick(event, ${K}, 'knowledge')">Open report <kbd>&#9166;</kbd></a>
+              ${inc.status !== 'resolved' ? `<button class="btn sm success" data-write onclick="event.stopPropagation(); openResolveIncidentModal(${K}, ${jsArg(inc.title)})">Resolve <kbd>r</kbd></button>` : ''}
+              <button class="btn sm" data-write onclick="event.stopPropagation(); openEditModal(${K})">Edit <kbd>e</kbd></button>
+              <button class="btn sm ghost" onclick="event.stopPropagation(); openHistoryForEntry(${K})">Versions${hist ? ` · ${hist.length}` : ''} <kbd>h</kbd></button>
+              <button class="btn sm ghost" onclick="event.stopPropagation(); openDiffForEntry(${K})">Diff <kbd>d</kbd></button>
+              <a href="${placeHash({kind: 'service', name: svc})}" class="btn sm ghost" onclick="openPlace(event, 'service', ${jsArg(svc)})">Service</a>
             </div></div>`;
         }
         // What makes the row actionable sits in the row; under the cursor the peek already says it.
@@ -127,7 +119,7 @@
         const note = cur ? ''
           : inc.status === 'resolved' ? (inc.resolution ? `<div class="inc-note res"><b>Resolved</b> &middot; ${escapeHtml(inc.resolution)}</div>` : '')
           : det ? `<div class="inc-note det"><code title="${escapeHtml(det)}">${escapeHtml(det)}</code></div>`
-          : `<div class="inc-note"><b>no detection</b></div>`;  // the queue header above says why that matters; the row only has to show it
+          : `<div class="inc-note"><b>no detection</b><span class="why"> &middot; nobody can tell whether it is still happening</span></div>`;  // the queue header above says why that matters; the row only has to show it
         return `<div class="inc-r ${cur ? 'cur' : ''} ${inc.status}" data-idx="${idx}" onclick="App.incidentCursor=${idx}; renderIncidents();" ondblclick="handleCardClick(event, ${jsArg(inc.key)}, 'knowledge')">
             <span class="n">${idx + 1}</span>
             <span class="dot ${inc.status === 'resolved' ? 'resolved' : sev}"></span>
@@ -179,7 +171,8 @@
     function openResolveIncidentModal(key, title) {
       if (refuseReadOnly()) return;
       App.activeResolveKey = key;
-      document.getElementById('resolveIncidentTargetText').textContent = `Incident: ${title} (${key})`;
+      document.getElementById('resolveIncidentTitle').textContent = `Resolve: ${title || key}`;
+      document.getElementById('resolveIncidentTargetText').textContent = key;
       document.getElementById('resolveIncidentOutcome').value = '';
       openModal('resolveIncidentModal');
     }

@@ -16,9 +16,6 @@
 
     .item-key { color: var(--text-muted); }
 
-    .btn.success { background: transparent; color: var(--text); border-color: var(--border-light); }
-    .btn.success:hover { border-color: var(--green); color: var(--green); }
-    .btn.primary { font-weight: 500; }
 
     .incident-card.open { border-left-width: 3px; }
     .incident-card.mitigated { border-left-width: 3px; }
@@ -30,6 +27,4 @@
     a.btn, a.btn:hover { text-decoration: none; }
     .btn { white-space: nowrap; }
 
-    .btn.warning { background: transparent; color: var(--text); border-color: var(--border-light); }
-    .btn.warning:hover { border-color: var(--amber); color: var(--amber); }
 
