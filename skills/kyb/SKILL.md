@@ -433,3 +433,30 @@ token's name, so `kyb history <key>` says who changed what. A `401` means the se
 know the token (ask the owner for one, never invent or borrow one); a `403` names the role the
 action needs. Never put a token into an entry, a command line, a log or a message. A server
 behind TLS is addressed whole with `KYB_URL=https://...`.
+
+## Who wrote it: attribution
+
+Every write is committed with trailers naming the agent, its session and the workspace it
+ran in, as far as the client could tell. `kyb history <key>` shows them as `by`:
+
+```json
+{"sha": "…", "change": "modified", "by": {"agent": "claude", "session": "18970ebf-…", "workspace": "knowyourbusiness/scripts", "via": "cli"}}
+```
+
+- `via: cli` — the `kyb` command read its environment: the agent from `PROD_PROVIDER`,
+  `CLAUDECODE`, `CODEX_*` or `ANTIGRAVITY_*`; the session from `CLAUDE_CODE_SESSION_ID`,
+  `CODEX_THREAD_ID`, `ANTIGRAVITY_CONVERSATION_ID` or `PROD_PRIMARY_SESSION_KEY`; the workspace
+  from the git repository the command ran in (`<repo>/<path inside it>`), never an absolute path.
+- `via: hook` — Claude Code calls the kyb MCP tools over HTTP, so a PreToolUse hook
+  (`~/.local/bin/kyb-hook`, registered by the installer) adds the same three to each call. It
+  changes only the call's input; whether the call may run stays with your permission policy.
+- `via: meta` — the MCP client's own call metadata named the conversation (Antigravity, Codex).
+- `via: headers` — a client that sent `X-Kyb-Agent` / `X-Kyb-Session` / `X-Kyb-Workspace` with its
+  MCP requests and had neither a hook nor metadata. A field one source left empty is filled from
+  the next (hook, then metadata, then headers); `via` names where the agent came from.
+- `kyb whoami` shows what a write from here would be attributed to. Override with `KYB_AGENT`,
+  `KYB_SESSION`, `KYB_WORKSPACE` when the environment is not yours (a script acting for an agent,
+  or an agent started from inside another agent's shell, which inherits the outer one's markers).
+
+This is forensics, not identity: it grants nothing and is only what the client claimed. The
+signer of the commit (`author`) is the token holder, when a token was presented.

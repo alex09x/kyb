@@ -2332,6 +2332,127 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
+    #[test]
+    fn attribution_trailers_round_trip_and_stay_on_one_line() {
+        let by = auth::By::new("claude", "sess-1", "kyb/ui", "cli");
+        let msg = auth::message_with_trailers("kyb: upsert x", Some(&by));
+        assert_eq!(msg, "kyb: upsert x\n\nKyb-Agent: claude\nKyb-Session: sess-1\nKyb-Workspace: kyb/ui\nKyb-Via: cli\n");
+        assert_eq!(auth::By::from_message(&msg), Some(by.clone()));
+        assert_eq!(auth::message_with_trailers("kyb: upsert x", None), "kyb: upsert x");
+        assert_eq!(auth::By::from_message("kyb: upsert x"), None);
+        // a value cannot smuggle a second trailer or a newline into the message
+        let sly = auth::By::new("codex\nKyb-Agent: root", "", "", "cli");
+        assert_eq!(sly.agent, "codexKyb-Agent: root");
+        assert_eq!(auth::By::from_message(&auth::message_with_trailers("m", Some(&sly))).unwrap().agent, "codexKyb-Agent: root");
+        // a message with a body paragraph before the trailers still reads them
+        assert_eq!(auth::By::from_message("summary\n\nsome body\n\nKyb-Agent: antigravity\nKyb-Via: meta").unwrap().agent, "antigravity");
+        // only fields that are set are written; session and workspace alone still count
+        assert_eq!(auth::By::new("", "s", "", "").trailers(), "Kyb-Session: s\n");
+        assert!(auth::By::new("", "", "", "hook").is_empty(), "a via alone is nobody");
+    }
+
+    #[tokio::test]
+    async fn attribution_from_headers_hook_and_meta_lands_on_the_commit() {
+        let (app, _data, _idx) = app_with_tmp();
+        // the CLI way: headers on the write
+        let req = Request::builder().method("POST").uri("/knowledge").header("content-type", "application/json")
+            .header("x-kyb-agent", "claude").header("x-kyb-session", "18970ebf").header("x-kyb-workspace", "knowyourbusiness/scripts").header("x-kyb-via", "cli")
+            .body(Body::from(upsert_body("by-cli", "written by the cli").to_string())).unwrap();
+        assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
+        let (_, h) = call(&app, "GET", "/knowledge/by-cli/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "session": "18970ebf", "workspace": "knowyourbusiness/scripts", "via": "cli"}));
+        // the activity ledger carries it too
+        let (_, act) = call(&app, "GET", "/api/activity?limit=5", None).await;
+        let ev = act["activity"].as_array().unwrap();
+        assert_eq!(ev.iter().find(|e| e["key"] == "by-cli").unwrap()["by"]["agent"], "claude");
+        // whoami echoes what a request claims
+        let req = Request::builder().method("GET").uri("/whoami").header("x-kyb-agent", "codex").header("x-kyb-workspace", "btcr").body(Body::empty()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let me: Value = serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(me["by"], json!({"agent": "codex", "workspace": "btcr"}));
+        // a write without any of it: no trailer, no `by`
+        call(&app, "POST", "/knowledge", Some(upsert_body("by-nobody", "plain"))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/by-nobody/history", None).await;
+        assert!(h["versions"][0].get("by").is_none());
+
+        // the MCP way, with a hook's _ctx in the arguments: it is stripped before the API sees it
+        let rpc = |id: u64, name: &str, args: Value, meta: Option<Value>| {
+            let mut params = json!({"name": name, "arguments": args});
+            if let Some(m) = meta { params["_meta"] = m; }
+            json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params})
+        };
+        let (st, v) = call(&app, "POST", "/mcp", Some(rpc(1, "kyb_task", json!({"key": "task-by-hook", "title": "T", "body": "b",
+            "_ctx": {"agent": "claude", "session": "sess-9", "workspace": "voiceofchain"}}), None))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["result"]["isError"], Value::Null, "{v}");
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-hook/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "session": "sess-9", "workspace": "voiceofchain", "via": "hook"}));
+        // the client's own metadata: Antigravity names its conversation, Codex its session, Claude Code only the tool use
+        let (_, v) = call(&app, "POST", "/mcp", Some(rpc(2, "kyb_task", json!({"key": "task-by-ag", "title": "T", "body": "b"}),
+            Some(json!({"antigravity.google/conversation_id": "conv-42"}))))).await;
+        assert_eq!(v["result"]["isError"], Value::Null, "{v}");
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-ag/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-42", "via": "meta"}));
+        call(&app, "POST", "/mcp", Some(rpc(3, "kyb_task", json!({"key": "task-by-cx", "title": "T", "body": "b"}),
+            Some(json!({"x-codex-turn-metadata": {"session_id": "thr-7", "turn_id": "t1"}}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-cx/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "codex", "session": "thr-7", "via": "meta"}));
+        call(&app, "POST", "/mcp", Some(rpc(4, "kyb_task", json!({"key": "task-by-cc", "title": "T", "body": "b"}),
+            Some(json!({"claudecode/toolUseId": "toolu_1"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-cc/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "via": "meta"}));
+        // a hook's _ctx wins over the metadata, and an empty _ctx falls through to it
+        call(&app, "POST", "/mcp", Some(rpc(5, "kyb_task", json!({"key": "task-by-both", "title": "T", "body": "b", "_ctx": {}}),
+            Some(json!({"claudecode/toolUseId": "toolu_2"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-both/history", None).await;
+        assert_eq!(h["versions"][0]["by"]["via"], "meta");
+        // a partial _ctx (workspace only) is completed from the metadata: agent from there, via names the agent's source
+        call(&app, "POST", "/mcp", Some(rpc(6, "kyb_task", json!({"key": "task-by-part", "title": "T", "body": "b", "_ctx": {"workspace": "btcr"}}),
+            Some(json!({"antigravity.google/conversation_id": "conv-9"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-part/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-9", "workspace": "btcr", "via": "meta"}));
+        // Codex may send its turn metadata JSON-encoded as a string
+        call(&app, "POST", "/mcp", Some(rpc(7, "kyb_task", json!({"key": "task-by-cxs", "title": "T", "body": "b"}),
+            Some(json!({"x-codex-turn-metadata": "{\"thread_id\": \"thr-s\"}"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-cxs/history", None).await;
+        assert_eq!(h["versions"][0]["by"]["session"], "thr-s");
+        // a client with neither hook nor metadata: the X-Kyb headers on the MCP request itself
+        let req = Request::builder().method("POST").uri("/mcp").header("content-type", "application/json")
+            .header("x-kyb-agent", "cursor").header("x-kyb-workspace", "landing-rs")
+            .body(Body::from(rpc(8, "kyb_task", json!({"key": "task-by-hdr", "title": "T", "body": "b"}), None).to_string())).unwrap();
+        assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-hdr/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "cursor", "workspace": "landing-rs", "via": "headers"}));
+        // and those headers only fill what the call itself did not say
+        let req = Request::builder().method("POST").uri("/mcp").header("content-type", "application/json")
+            .header("x-kyb-agent", "cursor").header("x-kyb-workspace", "landing-rs")
+            .body(Body::from(rpc(9, "kyb_task", json!({"key": "task-by-hdr2", "title": "T", "body": "b"}), Some(json!({"antigravity.google/conversation_id": "conv-h"}))).to_string())).unwrap();
+        app.clone().oneshot(req).await.unwrap();
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-hdr2/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-h", "workspace": "landing-rs", "via": "meta"}));
+        // a session is one agent's conversation: a source naming another agent never lends its session
+        call(&app, "POST", "/mcp", Some(rpc(10, "kyb_task", json!({"key": "task-by-x1", "title": "T", "body": "b", "_ctx": {"agent": "claude"}}),
+            Some(json!({"x-codex-turn-metadata": {"session_id": "cx-1"}}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x1/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "via": "hook"}));
+        let req = Request::builder().method("POST").uri("/mcp").header("content-type", "application/json")
+            .header("x-kyb-agent", "cursor").header("x-kyb-session", "cursor-1").header("x-kyb-workspace", "landing-rs")
+            .body(Body::from(rpc(11, "kyb_task", json!({"key": "task-by-x2", "title": "T", "body": "b"}), Some(json!({"claudecode/toolUseId": "toolu_9"}))).to_string())).unwrap();
+        app.clone().oneshot(req).await.unwrap();
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x2/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "workspace": "landing-rs", "via": "meta"}), "the workspace is a place and may come from the headers; cursor's session may not");
+        // a session with no agent attached is taken by whichever agent is then named
+        call(&app, "POST", "/mcp", Some(rpc(12, "kyb_task", json!({"key": "task-by-x3", "title": "T", "body": "b", "_ctx": {"session": "s-only"}}),
+            Some(json!({"claudecode/toolUseId": "toolu_10"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x3/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "session": "s-only", "via": "meta"}));
+        // but an agent that brings its own session keeps it over an unattached one
+        call(&app, "POST", "/mcp", Some(rpc(13, "kyb_task", json!({"key": "task-by-x4", "title": "T", "body": "b", "_ctx": {"session": "s-only"}}),
+            Some(json!({"antigravity.google/conversation_id": "conv-x"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-x4/history", None).await;
+        assert_eq!(h["versions"][0]["by"]["session"], "conv-x");
+    }
+
     #[tokio::test]
     async fn search_changed_between() {
         let (app, _data, _idx) = app_with_tmp();

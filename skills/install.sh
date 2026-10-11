@@ -25,6 +25,40 @@ install -d "$HOME/.local/bin"
 install -m 755 "$cli_bin" "$HOME/.local/bin/kyb"
 echo "✓ CLI      ~/.local/bin/kyb"
 
+# Claude Code reaches the server over HTTP, so its session never reaches the
+# server by itself: a PreToolUse hook on the kyb tools adds the agent, session
+# and workspace to each call (recorded as `by` on the version). Codex and
+# Antigravity go through the CLI, which reads the same from its environment.
+hook_bin="$SRC/kyb/bin/kyb-hook"
+install -m 755 "$hook_bin" "$HOME/.local/bin/kyb-hook"
+echo "✓ HOOK     ~/.local/bin/kyb-hook"
+claude_settings="$HOME/.claude/settings.json"
+if [ -d "$HOME/.claude" ]; then
+  python3 - "$claude_settings" "$HOME/.local/bin/kyb-hook" <<'PY'
+import json, pathlib, sys
+path, hook = pathlib.Path(sys.argv[1]), sys.argv[2]
+try:
+    settings = json.loads(path.read_text()) if path.exists() else {}
+except ValueError:
+    raise SystemExit(f"kyb: {path} is not valid JSON; the hook was not registered")
+hooks = settings.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+handler = {"type": "command", "command": hook, "timeout": 5, "statusMessage": "kyb attribution"}
+# Ours is exactly the handler whose command is this hook's path. It is taken out of
+# wherever it sits (a group keeps its other handlers; a group left empty goes), then
+# added once in its own group. Nothing else in the file is touched.
+for group in pre:
+    group["hooks"] = [c for c in group.get("hooks", []) if c.get("command") != hook]
+pre[:] = [g for g in pre if g.get("hooks")]
+pre.append({"matcher": "mcp__kyb__.*", "hooks": [handler]})
+path.parent.mkdir(parents=True, exist_ok=True)
+tmp = path.with_name(path.name + ".kyb-tmp")
+tmp.write_text(json.dumps(settings, indent=2) + "\n")
+tmp.replace(path)
+PY
+  echo "✓ HOOKREG  $claude_settings (PreToolUse mcp__kyb__.*)"
+fi
+
 # The server address is deployment-specific and never lives in this repo:
 # the deployer passes KYB_SERVER (from its own gitignored fleet config) and
 # the CLI reads the host file at run time.

@@ -37,6 +37,8 @@ for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$port/healthz" 
 
 export KYB_ADDR="127.0.0.1:$port" HOME="$tmp/home"
 mkdir -p "$HOME"
+# a repository with a subdirectory and a symlink to it, for the workspace checks
+mkdir -p "$tmp/repo/sub" && git -C "$tmp/repo" init -q && ln -s "$tmp/repo/sub" "$tmp/link-to-sub"
 unset KYB_TOKEN
 
 expect "without a token a read is refused, and the CLI shows why" "$("$cli" tags 2>&1)" "a token is required"
@@ -69,6 +71,25 @@ expect "the same holds for the token file" "$(bash -x "$cli" whoami 2>&1 | grep 
 
 # KYB_URL names the server whole, scheme included (how a server behind TLS is reached)
 expect "KYB_URL is used as given" "$(KYB_ADDR=192.0.2.1:9 KYB_URL="http://127.0.0.1:$port/" KYB_TOKEN="$t_write" "$cli" whoami 2>&1)" "Agent W"
+
+# attribution: the agent and its own session, decided together; the workspace inside the repository
+by_of() { env -u KYB_AGENT -u KYB_SESSION -u KYB_WORKSPACE -u CLAUDECODE -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u CODEX_SESSION_ID -u ANTIGRAVITY_CONVERSATION_ID -u ANTIGRAVITY_AGENT -u PROD_PROVIDER -u PROD_PRIMARY_SESSION_KEY \
+  "$@" KYB_TOKEN="$t_read" "$cli" whoami 2>&1 | python3 -c 'import json,sys; b=json.load(sys.stdin).get("by") or {}; print(b.get("agent",""), b.get("session",""), b.get("workspace",""), b.get("via",""))'; }
+expect "a Claude Code session is claude with its own session id" "$(by_of env CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=cc-1)" "claude cc-1"
+expect "a Codex started from a Claude shell is codex with the codex thread, not the inherited claude session" "$(by_of env CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=cc-1 PROD_PROVIDER=claude CODEX_THREAD_ID=thr-1)" "codex thr-1"
+expect "an Antigravity conversation inside a Claude shell is antigravity with its conversation" "$(by_of env CLAUDECODE=1 CLAUDE_CODE_SESSION_ID=cc-1 ANTIGRAVITY_AGENT=1 ANTIGRAVITY_CONVERSATION_ID=conv-1)" "antigravity conv-1"
+expect "KYB_AGENT=claude under an inherited codex thread keeps claude's own session, never codex's" "$(by_of env KYB_AGENT=claude CLAUDE_CODE_SESSION_ID=cc-1 CODEX_THREAD_ID=thr-1)" "claude cc-1"
+refuse "an agent named by KYB_AGENT with no session of its own borrows nobody's" "$(by_of env KYB_AGENT=cursor CODEX_THREAD_ID=thr-1 CLAUDE_CODE_SESSION_ID=cc-1)" "thr-1"
+refuse "nor the enclosing prod session when prod named a different agent" "$(by_of env KYB_AGENT=cursor PROD_PROVIDER=claude PROD_PRIMARY_SESSION_KEY=outer-1)" "outer-1"
+expect "an agent prod itself named gets prod's session key" "$(by_of env PROD_PROVIDER=cursor PROD_PRIMARY_SESSION_KEY=outer-1)" "cursor outer-1"
+expect "KYB_SESSION is the explicit session for a hand-named agent" "$(by_of env KYB_AGENT=cursor KYB_SESSION=cur-1 PROD_PRIMARY_SESSION_KEY=outer-1)" "cursor cur-1"
+expect "a bare shell is shell" "$(by_of env)" "shell"
+expect "the workspace is the repository name and the path inside it" "$(cd "$tmp/repo/sub" && by_of env)" "repo/sub"
+expect "a symlinked working directory still gives a path inside the repository" "$(cd "$tmp/link-to-sub" && by_of env)" "repo/sub"
+expect "an absolute KYB_WORKSPACE keeps only its last component" "$(by_of env KYB_WORKSPACE=/Users/someone/private/thing)" " thing "
+expect "a quote in a workspace name reaches the server as a quote, not as a second config line" "$(by_of env KYB_WORKSPACE='a"b\\c')" 'a"b\\c'
+refuse "a newline in a value cannot add a config line" "$(by_of env KYB_WORKSPACE="$(printf 'x"\nurl = http://127.0.0.1:1/\nheader = "y')" 2>&1)" "cannot reach"
+expect "via says the CLI" "$(by_of env)" "cli"
 expect "an https URL is passed to curl as https" "$(KYB_URL="https://127.0.0.1:$port" "$cli" whoami 2>&1)" "cannot reach 127.0.0.1:$port"
 
 mode="$(stat -f '%Lp' "$KYB_AUTH_FILE" 2>/dev/null || stat -c '%a' "$KYB_AUTH_FILE")"

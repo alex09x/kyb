@@ -336,6 +336,18 @@ caller through by leaving the token out. A public read-only demo is its own inst
 own synthetic data, started with `KYB_AUTH=required KYB_ANON=read`. The web UI asks for a token when the server does and hides what the
 token's role would be refused.
 
+## Attribution: which agent wrote what
+
+Every write is committed with trailers (`Kyb-Agent`, `Kyb-Session`, `Kyb-Workspace`, `Kyb-Via`)
+naming the agent, its session and the workspace it ran in, as far as the client could tell; the
+history and activity endpoints return them as `by`, and the console shows them on each version.
+The CLI reads them from the environment the agent runs it in; for the MCP endpoint a Claude Code
+hook adds them to each call as `_ctx` (taken out of the arguments before the API sees them), and
+Antigravity's and Codex's own call metadata is read when there is no hook. Headers for any
+client: `X-Kyb-Agent`, `X-Kyb-Session`, `X-Kyb-Workspace`, `X-Kyb-Via`. Workspaces are a
+repository name and a path inside it, never an absolute path. Attribution is forensics, not
+identity: it grants nothing (tokens do that) and `GET /whoami` echoes what a request claims.
+
 ## Web UI and Control Room
 
 `kyb-server` embeds a zero-dependency, dark-mode Web UI served directly at `http://<host>:9310/`:

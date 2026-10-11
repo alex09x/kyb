@@ -13,7 +13,8 @@
       if (ev.action === 'retracted' || ev.action === 'archived' || ev.action === 'dropped') return [LED_VERB[ev.action], 'retract'];
       return [LED_VERB[ev.action] || ev.action, ''];
     }
-    function ledWho(a) { return (a || '').replace(/\s*<[^>]*>/, '').trim() || 'unknown'; }
+    // the signer when there is one, else the agent the client named, else nobody
+    function ledWho(a, by) { const b = by || {}; return (a || '').replace(/\s*<[^>]*>/, '').trim() || [b.agent, b.workspace].filter(Boolean).join(' · ') || 'unknown'; }
     function ledDay(ts) {
       const d = new Date(ts), t = new Date(); const y = new Date(); y.setDate(t.getDate() - 1);
       const same = (a, b) => a.toDateString() === b.toDateString();
@@ -111,7 +112,7 @@
             <span class="sub">${escapeHtml(sub)}</span>
             ${ledDiffHtml(App.ledDiffs.get(e.sha))}
           </div>
-          <span class="who" title="${escapeHtml(e.sha || '')}">${escapeHtml(ledWho(e.author))}</span>
+          <span class="who" title="${escapeHtml(e.sha || '')}">${escapeHtml(ledWho(e.author, e.by))}</span>
         </div>`;
         const next = events[i + 1];
         html += foldSearches(e.t, next ? next.t : -Infinity, i + 1);

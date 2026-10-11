@@ -88,15 +88,90 @@ pretty() { if command -v jq >/dev/null 2>&1; then jq .; else cat; fi; }
 
 urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${1:-}"; }
 
+# Who is writing, for the record: the agent, its session and the workspace,
+# read from the environment the agent runs the CLI in. The server writes them
+# as trailers on the commit (kyb history shows them as `by`); they are not an
+# identity and grant nothing - a token does that. Overrides: KYB_AGENT,
+# KYB_SESSION, KYB_WORKSPACE. The workspace is a name and a path inside the
+# repository, never an absolute path: machines and home directories stay out
+# of the shared history.
+# The agent and its session are decided together: first which agent this is,
+# then that agent's own session variable and no other's. A Codex started from
+# inside a Claude Code shell inherits CLAUDE_CODE_SESSION_ID and PROD_PROVIDER=claude,
+# but CODEX_THREAD_ID is its own, so the agent's own markers come first; nested
+# the other way round the two cannot be told apart from here, and KYB_AGENT
+# settles it - the session then comes from that agent's variable or KYB_SESSION,
+# never from another agent's.
+by_context() { # sets BY_AGENT and BY_SESSION
+  local from_prod=""
+  BY_AGENT="${KYB_AGENT:-}"
+  if [ -z "$BY_AGENT" ]; then
+    if [ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}" ]; then BY_AGENT=codex
+    elif [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}${ANTIGRAVITY_AGENT:-}" ]; then BY_AGENT=antigravity
+    elif [ -n "${CLAUDECODE:-}${CLAUDE_CODE_SESSION_ID:-}" ]; then BY_AGENT=claude
+    elif [ -n "${PROD_PROVIDER:-}" ]; then BY_AGENT="$PROD_PROVIDER"; from_prod=1
+    else BY_AGENT=shell
+    fi
+  fi
+  # the session is the agent's own, or nothing: prod's session key belongs to the
+  # agent only when prod also named that agent, never to one named by hand
+  case "$BY_AGENT" in
+    codex)       BY_SESSION="${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}" ;;
+    antigravity) BY_SESSION="${ANTIGRAVITY_CONVERSATION_ID:-}" ;;
+    claude)      BY_SESSION="${CLAUDE_CODE_SESSION_ID:-}" ;;
+    *)           BY_SESSION=""; [ -n "$from_prod" ] && BY_SESSION="${PROD_PRIMARY_SESSION_KEY:-}" ;;
+  esac
+  BY_SESSION="${KYB_SESSION:-$BY_SESSION}"
+}
+# The repository's name and the path inside it; never an absolute path. Both ends
+# are the physical paths and the directory must really be inside the repository:
+# a symlinked working directory must not turn into the whole path from /.
+by_workspace() {
+  if [ -n "${KYB_WORKSPACE:-}" ]; then
+    case "$KYB_WORKSPACE" in /*) basename "$KYB_WORKSPACE" ;; *) printf '%s' "$KYB_WORKSPACE" ;; esac
+    return
+  fi
+  local top here
+  here="$(pwd -P)"
+  if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; then
+    top="$(cd "$top" && pwd -P)"
+    if [ "$here" = "$top" ]; then basename "$top"
+    else
+      case "$here" in "$top"/*) printf '%s/%s' "$(basename "$top")" "${here#"$top"/}" ;; *) basename "$top" ;; esac
+    fi
+  elif [ -n "${PROD_WORKSPACE_NAME:-}" ]; then
+    printf '%s' "$PROD_WORKSPACE_NAME"
+  else
+    basename "$here"
+  fi
+}
+# One curl config line `header = "<name>: <value>"`. The value goes through the
+# config file's quoted-string syntax, so a quote or a backslash in it is escaped
+# and control characters are dropped: a value can never end the line and start
+# another option, which is what would send the headers - token included - to a
+# URL of its choosing.
+cfg_header() { # cfg_header <name> <value>
+  local v
+  v="$(printf '%s' "$2" | tr -d '\000-\037\177')"
+  v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
+  printf 'header = "%s: %s"\n' "$1" "$v"
+}
+# curl config lines: every header the server reads, token included, in a file
+# descriptor rather than on the command line, where `ps` could show them
+request_headers() {
+  by_context
+  [ -n "$KYB_TOKEN" ] && cfg_header authorization "Bearer $KYB_TOKEN"
+  cfg_header x-kyb-agent "$BY_AGENT"
+  cfg_header x-kyb-session "$BY_SESSION"
+  cfg_header x-kyb-workspace "$(by_workspace)"
+  cfg_header x-kyb-via cli
+}
+
 # This is a pure HTTP client for the kyb server — no ssh, no attempts to
 # start or fix anything remotely. If the server doesn't answer, say so and stop.
 kyb_curl() {
   local out rc=0
-  if [ -n "$KYB_TOKEN" ]; then
-    out="$(curl -sS -m 15 --config <(printf 'header = "authorization: Bearer %s"\n' "$KYB_TOKEN") "$@" 2>&1)" || rc=$?
-  else
-    out="$(curl -sS -m 15 "$@" 2>&1)" || rc=$?
-  fi
+  out="$(curl -sS -m 15 --config <(request_headers) "$@" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || die "cannot reach $ADDR: $out"
   printf '%s\n' "$out"
 }
@@ -461,6 +536,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     kyb_curl "$BASE/healthz" | pretty
     ;;
   whoami)
+    # the server's answer carries `by`: what it would record for a write from here
     kyb_curl "$BASE/whoami" | pretty
     ;;
   login)

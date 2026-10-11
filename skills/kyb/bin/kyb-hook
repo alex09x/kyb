@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+# KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+# Copyright (c) 2026 Alexander Panasenko
+#
+# Contact: alex@prod.codes
+# Author: https://prod.codes/about/
+# Project: https://github.com/alex09x/kyb
+# SPDX-License-Identifier: MIT
+#
+# A Claude Code PreToolUse hook for the kyb MCP tools. Claude Code talks to the
+# server over HTTP, so nothing of the session reaches it by itself; this hook
+# puts the session id, the agent and the workspace into the tool call as `_ctx`,
+# which the server takes out of the arguments and records as trailers on the
+# commit (`kyb history <key>` shows them as `by`). Nothing else changes: the
+# model's arguments pass through untouched, the hook never blocks a call and
+# never allows one - the permission decision stays with the person's policy.
+#
+# Registered by skills/install.sh in ~/.claude/settings.json:
+#   PreToolUse, matcher "mcp__kyb__.*", command ~/.local/bin/kyb-hook
+#
+# The workspace is a name and a path inside the repository, never an absolute
+# path: machine names and home directories stay out of the shared history.
+import json
+import os
+import subprocess
+import sys
+
+
+def workspace(cwd):
+    """The repository's name and the path inside it; never an absolute path.
+
+    Both ends are canonicalised and the directory must really be inside the
+    repository: a symlinked cwd must not turn into `../../Users/...`."""
+    env = os.environ.get("KYB_WORKSPACE")
+    if env:
+        return env.lstrip("/").rsplit("/", 1)[-1] if env.startswith("/") else env
+    cwd = os.path.realpath(cwd)
+    try:
+        top = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        top = ""
+    if top:
+        top = os.path.realpath(top)
+        name = os.path.basename(top)
+        if cwd == top:
+            return name
+        if cwd.startswith(top + os.sep):
+            return f"{name}/{os.path.relpath(cwd, top)}"
+        return name
+    return os.environ.get("PROD_WORKSPACE_NAME") or os.path.basename(cwd.rstrip("/")) or ""
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return  # not for us; saying nothing lets the call proceed
+    if not str(event.get("tool_name", "")).startswith("mcp__kyb__"):
+        return
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return
+    ctx = {
+        "agent": os.environ.get("KYB_AGENT") or "claude",
+        "session": os.environ.get("KYB_SESSION") or str(event.get("session_id") or ""),
+        "workspace": workspace(str(event.get("cwd") or os.getcwd())),
+    }
+    updated = dict(tool_input)
+    updated["_ctx"] = ctx
+    # Only the input changes. No permission decision: whether the call may run
+    # stays with the person's own policy, exactly as without this hook.
+    json.dump({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": updated,
+        }
+    }, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()

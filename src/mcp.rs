@@ -105,6 +105,8 @@ async fn mcp_post(State(st): State<Arc<McpState>>, req: ExtractRequest) -> Respo
     let connect = req.extensions().get::<ConnectInfo<SocketAddr>>().cloned();
     // the caller's token travels with each replayed call: the API decides, per tool, what it may do
     let bearer = req.headers().get(header::AUTHORIZATION).cloned();
+    // attribution headers on the MCP request itself: a client with no hook and no metadata
+    let headers_by = crate::auth::By::from_headers(req.headers());
 
     let body: Bytes = match axum::body::to_bytes(req.into_body(), MAX_BODY).await {
         Ok(b) => b,
@@ -139,7 +141,7 @@ async fn mcp_post(State(st): State<Arc<McpState>>, req: ExtractRequest) -> Respo
 
     let mut out = Vec::new();
     for msg in &messages {
-        if let Some(resp) = handle_one(&st, readonly, connect.as_ref(), bearer.as_ref(), msg).await {
+        if let Some(resp) = handle_one(&st, readonly, connect.as_ref(), bearer.as_ref(), headers_by.as_ref(), msg).await {
             out.push(resp);
         }
     }
@@ -158,6 +160,7 @@ async fn handle_one(
     readonly: bool,
     connect: Option<&ConnectInfo<SocketAddr>>,
     bearer: Option<&axum::http::HeaderValue>,
+    headers_by: Option<&crate::auth::By>,
     msg: &Value,
 ) -> Option<Value> {
     // No id, or a null one, means a notification: the spec forbids answering it.
@@ -172,7 +175,7 @@ async fn handle_one(
         "initialize" => rpc_ok(id, initialize(&params)),
         "ping" => rpc_ok(id, json!({})),
         "tools/list" => rpc_ok(id, json!({"tools": tools(readonly)})),
-        "tools/call" => match call_tool(st, readonly, connect, bearer, &params).await {
+        "tools/call" => match call_tool(st, readonly, connect, bearer, headers_by, &params).await {
             Ok(value) => rpc_ok(id, value),
             Err((code, message)) => rpc_error(id, code, &message),
         },
@@ -232,16 +235,22 @@ async fn call_tool(
     readonly: bool,
     connect: Option<&ConnectInfo<SocketAddr>>,
     bearer: Option<&axum::http::HeaderValue>,
+    headers_by: Option<&crate::auth::By>,
     params: &Value,
 ) -> Result<Value, (i64, String)> {
     let name = match params.get("name").and_then(Value::as_str) {
         Some(n) if !n.is_empty() => n,
         _ => return Err((-32602, "tools/call requires a string `name`".into())),
     };
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let mut args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
     if !args.is_object() {
         return Err((-32602, "`arguments` must be an object".into()));
     }
+    // Who is calling, as far as the client says. `_ctx` is put into the arguments
+    // by an agent hook (it is not a tool parameter and never reaches the API);
+    // the client's own call metadata names the conversation; the request's own
+    // X-Kyb headers are the fallback for a client that has neither.
+    let by = attribution(args.as_object_mut().and_then(|o| o.remove("_ctx")), params.get("_meta"), headers_by);
     if readonly && WRITE_TOOLS.contains(&name) {
         return Ok(tool_error(format!(
             "{name} is a write and this endpoint was opened read-only (?readonly=1)."
@@ -252,7 +261,7 @@ async fn call_tool(
         Ok(call) => call,
         Err(message) => return Ok(tool_error(message)),
     };
-    let (status, text) = forward(st, connect, bearer, call).await;
+    let (status, text) = forward(st, connect, bearer, by.as_ref(), call).await;
     if status.is_success() {
         Ok(tool_text(text.trim().to_string()))
     } else {
@@ -260,10 +269,77 @@ async fn call_tool(
     }
 }
 
+/// The attribution of one tool call, field by field: a hook's `_ctx` (agent,
+/// session, workspace) first; then the `_meta` the MCP client attached -
+/// Antigravity and Codex name their conversation there, Claude Code only the
+/// tool use, so only the agent; then the X-Kyb headers of the request. A field
+/// a higher source left empty is taken from the next one, never overwritten by
+/// an empty value. `via` names the source of the agent field.
+fn attribution(ctx: Option<Value>, meta: Option<&Value>, headers: Option<&crate::auth::By>) -> Option<crate::auth::By> {
+    use crate::auth::By;
+    let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    let from_ctx = ctx
+        .filter(Value::is_object)
+        .map(|c| By::new(&s(&c, "agent"), &s(&c, "session"), &s(&c, "workspace"), "hook"))
+        .filter(|b| !b.is_empty());
+    let from_meta = meta.and_then(|m| {
+        if let Some(id) = m.get("antigravity.google/conversation_id").and_then(Value::as_str) {
+            return Some(By::new("antigravity", id, "", "meta"));
+        }
+        if let Some(turn) = m.get("x-codex-turn-metadata") {
+            // an object, or the same object JSON-encoded as a string
+            let decoded = turn.as_str().and_then(|t| serde_json::from_str::<Value>(t).ok());
+            let turn = decoded.as_ref().unwrap_or(turn);
+            let id = ["session_id", "thread_id"].iter().find_map(|k| turn.get(k).and_then(Value::as_str)).unwrap_or_default();
+            return Some(By::new("codex", id, "", "meta"));
+        }
+        if m.get("claudecode/toolUseId").is_some() {
+            return Some(By::new("claude", "", "", "meta"));
+        }
+        None
+    });
+    let from_headers = headers.cloned().map(|mut h| {
+        if h.via.is_empty() {
+            h.via = "headers".into();
+        }
+        h
+    });
+    // The agent is the first source's that names one, and its session comes with
+    // it. A session from another source is taken only when that source names no
+    // agent or the same one: a session is a conversation of one agent, and a
+    // source that names a different agent is talking about a different
+    // conversation. The workspace is a place, not a conversation, and is filled
+    // from any source.
+    let mut out = By::default();
+    let sources: Vec<By> = [from_ctx, from_meta, from_headers].into_iter().flatten().collect();
+    if let Some(named) = sources.iter().find(|s| !s.agent.is_empty()) {
+        out.agent = named.agent.clone();
+        out.via = named.via.clone();
+        out.session = named.session.clone();
+    }
+    for src in &sources {
+        if out.session.is_empty() && !src.session.is_empty() && (src.agent.is_empty() || src.agent == out.agent) {
+            out.session = src.session.clone();
+        }
+        if out.workspace.is_empty() {
+            out.workspace = src.workspace.clone();
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        if out.via.is_empty() {
+            out.via = "headers".into();
+        }
+        Some(out)
+    }
+}
+
 async fn forward(
     st: &McpState,
     connect: Option<&ConnectInfo<SocketAddr>>,
     bearer: Option<&axum::http::HeaderValue>,
+    by: Option<&crate::auth::By>,
     call: Call,
 ) -> (StatusCode, String) {
     let mut uri = call.path;
@@ -288,6 +364,13 @@ async fn forward(
     }
     if let Some(token) = bearer {
         req.headers_mut().insert(header::AUTHORIZATION, token.clone());
+    }
+    if let Some(by) = by {
+        for (name, value) in [("x-kyb-agent", &by.agent), ("x-kyb-session", &by.session), ("x-kyb-workspace", &by.workspace), ("x-kyb-via", &by.via)] {
+            if let Ok(v) = axum::http::HeaderValue::from_str(value) {
+                req.headers_mut().insert(name, v);
+            }
+        }
     }
 
     let resp = st.api.clone().oneshot(req).await.expect("the router is infallible");

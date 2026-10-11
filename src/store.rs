@@ -49,6 +49,9 @@ pub struct VersionInfo {
     pub change: String, // added|modified|deleted
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// The agent, session and workspace the client named for this write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<crate::auth::By>,
 }
 
 /// One version of one key from history — the unit of indexing.
@@ -199,7 +202,8 @@ impl Store {
             Err(_) => None,
         };
         let parents: Vec<&git2::Commit> = parent.iter().collect();
-        let oid = repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)?;
+        let msg = crate::auth::message_with_trailers(msg, crate::auth::by().as_ref());
+        let oid = repo.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &parents)?;
         let at = repo.find_commit(oid)?.time().seconds();
         Ok((oid.to_string(), at))
     }
@@ -281,7 +285,8 @@ impl Store {
             Err(_) => None,
         };
         let parents: Vec<&git2::Commit> = parent.iter().collect();
-        let oid = repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)?;
+        let msg = crate::auth::message_with_trailers(msg, crate::auth::by().as_ref());
+        let oid = repo.commit(Some("HEAD"), &sig, &sig, &msg, &tree, &parents)?;
         let at = repo.find_commit(oid)?.time().seconds();
         Ok((oid.to_string(), at))
     }
@@ -500,6 +505,7 @@ impl Store {
                 .collect();
             let who = commit.author();
             let author = crate::auth::shown_author(who.name().unwrap_or_default(), who.email().unwrap_or_default());
+            let by = crate::auth::By::from_message(commit.message().unwrap_or_default());
             for (key, change) in &changes {
                 if moved.contains(key.as_str()) {
                     continue;
@@ -510,6 +516,7 @@ impl Store {
                     message: commit.summary().unwrap_or("").to_string(),
                     change: (*change).into(),
                     author: Some(author.clone()),
+                    by: by.clone(),
                 });
             }
         }
@@ -602,6 +609,7 @@ impl Store {
                 sha: oid.to_string(),
                 ts,
                 author,
+                by: crate::auth::By::from_message(commit.message().unwrap_or_default()),
                 message: msg,
                 key: detected_key,
                 kind,
@@ -631,6 +639,8 @@ pub struct ActivityEvent {
     pub sha: String,
     pub ts: String,
     pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<crate::auth::By>,
     pub message: String,
     pub key: Option<String>,
     pub kind: String,
