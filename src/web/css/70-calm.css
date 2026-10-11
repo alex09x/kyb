@@ -1,5 +1,5 @@
     /* ===== Calm pass: quiet everything that is not state ===== */
-    .badge { font-weight: 500; letter-spacing: 0.4px; }
+    .badge { font-weight: 500; }
     /* kind and neutral status: text only, no fill */
     .badge-knowledge, .badge-task, .badge-open, .badge-low, .badge-normal, .badge-medium,
     .badge-in_progress, .badge-in-progress {

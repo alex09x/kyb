@@ -20,7 +20,7 @@
       border: 1px solid var(--border);
       padding: 14px;
       border-radius: 8px;
-      font-size: 12px;
+      font-size: 13px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -28,7 +28,7 @@
       max-width: 280px;
       z-index: 10;
     }
-    .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+    .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); }
     .legend-color { width: 10px; height: 10px; border-radius: 50%; }
 
     .graph-controls-bar {
@@ -55,7 +55,7 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 12px 14px;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--text);
       display: none;
       z-index: 60;

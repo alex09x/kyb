@@ -48,6 +48,8 @@
         <span style="color:var(--text-muted)">&middot; ${App.tasks.length - live.length} closed</span>
         <span class="inc-chips">
           ${[['live','live'],['open','open'],['in_progress','in progress'],['blocked','blocked'],['done','closed']].map(([k,l]) => `<button class="chip ${f === k ? 'active' : ''}" onclick="taskSetStatus('${k}')">${l}</button>`).join('')}
+          <span class="sep"></span>
+          <button class="btn sm primary" onclick="openNewModal('task')">+ Add task</button>
         </span>`;
 
       document.getElementById('taskQueue').innerHTML = TASK_QUEUES.map(q => {
@@ -58,12 +60,7 @@
       }).join('');
 
       const list = taskFiltered();
-      const parts = ['tasks'];
-      if (f !== 'live') parts.push('<i>--status</i> ' + f);
-      if (App.taskQueue) parts.push(TASK_QUEUES.find(q => q.id === App.taskQueue).flag.replace(/--(\S+)/g, '<i>--$1</i>'));
-      document.getElementById('taskCmd').innerHTML =
-        `<span class="p">kyb</span><span>${parts.join(' ')}</span><span class="cur"></span>
-         <span class="cnt">${list.length} of ${App.tasks.length}${f === 'live' ? ' &middot; live only' : ''}</span>`;
+      document.getElementById('taskCount').textContent = `${list.length} of ${App.tasks.length}${f === 'live' ? ' · live only' : ''}`;
 
       if (keepSelection && App.taskCursorKey) { const at = list.findIndex(t => t.key === App.taskCursorKey); if (at >= 0) App.taskCursor = at; }
       if (App.taskCursor == null || App.taskCursor >= list.length) App.taskCursor = 0;
@@ -85,7 +82,7 @@
           : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
         const acts = cur ? `<div class="acts" onclick="event.stopPropagation()">
             <a href="#/knowledge/${encodeURIComponent(t.key)}" class="btn sm primary" onclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">&#9166; Doc</a>
-            ${!done ? `<select class="form-select" onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';" style="padding:2px 6px; font-size:11px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
+            ${!done ? `<select class="form-select" onchange="moveTaskTo(this.value, ${jsArg(t.key)}, ${jsArg(t.title)}); this.value='';" style="padding:2px 6px; font-size: 12.5px; height:24px; background:var(--card-subtle); color:var(--text-dim); border:1px solid var(--border);">
               <option value="" disabled selected>m Move to…</option>
               <option value="open" ${st === 'open' ? 'disabled' : ''}>Open</option>
               <option value="in_progress" ${st === 'in_progress' ? 'disabled' : ''}>In progress</option>
@@ -177,11 +174,10 @@
 
     async function submitBlockTask() {
       const reasonEl = document.getElementById('blockTaskReason');
-      const authorEl = document.getElementById('blockTaskAuthor');
       const reason = reasonEl ? reasonEl.value.trim() : '';
-      const author = (authorEl ? authorEl.value.trim() : '') || 'Alexander Panasenko <alex@prod.codes>';
-      if (!reason) {
-        showToast('Please provide a reason why this task is blocked', 'error');
+      const author = FORM_AUTHOR;
+      if (!markRequired(['blockTaskReason']) || !reason) {
+        showToast('Say what is blocking it', 'error');
         return;
       }
       closeModal('blockTaskModal');
@@ -196,12 +192,11 @@
     }
 
     async function submitResolveTask() {
-      const outcome = document.getElementById('resolveTaskOutcome').value.trim();
-      const author = document.getElementById('resolveTaskAuthor').value.trim() || 'Alexander Panasenko <alex@prod.codes>';
-      if (!outcome) {
-        showToast('Please provide a completion outcome note', 'error');
+      if (!markRequired(['resolveTaskOutcome'])) {
+        showToast('Say what the outcome was', 'error');
         return;
       }
+      const outcome = document.getElementById('resolveTaskOutcome').value.trim();
 
       const res = await apiPost(`/tasks/${encodeURIComponent(App.activeResolveKey)}/resolve`, {
         resolution: outcome

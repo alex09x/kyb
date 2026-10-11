@@ -176,14 +176,8 @@
     setInterval(updateLastSyncTicker, 2000);
 
     function renderHeaderStats() {
-      document.getElementById('statIndexed').textContent = `${App.entries.length} entries`;
       const openInc = App.incidents.filter(i => i.status !== 'resolved').length;
-      const openIncEl = document.getElementById('statIncidents');
-      openIncEl.textContent = `${openInc} open`;
-      openIncEl.className = openInc > 0 ? 'stat-val red' : 'stat-val green';
-
       const activeTasks = App.tasks.filter(t => t.status !== 'done').length;
-      document.getElementById('statTasks').textContent = `${activeTasks} active`;
 
       document.getElementById('badgeKnowledgeCount').textContent = App.entries.length;
       const incBadge = document.getElementById('badgeIncidentsCount');

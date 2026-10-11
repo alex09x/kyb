@@ -1,12 +1,12 @@
     /* ===== Change ledger: what moved, when, by whom - and what the text lost or gained ===== */
     .led { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--bg); }
-    .led-top { display:flex; align-items:baseline; gap:18px; padding:14px 16px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text-dim); flex-wrap:wrap; }
-    .led-top b { font-size:20px; font-weight:600; letter-spacing:-.01em; color:var(--text); }
+    .led-top { display:flex; align-items:baseline; gap:18px; padding:14px 16px; border-bottom:1px solid var(--border); font-size: 13px; color:var(--text-dim); flex-wrap:wrap; }
+    .led-top b { font-size: 20px; font-weight:600; letter-spacing:-.01em; color:var(--text); }
     .led-top .chips { margin-left:auto; display:flex; gap:4px; align-items:center; }
-    .led-day { padding:12px 16px 4px; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); }
-    .led-ev { display:grid; grid-template-columns:52px 14px minmax(0,1fr) auto; gap:12px; align-items:start; padding:8px 16px; font-size:12.5px; }
+    .led-day { padding:12px 16px 4px; font-size: 12.5px; color:var(--text-muted); }
+    .led-ev { display:grid; grid-template-columns:52px 14px minmax(0,1fr) auto; gap:12px; align-items:start; padding:8px 16px; font-size: 13.5px; }
     .led-ev:hover { background:var(--card-subtle); }
-    .led-ev .tm { color:var(--text-muted); font-family:var(--font-mono); font-size:11.5px; padding-top:2px; font-variant-numeric:tabular-nums; }
+    .led-ev .tm { color:var(--text-muted); font-family:var(--font-mono); font-size: 13px; padding-top:2px; font-variant-numeric:tabular-nums; }
     .led-ev .ln { display:flex; flex-direction:column; align-items:center; align-self:stretch; }
     .led-ev .ln .dot { width:8px; height:8px; border-radius:50%; background:var(--text-muted); margin-top:4px; }
     .led-ev .ln .dot.open { background:var(--red); } .led-ev .ln .dot.res { background:var(--green); } .led-ev .ln .dot.task { background:var(--accent); }
@@ -15,21 +15,21 @@
     .led-ev .what .h { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
     .led-ev .what b { font-weight:500; color:var(--text); }
     .led-ev .what b a { color:inherit; text-decoration:none; } .led-ev .what b a:hover { text-decoration:underline; }
-    .led-ev .what .sub { font-size:11.5px; color:var(--text-muted); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .led-ev .who { font-size:11px; color:var(--text-muted); white-space:nowrap; padding-top:2px; }
-    .led-verb { font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); color:var(--text-dim); }
+    .led-ev .what .sub { font-size: 13px; color:var(--text-muted); font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .led-ev .who { font-size: 12.5px; color:var(--text-muted); white-space:nowrap; padding-top:2px; }
+    .led-verb { font-size: 12.5px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); color:var(--text-dim); }
     .led-verb.open { color:var(--red); border-color:rgba(224,108,111,.4); }
     .led-verb.res { color:var(--green); border-color:rgba(95,184,143,.4); }
     .led-verb.retract { color:var(--amber); border-color:rgba(217,164,65,.4); }
-    .led-d { font-family:var(--font-mono); font-size:11px; color:var(--text-muted); background:var(--card-subtle); border:1px solid var(--border); border-radius:4px; padding:5px 8px; margin-top:3px; display:flex; flex-direction:column; gap:2px; max-width:900px; }
+    .led-d { font-family:var(--font-mono); font-size: 12.5px; color:var(--text-muted); background:var(--card-subtle); border:1px solid var(--border); border-radius:4px; padding:5px 8px; margin-top:3px; display:flex; flex-direction:column; gap:2px; max-width:900px; }
     .led-d div { white-space:pre-wrap; word-break:break-word; }
     .led-d .del { color:var(--red); } .led-d .add { color:var(--green); } .led-d .fld { color:var(--text-dim); } .led-d .fld em { font-style:normal; color:var(--text-muted); text-decoration:line-through; }
-    .led-d .more { color:var(--text-muted); font-family:var(--font-sans); font-size:10.5px; }
-    .led-fold { padding:6px 16px 6px 94px; font-size:11px; color:var(--text-muted); cursor:pointer; }
+    .led-d .more { color:var(--text-muted); font-family:var(--font-sans); font-size: 12.5px; }
+    .led-fold { padding:6px 16px 6px 94px; font-size: 12.5px; color:var(--text-muted); cursor:pointer; }
     .led-fold:hover { color:var(--text-dim); }
     .led-fold .acc { color:var(--accent); }
-    .led-q { display:grid; grid-template-columns:52px 14px minmax(0,1fr) auto; gap:12px; padding:3px 16px; font-size:11.5px; color:var(--text-muted); }
+    .led-q { display:grid; grid-template-columns:52px 14px minmax(0,1fr) auto; gap:12px; padding:3px 16px; font-size: 13px; color:var(--text-muted); }
     .led-q .qq { font-family:var(--font-mono); color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .led-q .qq a { color:inherit; text-decoration:none; } .led-q .qq a:hover { color:var(--accent); }
-    .led-empty { padding:28px 16px; color:var(--text-muted); font-size:12.5px; text-align:center; }
+    .led-empty { padding:28px 16px; color:var(--text-muted); font-size: 13.5px; text-align:center; }
 

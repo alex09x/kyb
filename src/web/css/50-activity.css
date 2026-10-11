@@ -16,7 +16,7 @@
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      font-size: 10px;
+      font-size: 12.5px;
       font-family: var(--font-mono);
       background: rgba(139, 92, 246, 0.15);
       color: #a78bfa;

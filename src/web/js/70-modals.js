@@ -33,6 +33,24 @@
       openModal('newModal');
     }
 
+    // Forms ask only what cannot be derived. The key is derived from the title and shown as
+    // one editable mono line; the author is the console's owner and is not asked for.
+    const FORM_AUTHOR = 'Alexander Panasenko <alex@prod.codes>';
+    const SEVERITIES = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']];
+    const PRIORITIES = [['', 'Unranked'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']];
+
+    function segmented(id, options, value) {
+      return `<input type="hidden" id="${id}" value="${escapeHtml(value)}"><div class="seg" data-for="${id}">${options.map(([v, l]) =>
+        `<button type="button" class="${v === value ? 'on' : ''}" data-value="${escapeHtml(v)}" onclick="segPick(this)">${l}</button>`).join('')}</div>`;
+    }
+    function segPick(btn) {
+      const seg = btn.parentElement;
+      document.getElementById(seg.dataset.for).value = btn.dataset.value;
+      [...seg.children].forEach(b => b.classList.toggle('on', b === btn));
+    }
+    const field = (label, control, hint) => `<div class="form-group"><label class="form-label">${label}</label>${control}${hint ? `<div class="form-hint">${hint}</div>` : ''}</div>`;
+    const keyField = (id, value, placeholder) => `<div class="form-group key"><label class="form-label">Key</label><input type="text" class="form-input mono" id="${id}" value="${escapeHtml(value || '')}" placeholder="${placeholder}" oninput="this.dataset.touched = 'true'"></div>`;
+
     function switchNewModalType(type) {
       App.newModalKind = type;
       ['Knowledge', 'Incident', 'Task'].forEach(t => {
@@ -42,96 +60,62 @@
 
       const bodyEl = document.getElementById('newModalBody');
       const titleEl = document.getElementById('newModalTitle');
+      const submitEl = document.getElementById('newModalSubmitBtn');
 
       if (type === 'knowledge') {
-        titleEl.textContent = 'Create Fleet Knowledge Article';
+        titleEl.textContent = 'New note';
+        submitEl.textContent = 'Save note';
         bodyEl.innerHTML = `
-          <div class="form-group">
-            <label class="form-label">Title *</label>
-            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Postgres replicas and failover" oninput="autoSlugKey(this.value)">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Unique Key *</label>
-            <input type="text" class="form-input" id="newKey" placeholder="e.g. postgres-replicas">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Tags (comma-separated)</label>
-            <input type="text" class="form-input" id="newTags" placeholder="database, postgres, infra">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Markdown Body *</label>
-            <textarea class="form-textarea" id="newBody" placeholder="Document architecture, hosts, ports, wiring, and operational notes..."></textarea>
-          </div>
+          ${field('What is it about', `<input type="text" class="form-input" id="newTitle" placeholder="Postgres replicas and failover" oninput="autoSlugKey(this.value)">`)}
+          ${keyField('newKey', '', 'postgres-replicas')}
+          ${field('Tags', `<input type="text" class="form-input" id="newTags" placeholder="database, postgres, infra">`, 'Comma-separated. Existing tags are suggested in the list.')}
+          ${field('The note', `<textarea class="form-textarea" id="newBody" placeholder="Hosts, ports, wiring, decisions and why. Markdown."></textarea>`)}
         `;
       } else if (type === 'incident') {
-        titleEl.textContent = 'Report Fleet Incident';
+        titleEl.textContent = 'New incident';
+        submitEl.textContent = 'Open incident';
         const todaySlug = new Date().toISOString().slice(0, 10).replace(/-/g, '');
         bodyEl.innerHTML = `
-          <div class="form-group">
-            <label class="form-label">Incident Title *</label>
-            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Redis out of memory on cache-01" oninput="autoSlugIncident(this.value)">
+          ${field('What broke', `<input type="text" class="form-input" id="newTitle" placeholder="Redis out of memory on cache-01" oninput="autoSlugIncident(this.value)">`)}
+          ${keyField('newKey', `inc-${todaySlug}-`, '')}
+          <div class="form-row">
+            ${field('Service', `<input type="text" class="form-input" id="newService" placeholder="redis">`)}
+            ${field('Which hosts', `<input type="text" class="form-input" id="newHosts" placeholder="cache-01, worker-02">`)}
           </div>
-          <div class="form-group">
-            <label class="form-label">Incident Key *</label>
-            <input type="text" class="form-input" id="newKey" value="inc-${todaySlug}-">
-          </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            <div class="form-group">
-              <label class="form-label">Service</label>
-              <input type="text" class="form-input" id="newService" placeholder="e.g. redis">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Severity</label>
-              <select class="form-select" id="newSeverity">
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-                <option value="low">Low</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Impacted Hosts (comma-separated)</label>
-            <input type="text" class="form-input" id="newHosts" placeholder="cache-01, worker-02">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Incident Summary & Detection Check *</label>
-            <textarea class="form-textarea" id="newBody" placeholder="What happened, symptoms, impact, and immediate workaround..."></textarea>
-          </div>
+          ${field('How bad', segmented('newSeverity', SEVERITIES, 'medium'))}
+          ${field('Is it still happening?', `<input type="text" class="form-input mono" id="newDetection" placeholder="curl -fsS http://cache-01:6379/ping">`, 'A command anyone can run to tell. Without it the incident lands in the unverifiable queue.')}
+          ${field('What happened', `<textarea class="form-textarea" id="newBody" placeholder="Symptoms, impact, what was done so far."></textarea>`)}
         `;
       } else if (type === 'task') {
-        titleEl.textContent = 'Add Fleet Task / Idea';
+        titleEl.textContent = 'New task';
+        submitEl.textContent = 'Add task';
         bodyEl.innerHTML = `
-          <div class="form-group">
-            <label class="form-label">Task Title *</label>
-            <input type="text" class="form-input" id="newTitle" placeholder="e.g. Migrate sccache to local ssd" oninput="autoSlugTask(this.value)">
+          ${field('What needs doing', `<input type="text" class="form-input" id="newTitle" placeholder="Migrate sccache to local ssd" oninput="autoSlugTask(this.value)">`)}
+          ${keyField('newKey', '', 'task-migrate-sccache')}
+          <div class="form-row">
+            ${field('Priority', segmented('newPriority', PRIORITIES, ''))}
+            ${field('Who', `<input type="text" class="form-input" id="newAssignee" value="Alexander Panasenko">`)}
           </div>
-          <div class="form-group">
-            <label class="form-label">Task Key *</label>
-            <input type="text" class="form-input" id="newKey" placeholder="task-migrate-sccache">
-          </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            <div class="form-group">
-              <label class="form-label">Priority</label>
-              <select class="form-select" id="newPriority">
-                <option value="">Not ranked</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Assignee</label>
-              <input type="text" class="form-input" id="newAssignee" placeholder="Alexander Panasenko" value="Alexander Panasenko">
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Task Description / Acceptance Criteria *</label>
-            <textarea class="form-textarea" id="newBody" placeholder="What needs to be done and how to verify..."></textarea>
-          </div>
+          ${field('Done when', `<textarea class="form-textarea" id="newBody" placeholder="What to do and how to tell it is done."></textarea>`)}
         `;
       }
+    }
+
+    // A missing field is marked where it is, not only in a toast.
+    function markRequired(ids) {
+      let first = null;
+      ids.forEach(id => {
+        const el = document.getElementById(id); if (!el) return;
+        const missing = !el.value.trim();
+        el.classList.toggle('invalid', missing);
+        const group = el.closest('.form-group'); if (!group) return;
+        let err = group.querySelector('.form-err');
+        if (missing && !err) { err = document.createElement('div'); err.className = 'form-err'; err.textContent = 'This is needed.'; group.appendChild(err); }
+        if (!missing && err) err.remove();
+        if (missing && !first) first = el;
+      });
+      if (first) first.focus();
+      return !first;
     }
 
     function autoSlugKey(val) {
@@ -142,12 +126,14 @@
     }
     function autoSlugIncident(val) {
       const keyEl = document.getElementById('newKey');
+      if (keyEl.dataset.touched === 'true') return;
       const todaySlug = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const slug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       keyEl.value = `inc-${todaySlug}-${slug}`;
     }
     function autoSlugTask(val) {
       const keyEl = document.getElementById('newKey');
+      if (keyEl.dataset.touched === 'true') return;
       const slug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       keyEl.value = `task-${slug}`;
     }
@@ -157,8 +143,8 @@
       const key = document.getElementById('newKey')?.value.trim();
       const body = document.getElementById('newBody')?.value.trim();
 
-      if (!title || !key || !body) {
-        showToast('Please fill out all required fields (*)', 'error');
+      if (!markRequired(['newTitle', 'newKey', 'newBody'])) {
+        showToast('Fill in the marked fields', 'error');
         return;
       }
 
@@ -171,13 +157,14 @@
           title,
           tags,
           body,
-          author: 'Alexander Panasenko <alex@prod.codes>'
+          author: FORM_AUTHOR
         });
       } else if (App.newModalKind === 'incident') {
         const service = document.getElementById('newService')?.value.trim() || 'infrastructure';
         const severity = document.getElementById('newSeverity')?.value || 'medium';
         const rawHosts = document.getElementById('newHosts')?.value || '';
         const hosts = rawHosts.split(',').map(s => s.trim()).filter(Boolean);
+        const detection = document.getElementById('newDetection')?.value.trim() || '';
         res = await apiPost('/incidents', {
           key,
           title,
@@ -185,7 +172,8 @@
           severity,
           hosts,
           body,
-          author: 'Alexander Panasenko <alex@prod.codes>'
+          ...(detection ? { detection } : {}),
+          author: FORM_AUTHOR
         });
       } else if (App.newModalKind === 'task') {
         const priority = document.getElementById('newPriority')?.value || '';
@@ -196,7 +184,7 @@
           priority,
           assignee,
           body,
-          author: 'Alexander Panasenko <alex@prod.codes>'
+          author: FORM_AUTHOR
         });
       }
 
@@ -237,93 +225,36 @@
 
       editingEntry = entry;
       editingEntryKind = entry.kind || 'knowledge';
-      document.getElementById('editModalTitle').textContent = `Edit ${editingEntryKind.toUpperCase()}: ${entry.key}`;
+      document.getElementById('editModalTitle').textContent = `Edit ${entry.key}`;
 
       const bodyEl = document.getElementById('editModalBody');
+      const hidden = `<input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">`;
 
       if (editingEntryKind === 'incident') {
-        bodyEl.innerHTML = `
-          <input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">
-          <div class="form-group">
-            <label class="form-label">Incident Title *</label>
-            <input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">
+        bodyEl.innerHTML = `${hidden}
+          ${field('What broke', `<input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">`)}
+          <div class="form-row">
+            ${field('Service', `<input type="text" class="form-input" id="editService" value="${escapeHtml(entry.service || '')}">`)}
+            ${field('Which hosts', `<input type="text" class="form-input" id="editHosts" value="${escapeHtml((entry.hosts || []).join(', '))}">`)}
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            <div class="form-group">
-              <label class="form-label">Service</label>
-              <input type="text" class="form-input" id="editService" value="${escapeHtml(entry.service || '')}">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Severity</label>
-              <select class="form-select" id="editSeverity">
-                <option value="critical" ${entry.severity === 'critical' ? 'selected' : ''}>Critical</option>
-                <option value="high" ${entry.severity === 'high' ? 'selected' : ''}>High</option>
-                <option value="medium" ${entry.severity === 'medium' || !entry.severity ? 'selected' : ''}>Medium</option>
-                <option value="low" ${entry.severity === 'low' ? 'selected' : ''}>Low</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Impacted Hosts (comma-separated)</label>
-            <input type="text" class="form-input" id="editHosts" value="${escapeHtml((entry.hosts || []).join(', '))}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Incident Body / Mitigation Notes *</label>
-            <textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Author Identity</label>
-            <input type="text" class="form-input" id="editAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
-          </div>
+          ${field('How bad', segmented('editSeverity', SEVERITIES, entry.severity || 'medium'))}
+          ${field('Is it still happening?', `<input type="text" class="form-input mono" id="editDetection" value="${escapeHtml(entry.detection || '')}" placeholder="a command anyone can run to tell">`)}
+          ${field('What happened', `<textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>`)}
         `;
       } else if (editingEntryKind === 'task') {
-        bodyEl.innerHTML = `
-          <input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">
-          <div class="form-group">
-            <label class="form-label">Task Title *</label>
-            <input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">
+        bodyEl.innerHTML = `${hidden}
+          ${field('What needs doing', `<input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">`)}
+          <div class="form-row">
+            ${field('Priority', segmented('editPriority', PRIORITIES, entry.priority || ''))}
+            ${field('Who', `<input type="text" class="form-input" id="editAssignee" value="${escapeHtml(entry.assignee || 'Alexander Panasenko')}">`)}
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-            <div class="form-group">
-              <label class="form-label">Priority</label>
-              <select class="form-select" id="editPriority">
-                ${[['', 'Not ranked'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['critical', 'Critical']].map(([v, l]) =>
-                  `<option value="${v}" ${(entry.priority || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Assignee</label>
-              <input type="text" class="form-input" id="editAssignee" value="${escapeHtml(entry.assignee || 'Alexander Panasenko')}">
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Task Description / Acceptance Criteria *</label>
-            <textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Author Identity</label>
-            <input type="text" class="form-input" id="editAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
-          </div>
+          ${field('Done when', `<textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>`)}
         `;
       } else {
-        bodyEl.innerHTML = `
-          <input type="hidden" id="editKey" value="${escapeHtml(entry.key)}">
-          <div class="form-group">
-            <label class="form-label">Title *</label>
-            <input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Tags (comma-separated)</label>
-            <input type="text" class="form-input" id="editTags" value="${escapeHtml((entry.tags || []).join(', '))}">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Markdown Body *</label>
-            <textarea class="form-textarea" id="editBody" style="min-height:160px;">${escapeHtml(entry.body || '')}</textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Author Identity</label>
-            <input type="text" class="form-input" id="editAuthor" value="Alexander Panasenko &lt;alex@prod.codes&gt;">
-          </div>
+        bodyEl.innerHTML = `${hidden}
+          ${field('What is it about', `<input type="text" class="form-input" id="editTitle" value="${escapeHtml(entry.title || '')}">`)}
+          ${field('Tags', `<input type="text" class="form-input" id="editTags" value="${escapeHtml((entry.tags || []).join(', '))}">`)}
+          ${field('The note', `<textarea class="form-textarea" id="editBody" style="min-height:160px;">${escapeHtml(entry.body || '')}</textarea>`)}
         `;
       }
 
@@ -340,10 +271,10 @@
       const key = document.getElementById('editKey')?.value;
       const title = document.getElementById('editTitle')?.value.trim();
       const body = document.getElementById('editBody')?.value.trim();
-      const author = document.getElementById('editAuthor')?.value.trim() || 'Alexander Panasenko <alex@prod.codes>';
+      const author = FORM_AUTHOR;
 
-      if (!title || !body) {
-        showToast('Title and body are required', 'error');
+      if (!markRequired(['editTitle', 'editBody'])) {
+        showToast('Fill in the marked fields', 'error');
         return;
       }
 
@@ -353,14 +284,16 @@
         const severity = document.getElementById('editSeverity')?.value || 'medium';
         const rawHosts = document.getElementById('editHosts')?.value || '';
         const hosts = rawHosts.split(',').map(s => s.trim()).filter(Boolean);
+        const detection = document.getElementById('editDetection')?.value.trim() || '';
         res = await apiPost('/incidents', {
-          ...editKeep(['status', 'knowledge', 'resolution', 'detection', 'affected', 'started_at', 'detected_at', 'tags', 'refs']),
+          ...editKeep(['status', 'knowledge', 'resolution', 'affected', 'started_at', 'detected_at', 'tags', 'refs']),
           key,
           title,
           service,
           severity,
           hosts,
           body,
+          ...(detection ? { detection } : {}),
           author
         });
       } else if (editingEntryKind === 'task') {

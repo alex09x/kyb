@@ -154,8 +154,9 @@ window.__t = {
         const r = a.getBoundingClientRect(); if (x < r.left || x > r.right || y < r.top || y > r.bottom) { clipped = true; break; }
       }
       if (clipped) continue;
+      if (!el.isConnected) continue;                                       // re-rendered while we walked: nothing covers it
       const top = document.elementFromPoint(x, y);
-      if (top && (top === el || el.contains(top))) continue;   // an ancestor under the cursor means something lies over the control
+      if (!top || top === el || el.contains(top)) continue;   // an ancestor under the cursor means something lies over the control
       out.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ' "' + el.textContent.trim().slice(0, 24) + '" under ' + (top ? (top.id ? '#' + top.id : top.tagName.toLowerCase() + '.' + String(top.className).split(' ')[0]) : 'nothing'));
     }
     return out;
@@ -288,7 +289,7 @@ def run(base, headed, coverage=None):
         # Records the test invents (made-up keys and shas) have nothing on the server. A 404 for
         # exactly such a path is the test's own doing; any other status on it, or a 404 anywhere
         # else, is reported like every other error.
-        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh")
+        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh", "/knowledge/k-anon")
         expected_404 = set()
         page.on("response", lambda r: expected_404.add(r.url) if r.status == 404 and any(x in r.url for x in synthetic) else None)
         # The ledger check invents an event for key k1 at sha s2; a diff fetch the ledger's observer
@@ -374,7 +375,7 @@ def run(base, headed, coverage=None):
 
         # --- task through its states
         page.evaluate(f"""async () => {{ openNewModal('task'); await __t.wait(200);
-          __t.set('newTitle', 'UI test task'); __t.set('newKey', '{K}'); __t.set('newBody', 'Do the thing.'); document.getElementById('newPriority').value = 'high';
+          __t.set('newTitle', 'UI test task'); __t.set('newKey', '{K}'); __t.set('newBody', 'Do the thing.'); document.querySelector(".seg[data-for='newPriority'] [data-value='high']").click();
           await submitNewModal(); await __t.wait(400); }}""")
         s, e = api(base, "GET", f"/knowledge/{K}")
         check("create task from the form (priority accepted)", s == 200 and e.get("kind") == "task" and e.get("priority") == "high", (s, e))
@@ -458,8 +459,8 @@ def run(base, headed, coverage=None):
         check("selecting the same queue again clears it", page.evaluate("App.incidentQueue") is None and len(rows()) >= n_unver, rows())
         page.evaluate("incSelectQueue('abandoned'); incClearCell()")
         check("incClearCell clears the queue filter", page.evaluate("App.incidentQueue") is None)
-        cmd = page.evaluate("filterIncidents('open'); filterIncidentsSeverity('high'); document.getElementById('incCmd').textContent")
-        check("the command line spells the active filters", "--status open" in cmd and "--severity high" in cmd, cmd)
+        cmd = page.evaluate("filterIncidents('open'); filterIncidentsSeverity('high'); [document.getElementById('incCount').textContent, incFiltered().length, App.incidents.length]")
+        check("the footer counts what the filters left", cmd[0] == f"{cmd[1]} of {cmd[2]}", cmd)
         page.evaluate("filterIncidents('all'); filterIncidentsSeverity('all')")
 
         trows = lambda: page.evaluate("[...document.querySelectorAll('#tab-tasks .inc-r')].map(r => r.querySelector('.t span').textContent.split(' ')[0])")
@@ -502,10 +503,10 @@ def run(base, headed, coverage=None):
         drawn = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = selectEntry('kyb-service', false); App.selectedKey = '{N}'; await p;
           return [[...document.querySelectorAll('.detail-tab')].map(b => b.textContent).join('|'), App.detailCache.has('kyb-service')]; }}""")
         # the optimistic skeleton (history: 0 versions) may draw before the key changes; the fetched history must not follow it
-        check("a stale selectEntry response neither draws nor caches", drawn[1] is False and "Versions (0)" in drawn[0], drawn)
+        check("a stale selectEntry response neither draws nor caches", drawn[1] is False and "Versions|" in drawn[0], drawn)
         refetched = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = selectEntry('{N}', false); App.cacheGen++; await p;
           return [[...document.querySelectorAll('.detail-tab')].map(b => b.textContent).join('|'), App.detailCache.has('{N}')]; }}""")
-        check("a write during the load of the selected entry triggers a fresh load, not a skeleton", "Versions (2)" in refetched[0] and refetched[1] is True, refetched)
+        check("a write during the load of the selected entry triggers a fresh load, not a skeleton", "Versions · 2" in refetched[0] and refetched[1] is True, refetched)
         check("the edited entry has two versions, each with its change", page.locator("#verList .ver-ev").count() == 2 and page.locator("#verList .ver-fld, #verList .ver-dif, #verList .ver-note").count() >= 2)
         sha = page.evaluate("App.currentHistoryList[App.currentHistoryList.length - 1].sha")
         page.evaluate(f"verToggleText('{sha}')")
@@ -664,11 +665,10 @@ def run(base, headed, coverage=None):
               == ['a &lt;<mark class="search-highlight">b</mark>&gt; c', "x", '<mark class="search-highlight">a.b</mark>'])
         check("verPrevSha walks the list it is given", ev("[verPrevSha([{sha:'c'},{sha:'b'},{sha:'a'}], 'c'), verPrevSha([{sha:'c'},{sha:'b'},{sha:'a'}], 'a'), verPrevSha([], 'x')]") == ["b", None, None])
 
-        # header stats mirror the data
+        # header counts mirror the data
         ev("renderHeaderStats()")
-        stats = ev("({indexed: document.getElementById('statIndexed').textContent, inc: document.getElementById('statIncidents').textContent, tasks: document.getElementById('statTasks').textContent, bK: document.getElementById('badgeKnowledgeCount').textContent, bI: document.getElementById('badgeIncidentsCount').textContent, bT: document.getElementById('badgeTasksCount').textContent, red: document.getElementById('statIncidents').className, pills: document.querySelectorAll('#tagPills .badge-tag').length, n: App.entries.length, oi: App.incidents.filter(i => i.status !== 'resolved').length, at: App.tasks.filter(t => t.status !== 'done').length, tags: Math.min(8, App.tags.length)})")
-        check("header stats: entries, open incidents, active tasks, tab badges, tag pills", stats["indexed"] == f"{stats['n']} entries" and stats["inc"] == f"{stats['oi']} open" and stats["tasks"] == f"{stats['at']} active"
-              and stats["bK"] == str(stats["n"]) and stats["bI"] == str(stats["oi"]) and stats["bT"] == str(stats["at"]) and stats["pills"] == stats["tags"] and ("red" in stats["red"]) == (stats["oi"] > 0), stats)
+        stats = ev("({bK: document.getElementById('badgeKnowledgeCount').textContent, bI: document.getElementById('badgeIncidentsCount').textContent, bT: document.getElementById('badgeTasksCount').textContent, red: document.getElementById('badgeIncidentsCount').className, n: App.entries.length, oi: App.incidents.filter(i => i.status !== 'resolved').length, at: App.tasks.filter(t => t.status !== 'done').length, pills: [...document.querySelectorAll('#tagPills .badge-tag')].length, tags: Math.min(App.tags.length, 8)})")
+        check("header counts: tab badges and tag pills", stats["bK"] == str(stats["n"]) and stats["bI"] == str(stats["oi"]) and stats["bT"] == str(stats["at"]) and stats["pills"] == stats["tags"] and ("red" in stats["red"]) == (stats["oi"] > 0), stats)
         ev("App.lastSyncTime = Date.now() - 65e3; updateLastSyncTicker()")
         check("last-sync ticker shows the age", ev("document.getElementById('statLastSync').textContent") == "1m ago")
 
@@ -712,7 +712,9 @@ def run(base, headed, coverage=None):
         page.wait_for_function(f"App.selectedKey === '{K}' && [...document.querySelectorAll('.task-hero-panel .btn')].some(b => b.textContent.includes('Start Progress'))", timeout=5000)
         acts = ev("[...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim())")
         check("open task offers Start, Block, Resolve", "Start Progress" in acts and "Block Task" in acts and "Resolve Task" in acts, acts)
-        check("detail header shows key, Link, CLI, Edit", ev("!!document.getElementById('btnCopyDirectLink') && !!document.getElementById('btnEditEntry')"))
+        check("detail header shows Edit and a More menu with the copy actions", ev("!!document.getElementById('btnCopyDirectLink') && !!document.getElementById('btnEditEntry') && document.querySelectorAll('.more .menu button, .more .menu a').length === 5"))
+        more = ev("""(() => { const m = document.querySelector('.more'); const was = getComputedStyle(m.querySelector('.menu')).display; m.querySelector('.btn').click(); const open = getComputedStyle(m.querySelector('.menu')).display; document.body.click(); return [was, open, getComputedStyle(m.querySelector('.menu')).display]; })()""")
+        check("More opens its menu and a click elsewhere closes it", more == ["none", "flex", "none"], more)
         ev(f"selectEntry('{I}-seed')")
         page.wait_for_function(f"App.selectedKey === '{I}-seed'", timeout=5000)
         check("resolved incident shows its resolution and detection", ev("document.getElementById('detailView').textContent.includes('fixed it') && document.getElementById('detailView').textContent.includes('healthz')"))
@@ -760,7 +762,7 @@ def run(base, headed, coverage=None):
         ev("document.getElementById('newKey').dataset.touched = 'true'; autoSlugKey('Something Else')")
         check("a hand-edited key is not overwritten", ev("document.getElementById('newKey').value") == "postgres-replicas-failover")
         ev("submitNewModal()")
-        check("submitting an incomplete form shows an error toast and keeps the dialog", ev("[...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('required'))") and ev("__t.open()") == ["newModal"])
+        check("submitting an incomplete form shows an error toast and keeps the dialog", ev("[...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('Fill in the marked fields'))") and ev("__t.open()") == ["newModal"])
         ev("showToast('hello', 'success')")
         check("showToast renders with its tone", ev("[...document.querySelectorAll('#toastContainer .toast.success')].some(t => t.textContent.includes('hello'))"))
         page.keyboard.press("Escape")
@@ -972,7 +974,7 @@ def run(base, headed, coverage=None):
           out.ledEmpty = document.getElementById('ledBody').textContent;
           App.entries = []; App.incidents = []; App.tasks = [];
           renderHeaderStats(); renderIncidents(); renderTasks();
-          out.zeroInc = document.getElementById('statIncidents').className + '|' + document.getElementById('badgeIncidentsCount').className;
+          out.zeroInc = document.getElementById('badgeIncidentsCount').className;
           out.emptyInc = document.getElementById('incidentRows').textContent; out.emptyTask = document.getElementById('taskRows').textContent;
           Object.assign(App, {entries: save.e, incidents: save.i, tasks: save.t, activity: save.a, audit: save.au, tags: save.tags, incidentQueue: save.q});
           App.taskStatusFilter = 'live'; App.taskCursor = 0; App.incidentCursor = 0;
@@ -986,7 +988,7 @@ def run(base, headed, coverage=None):
         check("closed tasks show their resolution and offer Reopen", any("Done" in r and "shipped" in r for r in bare["taskRows"]) and any("Dropped" in r and "not needed" in r for r in bare["taskRows"]) and bare["reopen"], bare["taskRows"])
         check("a child task names its parent", any("part of bare-task" in r for r in bare["taskRows"]), bare["taskRows"])
         check("an empty ledger says so", "No changes recorded yet" in bare["ledEmpty"], bare["ledEmpty"])
-        check("zero open incidents turns the header calm", "green" in bare["zeroInc"] and "red" not in bare["zeroInc"], bare["zeroInc"])
+        check("zero open incidents turns the incidents badge calm", "red" not in bare["zeroInc"], bare["zeroInc"])
         check("empty incident and task lists show the empty state", "Nothing matches" in bare["emptyInc"] and "Nothing matches" in bare["emptyTask"])
 
         # the detail pane for records with nothing but a key
@@ -1000,10 +1002,31 @@ def run(base, headed, coverage=None):
           return out; })()""")
         page.wait_for_timeout(500)
         check("a bare knowledge entry renders with its key and kind", "bare-note" in det["note"] and "knowledge" in det["note"].lower(), det["note"][:120])
-        check("a bare incident shows default severity and service, its links and who last changed it", "MEDIUM" in det["inc"] and "infrastructure" in det["inc"] and "kyb-service" in det["inc"] and "Zed" in det["inc"], det["inc"][:300])
+        check("a bare incident shows default severity and service, its links and who last changed it", "medium" in det["inc"] and "infrastructure" in det["inc"] and "kyb-service" in det["inc"] and "Zed" in det["inc"], det["inc"][:300])
         check("a bare task is unassigned and names its parent", "Unassigned" in det["task"] and "task-parent" in det["task"], det["task"][:300])
         check("an in-progress task offers Block, Resolve, Backlog", det["prog"][:3] == ["Block Task", "Resolve Task", "Move to Backlog"], det["prog"])
         check("a done task offers only Re-open", det["done"] == ["Re-open Task"], det["done"])
+        cal = ev("""(() => { const out = {}; const txt = () => document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
+          renderDetailView({key: 'c1', kind: 'incident', status: 'open', title: 'A'}, []); out.noDet = txt(); out.addCheck = [...document.querySelectorAll('.callout .btn')].map(b => b.textContent.trim());
+          renderDetailView({key: 'c2', kind: 'incident', status: 'resolved', resolution: 'r', title: 'B'}, []); out.resolved = txt(); out.resolvedCallout = [...document.querySelectorAll('.callout.good > *')].slice(0, 2).map(e => e.textContent.trim());
+          renderDetailView({key: 'c3', kind: 'incident', status: 'open', detection: 'true', hosts: ['h1', 'h2'], title: 'C'}, []); out.det = txt(); out.copy = [...document.querySelectorAll('.detect .btn')].map(b => b.textContent.trim());
+          renderDetailView({key: 'c4', kind: 'task', status: 'blocked', blocked_reason: 'vendor', title: 'D'}, []); out.blocked = txt(); out.unblock = [...document.querySelectorAll('.callout .btn')].map(b => b.textContent.trim()); out.blockedCallout = [...document.querySelectorAll('.callout > *')].slice(0, 2).map(e => e.textContent.trim());
+          // colour follows severity and priority: critical red, high amber, the rest plain; a done task is green
+          const pill = () => document.querySelector('.dh-pills .pill').className.replace('pill', '').trim();
+          out.pills = [];
+          for (const sev of ['critical', 'high']) { renderDetailView({key: 'p-' + sev, kind: 'incident', severity: sev, title: 'x'}, []); out.pills.push(pill()); }
+          renderDetailView({key: 'p-mit', kind: 'incident', status: 'mitigated', title: 'x'}, []); out.pills.push(document.querySelectorAll('.dh-pills .pill')[1].className.replace('pill', '').trim());
+          for (const pr of ['critical', 'high', 'low']) { renderDetailView({key: 'p-' + pr, kind: 'task', priority: pr, title: 'x'}, []); out.pills.push(document.querySelectorAll('.dh-pills .pill')[1].className.replace('pill', '').trim()); }
+          renderDetailView({key: 'p-done', kind: 'task', status: 'done', title: 'x'}, []); out.pills.push(pill());
+          // an author field that is empty is shown as nothing, not as 'undefined'
+          renderDetailView({key: 'k-anon', title: 'K'}, [{sha: 'g'.repeat(40), author: '', committed_at: new Date().toISOString()}, {sha: 'h'.repeat(40), author: 'First <f>', committed_at: new Date().toISOString()}]); out.unknown = txt().includes('undefined') ? 'undefined' : (txt().includes('last changed by') ? '' : 'missing');
+          // markRequired tolerates a missing element and a field outside a form group
+          const t0 = document.getElementById('newTitle'); if (t0) t0.id = 'newTitle__gone'; try { markRequired(['newTitle']); } finally { if (t0) t0.id = 'newTitle'; } markRequired(['globalSearch']); out.loose = document.getElementById('globalSearch').classList.contains('invalid'); document.getElementById('globalSearch').classList.remove('invalid');
+          return out; })()""")
+        check("an open incident without a check gets the 'No detection' callout with an Add check button", "No detection" in cal["noDet"] and cal["addCheck"] == ["Add check"] and cal["loose"] is True, cal)
+        check("a resolved incident without a check gets no such callout but shows its resolution", "No detection" not in cal["resolved"] and cal["resolvedCallout"] == ["Resolved", "r"], cal["resolved"][:200])
+        check("an incident with a check shows it with a Copy button and names its hosts", "Is it still happening? true" in cal["det"] and cal["copy"] == ["Copy"] and "h1, h2" in cal["det"], cal["det"][:200])
+        check("a blocked task shows the reason in a callout with Unblock", cal["blockedCallout"] == ["Blocked", "vendor"] and cal["unblock"] == ["Unblock"] and cal["pills"] == ["crit", "amber", "amber", "crit", "amber", "", "ok"] and cal["unknown"] == "", cal)
         ev(f"selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
 
@@ -1048,7 +1071,7 @@ def run(base, headed, coverage=None):
           const t2 = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); closeModal('editModal'); return [t, open, t2]; }}""")
         forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
         check("a rejected edit shows the server's reason and keeps the dialog", any("boom" in t for t in ed[0]) and ed[1] == ["editModal"], ed)
-        check("an edit without a title is refused before it is sent", any("Title and body are required" in t for t in ed[2]), ed[2])
+        check("an edit without a title is refused before it is sent", any("Fill in the marked fields" in t for t in ed[2]), ed[2])
         check("editing with nothing selected says so", ev("(async () => { const k = App.selectedKey; App.selectedKey = null; await openEditModal(); App.selectedKey = k; return [...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('No entry selected')); })()"))
 
         # empty forms are refused with a reason
@@ -1059,9 +1082,9 @@ def run(base, headed, coverage=None):
           promptBlockTask('{K}'); await submitBlockTask(); out.push(last()); closeModal('blockTaskModal');
           moveTaskTo('', '{K}', 't'); moveTaskTo('done', '{K}', 't'); out.push(__t.open().join()); closeModal('resolveTaskModal');
           return out; }}""")
-        check("resolve incident without an outcome is refused", "resolution outcome" in val[0], val)
-        check("done without an outcome is refused", "completion outcome" in val[1], val)
-        check("block without a reason is refused", "reason why this task is blocked" in val[2], val)
+        check("resolve incident without an outcome is refused", "what fixed it" in val[0], val)
+        check("done without an outcome is refused", "what the outcome was" in val[1], val)
+        check("block without a reason is refused", "what is blocking it" in val[2], val)
         check("moveTaskTo('done') opens the Done dialog; an empty target does nothing", val[3] == "resolveTaskModal", val)
 
         # a click with a modifier held is the browser's (new tab), not ours
@@ -1277,7 +1300,7 @@ def run(base, headed, coverage=None):
         check("the peek counts follow-ups in singular and plural, and lists hosts", "1 open follow-up" in inc["peek1"] and "1 open follow-ups" not in inc["peek1"] and "h9" in inc["peek1"] and "2 open follow-ups" in inc["peek2"], (inc["peek1"], inc["peek2"]))
         check("an incident dated in the future has no age", inc["futureAge"] == "")
         check("a resolved incident under the cursor offers no Resolve and shows its resolution", "Resolve" not in inc["resPeek"].replace("Resolution", "") and "done" in inc["resPeek"] and inc["noScrollApi"], inc["resPeek"])
-        ev("renderIncidents(true); switchTab('incidents'); __t.set('resolveIncidentAuthor', '')")
+        ev("renderIncidents(true); switchTab('incidents')")
         ev("filterIncidentsSeverity('low'); filterIncidents('mitigated')")
         page.mouse.click(5, 400); page.keyboard.press("Enter")
         check("keys on an empty incident list do nothing", ev("location.hash").startswith("#/incidents") or ev("App.activeTab") == "incidents")
@@ -1298,7 +1321,7 @@ def run(base, headed, coverage=None):
         check("tasks without a status are open; blocked rows carry reason and parent; a critical row is marked", any("Blocked with parent" in r and "vendor" in r and "part of t-crit" in r for r in tk["rows"]) and any("critical" in d for d in tk["dots"]) and set(tk["open"]) == {"t-crit", "t-nostatus"}, tk)
         check("queue counters: 2 blocked, 1 stalled, 2 unowned", tk["counts"] == ["2", "1", "2"], tk["counts"])
         check("the Move menu disables the task's own status", "open!" in tk["move"], tk["move"])
-        ev("renderTasks(true); switchTab('tasks'); taskSetStatus('live'); App.taskCursor = null; App.taskQueue = null; __t.set('resolveTaskAuthor', ''); __t.set('blockTaskAuthor', '')")
+        ev("renderTasks(true); switchTab('tasks'); taskSetStatus('live'); App.taskCursor = null; App.taskQueue = null; ")
         page.mouse.click(5, 400); page.keyboard.press("j")
         check("a task cursor that was never set starts from the top", ev("App.taskCursor") == 1)
         ev(f"App.tasks.push({{key: 'ghost'}}); promptBlockTask('{K}', ''); ")
@@ -1336,20 +1359,39 @@ def run(base, headed, coverage=None):
           window.fetch = (u, o) => {{ if (o && o.method === 'POST') {{ sent.push([String(u), JSON.parse(o.body)]); return Promise.resolve(new Response('{{}}', {{status: 200}})); }} return real(u, o); }};
           const real_refresh = window.refreshAll; window.refreshAll = async () => {{}}; const real_select = window.selectEntry; window.selectEntry = async () => {{}};
           openNewModal('incident'); __t.set('newTitle', 'T'); __t.set('newKey', 'inc-defaults'); __t.set('newBody', 'b'); __t.set('newService', ''); document.getElementById('newSeverity').value = ''; await submitNewModal();
+          openNewModal('incident'); __t.set('newTitle', 'T'); __t.set('newKey', 'inc-detect'); __t.set('newBody', 'b'); __t.set('newDetection', 'true'); document.querySelector(".seg[data-for='newSeverity'] [data-value='high']").click(); await submitNewModal();
           openNewModal('task'); __t.set('newTitle', 'T'); __t.set('newKey', 'task-defaults'); __t.set('newBody', 'b'); __t.set('newAssignee', ''); await submitNewModal();
           openNewModal('knowledge'); __t.set('newTitle', 'T'); __t.set('newKey', 'k-defaults'); __t.set('newBody', 'b'); await submitNewModal();
           const bare = async (entry, fill) => {{ window.fetch = (u, o) => o && o.method === 'POST' ? (sent.push([String(u), JSON.parse(o.body)]), Promise.resolve(new Response('{{}}', {{status: 200}}))) : Promise.resolve(new Response(JSON.stringify(entry), {{status: 200}}));
-            await openEditModal(entry.key); const html = document.getElementById('editModalBody').innerHTML; fill && fill(); __t.set('editTitle', 'T'); __t.set('editBody', 'b'); __t.set('editAuthor', ''); await submitEditModal(); return html; }};
+            await openEditModal(entry.key); const html = document.getElementById('editModalBody').innerHTML; fill && fill(); __t.set('editTitle', 'T'); __t.set('editBody', 'b'); await submitEditModal(); return html; }};
           out.incHtml = await bare({{key: 'e-inc', kind: 'incident'}}, () => {{ __t.set('editService', ''); document.getElementById('editSeverity').value = ''; }});
-          for (const sev of ['critical', 'high', 'low']) await bare({{key: 'e-inc', kind: 'incident', severity: sev, title: 't', body: 'b', service: 's', hosts: ['h']}});
+          for (const sev of ['critical', 'high', 'low']) out['sev-' + sev] = await bare({{key: 'e-inc', kind: 'incident', severity: sev, detection: 'd', title: 't', body: 'b', service: 's', hosts: ['h']}});
           out.taskHtml = await bare({{key: 'e-task', kind: 'task'}}, () => {{ __t.set('editAssignee', ''); }});
           out.knowHtml = await bare({{key: 'e-know'}});
           window.fetch = real; window.refreshAll = real_refresh; window.selectEntry = real_select; out.sent = sent; return out; }}""")
         by = {u.split("/")[-1] + ":" + b["key"]: b for u, b in frm["sent"]}
-        check("a new incident with nothing chosen is medium on 'infrastructure'", by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium", by.get("incidents:inc-defaults"))
+        check("a new incident with nothing chosen is medium on 'infrastructure' and carries no detection", by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium" and "detection" not in by["incidents:inc-defaults"], by.get("incidents:inc-defaults"))
+        check("a segment pressed and a detection typed go out with the incident", by["incidents:inc-detect"]["severity"] == "high" and by["incidents:inc-detect"]["detection"] == "true", by.get("incidents:inc-detect"))
+        check("the edit form marks the stored severity and keeps the detection", all(f"data-value=\"{sev}\" " in frm["sev-" + sev] and 'class="on"' in frm["sev-" + sev] for sev in ("critical", "high", "low")) and by["incidents:e-inc"]["detection"] == "d", by.get("incidents:e-inc"))
         check("a new task with no assignee typed gets the default one and no priority", by["tasks:task-defaults"]["assignee"] == "Alexander Panasenko" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
         check("a new knowledge entry with no tags sends none", by["knowledge:k-defaults"]["tags"] == [], by.get("knowledge:k-defaults"))
-        check("editing a bare incident, task and note fills honest defaults and a default author", by["incidents:e-inc"]["author"].startswith("Alexander") and by["tasks:e-task"]["assignee"] == "Alexander Panasenko" and by["knowledge:e-know"]["tags"] == [] and "Edit INCIDENT" not in frm["incHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
+        check("editing a bare incident, task and note fills honest defaults and a default author", by["incidents:e-inc"]["author"].startswith("Alexander") and by["tasks:e-task"]["assignee"] == "Alexander Panasenko" and by["knowledge:e-know"]["tags"] == [] and "Author" not in frm["incHtml"] and "Author" not in frm["taskHtml"] and "Author" not in frm["knowHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
+        req = ev("""(() => { const out = {}; openNewModal('incident'); __t.set('newTitle', ''); __t.set('newKey', 'k'); __t.set('newBody', '');
+          submitNewModal(); out.marked = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errs = document.querySelectorAll('#newModalBody .form-err').length; out.focus = document.activeElement.id;
+          __t.set('newTitle', 'T'); submitNewModal(); out.after = [...document.querySelectorAll('#newModalBody .invalid')].map(e => e.id); out.errsAfter = document.querySelectorAll('#newModalBody .form-err').length;
+          // a key the user typed into is not overwritten by the title
+          const key = document.getElementById('newKey'); key.value = 'inc-mine'; key.dispatchEvent(new Event('input')); autoSlugIncident('Other title'); out.keptInc = key.value;
+          openNewModal('task'); document.getElementById('newKey').value = 'task-mine'; document.getElementById('newKey').dispatchEvent(new Event('input')); autoSlugTask('Other'); out.keptTask = document.getElementById('newKey').value;
+          openNewModal('knowledge'); autoSlugKey('Fresh Note'); out.derived = document.getElementById('newKey').value; closeModal('newModal');
+          openResolveIncidentModal('inc-x', 't'); submitResolveIncident(); out.resolveErr = document.querySelectorAll('#resolveIncidentModal .form-err').length; closeModal('resolveIncidentModal');
+          openResolveTaskModal('task-x', 't'); submitResolveTask(); out.doneErr = document.querySelectorAll('#resolveTaskModal .form-err').length; closeModal('resolveTaskModal');
+          promptBlockTask('task-x', 't'); submitBlockTask(); out.blockErr = document.querySelectorAll('#blockTaskModal .form-err').length; closeModal('blockTaskModal');
+          return out; })()""")
+        check("an empty required field is marked in place, focused, and unmarked once filled", req["marked"] == ["newTitle", "newBody"] and req["errs"] == 2 and req["focus"] == "newTitle" and req["after"] == ["newBody"] and req["errsAfter"] == 1, req)
+        check("a key typed by hand survives the title; an untouched key follows it", req["keptInc"] == "inc-mine" and req["keptTask"] == "task-mine" and req["derived"] == "fresh-note", req)
+        check("resolve, done and block mark their one field when it is empty", (req["resolveErr"], req["doneErr"], req["blockErr"]) == (1, 1, 1), req)
+        page.wait_for_timeout(300)
+        forgive_console(0)
         foc = ev("""(() => { openNewModal('knowledge'); document.getElementById('newTitle').focus(); const inside = document.activeElement.id; openModal('shortcutsModal'); const replaced = __t.open();
           openNewModal('knowledge'); document.getElementById('newTitle').focus(); closeModal('newModal'); return [inside, replaced, document.activeElement.id, __t.open()]; })()""")
         check("opening a dialog replaces the one behind it; closing one drops focus from its fields", foc == ["newTitle", ["shortcutsModal"], "", []], foc)
@@ -1555,24 +1597,24 @@ def run(base, headed, coverage=None):
         ev("renderTasks(true)")
         sub = ev(f"""async () => {{ const real = window.fetch; const sent = []; window.fetch = (u, o) => o && o.method === 'POST' ? (sent.push([String(u), JSON.parse(o.body)]), Promise.resolve(new Response('{{}}', {{status: 200}}))) : real(u, o);
           const rr = window.refreshAll; window.refreshAll = async () => {{}};
-          openResolveIncidentModal('inc-x', 't'); __t.set('resolveIncidentOutcome', 'o'); __t.set('resolveIncidentAuthor', ''); await submitResolveIncident();
-          openResolveTaskModal('task-x', 't'); __t.set('resolveTaskOutcome', 'o'); __t.set('resolveTaskAuthor', ''); await submitResolveTask();
-          promptBlockTask('task-x', 't'); __t.set('blockTaskReason', 'r'); __t.set('blockTaskAuthor', ''); await submitBlockTask();
-          App.activeBlockKey = 'task-y'; const noEls = __t.without('blockTaskReason', () => __t.without('blockTaskAuthor', () => submitBlockTask())); await noEls;
+          openResolveIncidentModal('inc-x', 't'); __t.set('resolveIncidentOutcome', 'o'); await submitResolveIncident();
+          openResolveTaskModal('task-x', 't'); __t.set('resolveTaskOutcome', 'o'); await submitResolveTask();
+          promptBlockTask('task-x', 't'); __t.set('blockTaskReason', 'r'); await submitBlockTask();
+          App.activeBlockKey = 'task-y'; const noEls = __t.without('blockTaskReason', () => submitBlockTask()); await noEls;
           __t.without('blockTaskTargetText', () => __t.without('blockTaskReason', () => promptBlockTask('task-z', 't'))); closeModal('blockTaskModal');
           window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('offline')) : real(u, o);
           await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
           window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
         forgive_console(0, "POST /knowledge")
-        check("resolve, done and block go out with the default author when none is typed", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
+        check("resolve, done and block go out with the owner as author", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
         check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
         dv = ev("""(() => { const out = {};
           renderDetailView({key: 'inc-nodate', kind: 'incident', resolution: 'fixed', title: 'No dates'}, []); out.inc = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
           const t = new Date().toISOString(); renderDetailView({key: 'k-two-authors', title: 'Two'}, [{sha: 'e'.repeat(40), author: 'Second <s>', committed_at: t}, {sha: 'f'.repeat(40), author: 'First <f>', committed_at: t}]);
           out.know = document.getElementById('detailView').textContent.replace(/\\s+/g, ' '); return out; })()""")
         page.wait_for_timeout(400)
-        check("an undated incident is 'recent', open by default, and shows a resolution without a resolved date", "recent" in dv["inc"] and "OPEN" in dv["inc"].upper() and "fixed" in dv["inc"] and "Resolved:" not in dv["inc"], dv["inc"][:300])
-        check("an entry last changed by someone other than its author names both", "Authored by First" in dv["know"] and "Last updated by Second" in dv["know"], dv["know"][:300])
+        check("an undated incident is 'recent', open by default, and shows a resolution without a resolved date", "recent" in dv["inc"] and "open" in dv["inc"] and "fixed" in dv["inc"] and "·" not in dv["inc"].split("fixed")[1][:3], dv["inc"][:300])
+        check("an entry last changed by someone other than its author names both", "by First" in dv["know"] and "last changed by Second" in dv["know"], dv["know"][:300])
         nh = ev("""async () => { const real = window.fetch; const body = o => Promise.resolve(new Response(JSON.stringify(o), {status: 200}));
           window.fetch = u => String(u).includes('/history') ? Promise.resolve(new Response('{}', {status: 404})) : String(u).includes('?at=') ? body({key: 'nh', title: 'NH'}) : body({key: 'nh', title: 'NH', body: 'b'});
           App.detailCache.clear(); App.entryPrefetch.clear(); await selectEntry('nh', false); const h = App.detailCache.get('nh').history.length;
@@ -1621,7 +1663,23 @@ def run(base, headed, coverage=None):
             scope = ".modal-backdrop.open" if "dialog" in name else None
             cov = ev(f"__t.covered({scope!r})" if scope else "__t.covered()")
             check(f"nothing is covered: {name}", cov == [], cov[:6])
+            # the type scale: nothing a person reads is set below 12.5px, and no label is tracked uppercase
+            small = ev("""(() => { const out = []; for (const el of document.querySelectorAll('body *')) { if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
+              const cs = getComputedStyle(el); const own = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()); if (!own) continue;
+              const px = parseFloat(cs.fontSize); if (px < 12.5 || cs.textTransform === 'uppercase' || parseFloat(cs.letterSpacing) > 0.3) out.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ' ' + px + 'px ' + cs.textTransform + ' ' + cs.letterSpacing); }
+              return out.slice(0, 8); })()""")
+            check(f"type scale holds: {name}", small == [], small)
         ev("[...document.querySelectorAll('.modal-backdrop.open')].forEach(m => m.classList.remove('open'))")
+
+        # the header fits: at every width down to a small tablet nothing in it is outside the window or overlapping
+        for w in (1680, 1440, 1280, 1100, 1024, 900):
+            page.set_viewport_size({"width": w, "height": 900})
+            page.wait_for_timeout(150)
+            fit = ev("""(() => { const items = [...document.querySelector('header').children].filter(c => c.getBoundingClientRect().width); const rs = items.map(c => c.getBoundingClientRect());
+              const outside = rs.filter(r => r.left < 0 || r.right > innerWidth + 0.5).length; let overlap = 0; for (let i = 1; i < rs.length; i++) if (rs[i].left < rs[i - 1].right - 0.5) overlap++;
+              return {outside, overlap, right: Math.round(Math.max(...rs.map(r => r.right))), scroll: document.documentElement.scrollWidth > innerWidth}; })()""")
+            check(f"header fits at {w}px", fit["outside"] == 0 and fit["overlap"] == 0 and not fit["scroll"], fit)
+        page.set_viewport_size({"width": 1440, "height": 900})
 
         # and the controls are pressed for real: Playwright refuses to click what is hidden, disabled or covered
         ev(f"location.hash = '#/graph'; openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
@@ -1663,7 +1721,7 @@ def run(base, headed, coverage=None):
         page.wait_for_function("document.querySelectorAll('#verList .ver-text').length === 1", timeout=5000)
         check("Versions: 'text at v2' pressed shows that version's text", "Typed and clicked." in page.locator("#verList .ver-text").inner_text() and "Typed By Hand, Edited" in page.locator("#verList .ver-text").inner_text(), page.locator("#verList .ver-text").inner_text()[:120])
         page.click(".detail-tab:text('Raw')"); page.click(".detail-tab:text('Document')")
-        page.click("#btnCopyDirectLink")
+        page.click(".more > .btn"); page.click("#btnCopyDirectLink")
         page.wait_for_timeout(150)
         check("Link pressed copies this entry's link", ev("navigator.clipboard.readText()") == f"{base}/#/knowledge/typed-{stamp}")
         page.click(f"#knowledgeList .item-card[data-key='kyb-service']")
