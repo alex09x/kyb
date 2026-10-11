@@ -1,6 +1,6 @@
 use crate::model::{Entry, INCIDENT_PREFIX, KIND_KNOWLEDGE, TASK_PREFIX};
 use anyhow::{Context, Result};
-use git2::{Delta, DiffOptions, Repository, Signature, Sort};
+use git2::{Delta, Repository, Signature, Sort};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,6 +56,38 @@ pub struct HistoryDoc {
     pub sha: String,
     pub committed_at: i64,
     pub entry: Entry,
+}
+
+/// Every key's versions, newest first, for the whole canon. Built by one walk
+/// over history and then extended by the commits since - the repository is
+/// never walked twice for the same commits, and a key's history is a lookup.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryIndex {
+    /// The commit this index describes; None for an empty repository.
+    pub head: Option<String>,
+    by_key: HashMap<String, Vec<VersionInfo>>,
+}
+
+impl HistoryIndex {
+    pub fn versions(&self, key: &str) -> Vec<VersionInfo> {
+        self.by_key.get(key).cloned().unwrap_or_default()
+    }
+
+    /// Every key that ever had a version, retracted ones included.
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.by_key.keys()
+    }
+}
+
+/// The key a repository path belongs to: `<kind>/<key>.md` in the current
+/// layout, `<key>.md` in the pre-migration one. Any other file is not an entry.
+fn key_of_path(path: &str) -> Option<String> {
+    let key = path.rsplit('/').next()?.strip_suffix(".md")?;
+    if path == Store::file_rel(key) || path == Store::legacy_rel(key) {
+        Some(key.to_string())
+    } else {
+        None
+    }
 }
 
 fn iso(secs: i64) -> String {
@@ -356,42 +388,6 @@ impl Store {
             .collect())
     }
 
-    /// Every key that has ever existed, including retracted ones.
-    ///
-    /// Path names only - no blob is read - because the question is which keys
-    /// were used, not what they said. That keeps it cheap enough to run on a
-    /// create, where the alternative is walk_history(), which reads every
-    /// version of everything.
-    pub fn all_keys_ever(&self) -> Result<HashSet<String>> {
-        let repo = self.repo()?;
-        if repo.head().is_err() {
-            return Ok(HashSet::new());
-        }
-        let mut walk = repo.revwalk()?;
-        walk.push_head()?;
-        walk.set_sorting(Sort::TOPOLOGICAL)?;
-        let mut out = HashSet::new();
-        for oid in walk {
-            let commit = repo.find_commit(oid?)?;
-            let tree = commit.tree()?;
-            let parent = match commit.parent(0) {
-                Ok(p) => Some(p.tree()?),
-                Err(_) => None,
-            };
-            let diff = repo.diff_tree_to_tree(parent.as_ref(), Some(&tree), None)?;
-            for delta in diff.deltas() {
-                for file in [delta.old_file(), delta.new_file()] {
-                    let Some(path) = file.path().and_then(|p| p.to_str()) else { continue };
-                    let Some(name) = path.rsplit('/').next() else { continue };
-                    if let Some(key) = name.strip_suffix(".md") {
-                        out.insert(key.to_string());
-                    }
-                }
-            }
-        }
-        Ok(out)
-    }
-
     /// Full history: every commit × changed .md files → one version per doc.
     /// A version identical in content to the key's previous one (the layout
     /// migration is a pure rename) is skipped — moves are not new knowledge.
@@ -446,17 +442,33 @@ impl Store {
         Ok(out)
     }
 
-    /// History of one key (deletions included), newest first.
-    pub fn history(&self, key: &str) -> Result<Vec<VersionInfo>> {
+    /// The history of every key at HEAD. With `prev`, only the commits since
+    /// `prev.head` are walked and their versions put in front of what `prev`
+    /// knew; a `prev` whose head is no longer in this history (the canon was
+    /// rewritten by hand while the service was down) is discarded and the walk
+    /// starts over. Walking a commit means one tree diff against its parent,
+    /// no blob is read.
+    pub fn history_index(&self, prev: Option<&HistoryIndex>) -> Result<HistoryIndex> {
         let repo = self.repo()?;
-        if repo.head().is_err() {
-            return Ok(vec![]);
+        let Ok(head) = repo.head() else {
+            return Ok(HistoryIndex::default());
+        };
+        let head_oid = head.peel_to_commit()?.id();
+        let base = prev
+            .and_then(|p| p.head.as_deref())
+            .and_then(|h| git2::Oid::from_str(h).ok())
+            .filter(|&old| old == head_oid || repo.graph_descendant_of(head_oid, old).unwrap_or(false));
+        if base == Some(head_oid) {
+            return Ok(prev.expect("a base comes from prev").clone());
         }
         let mut walk = repo.revwalk()?;
-        walk.push_head()?;
+        walk.push(head_oid)?;
+        if let Some(old) = base {
+            walk.hide(old)?;
+        }
         // topological: newest first, stable even for same-second commits
         walk.set_sorting(Sort::TOPOLOGICAL)?;
-        let mut out = vec![];
+        let mut fresh: HashMap<String, Vec<VersionInfo>> = HashMap::new();
         for oid in walk {
             let oid = oid?;
             let commit = repo.find_commit(oid)?;
@@ -465,37 +477,59 @@ impl Store {
                 Ok(p) => Some(p.tree()?),
                 Err(_) => None,
             };
-            let mut dopts = DiffOptions::new();
-            // both layouts: the key's current path and its pre-migration one
-            dopts.pathspec(Self::file_rel(key));
-            dopts.pathspec(Self::legacy_rel(key));
-            let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut dopts))?;
-            let changes: Vec<&str> = diff
-                .deltas()
-                .filter_map(|d| match d.status() {
-                    Delta::Added => Some("added"),
-                    Delta::Modified => Some("modified"),
-                    Delta::Deleted => Some("deleted"),
-                    _ => None,
-                })
-                .collect();
-            // added+deleted in one commit = the migration move, not a change
-            if changes.contains(&"added") && changes.contains(&"deleted") {
-                continue;
+            let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+            let mut changes: Vec<(String, &str)> = vec![];
+            for d in diff.deltas() {
+                let change = match d.status() {
+                    Delta::Added => "added",
+                    Delta::Modified => "modified",
+                    Delta::Deleted => "deleted",
+                    _ => continue,
+                };
+                let file = if change == "deleted" { d.old_file() } else { d.new_file() };
+                let Some(path) = file.path().and_then(|p| p.to_str()) else { continue };
+                if let Some(key) = key_of_path(path) {
+                    changes.push((key, change));
+                }
             }
+            // a key both added and deleted in one commit moved between layouts: not a change to it
+            let moved: HashSet<&str> = changes
+                .iter()
+                .filter(|(k, c)| *c == "added" && changes.iter().any(|(k2, c2)| k2 == k && *c2 == "deleted"))
+                .map(|(k, _)| k.as_str())
+                .collect();
             let who = commit.author();
             let author = crate::auth::shown_author(who.name().unwrap_or_default(), who.email().unwrap_or_default());
-            for change in changes {
-                out.push(VersionInfo {
+            for (key, change) in &changes {
+                if moved.contains(key.as_str()) {
+                    continue;
+                }
+                fresh.entry(key.clone()).or_default().push(VersionInfo {
                     sha: oid.to_string(),
                     committed_at: iso(commit.time().seconds()),
                     message: commit.summary().unwrap_or("").to_string(),
-                    change: change.into(),
+                    change: (*change).into(),
                     author: Some(author.clone()),
                 });
             }
         }
-        Ok(out)
+        let mut by_key = match (base, prev) {
+            (Some(_), Some(p)) => p.by_key.clone(),
+            _ => HashMap::new(),
+        };
+        for (key, mut versions) in fresh {
+            let older = by_key.remove(&key).unwrap_or_default();
+            versions.extend(older);
+            by_key.insert(key, versions);
+        }
+        Ok(HistoryIndex { head: Some(head_oid.to_string()), by_key })
+    }
+
+    /// History of one key (deletions included), newest first - the index's
+    /// answer; the service keeps one index and asks it, this is for tests.
+    #[cfg(test)]
+    pub fn history(&self, key: &str) -> Result<Vec<VersionInfo>> {
+        Ok(self.history_index(None)?.versions(key))
     }
 
     /// Recent commits across the entire database canon with document titles and actions.
@@ -608,6 +642,71 @@ pub struct ActivityEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_index_extends_instead_of_rewalking() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let empty = store.history_index(None).unwrap();
+        assert!(empty.head.is_none() && empty.versions("alpha").is_empty());
+
+        store.upsert(entry("alpha", "one"), "2026-07-19").unwrap();
+        store.upsert(entry("beta", "one"), "2026-07-19").unwrap();
+        let first = store.history_index(None).unwrap();
+        assert_eq!(first.versions("alpha").len(), 1);
+        assert_eq!(first.versions("beta")[0].change, "added");
+        assert!(first.versions("nobody").is_empty());
+
+        // the same head: the previous index is handed back untouched
+        let same = store.history_index(Some(&first)).unwrap();
+        assert_eq!(same.head, first.head);
+
+        store.upsert(entry("alpha", "two"), "2026-07-20").unwrap();
+        store.delete("beta").unwrap();
+        let extended = store.history_index(Some(&first)).unwrap();
+        let rebuilt = store.history_index(None).unwrap();
+        assert_eq!(extended.head, rebuilt.head);
+        assert_ne!(extended.head, first.head);
+        for key in ["alpha", "beta", "nobody"] {
+            let (e, r): (Vec<_>, Vec<_>) = (extended.versions(key), rebuilt.versions(key));
+            assert_eq!(e.len(), r.len(), "{key}");
+            for (x, y) in e.iter().zip(r.iter()) {
+                assert_eq!((&x.sha, &x.change, &x.message), (&y.sha, &y.change, &y.message), "{key}");
+            }
+        }
+        let alpha = extended.versions("alpha");
+        assert_eq!((alpha[0].change.as_str(), alpha[1].change.as_str()), ("modified", "added"), "newest first");
+        assert_eq!(extended.versions("beta")[0].change, "deleted");
+        let mut keys: Vec<&String> = extended.keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["alpha", "beta"], "a retracted key is still a key that was used");
+        assert_eq!(store.history("alpha").unwrap().len(), 2, "the per-key history is the index's answer");
+
+        // a previous index whose head this history does not contain is not trusted
+        let foreign = HistoryIndex { head: Some("0".repeat(40)), by_key: HashMap::new() };
+        let again = store.history_index(Some(&foreign)).unwrap();
+        assert_eq!(again.versions("alpha").len(), 2);
+
+        // deleted in one commit and filed again in the next: two versions, not a move
+        store.upsert(entry("beta", "back"), "2026-07-21").unwrap();
+        let back = store.history_index(Some(&extended)).unwrap();
+        let beta: Vec<String> = back.versions("beta").into_iter().map(|v| v.change).collect();
+        assert_eq!(beta, ["added", "deleted", "added"]);
+
+        // a move between layouts (the key removed at one path and added at the other in
+        // one commit) is not a version, on the incremental path as on the full walk
+        let repo = store.repo().unwrap();
+        let mut idx = repo.index().unwrap();
+        let (from, to) = (Store::file_rel("alpha"), Store::legacy_rel("alpha"));
+        fs::rename(dir.path().join(&from), dir.path().join(&to)).unwrap();
+        idx.remove_path(Path::new(&from)).unwrap();
+        idx.add_path(Path::new(&to)).unwrap();
+        store.commit_index(&repo, &mut idx, "move alpha to the flat layout").unwrap();
+        let moved = store.history_index(Some(&back)).unwrap();
+        assert_ne!(moved.head, back.head, "the move is a commit");
+        assert_eq!(moved.versions("alpha").len(), 2, "but not a version of alpha");
+        assert_eq!(moved.versions("alpha").len(), store.history_index(None).unwrap().versions("alpha").len());
+    }
 
     fn entry(key: &str, body: &str) -> Entry {
         Entry {
