@@ -61,6 +61,17 @@ pub struct HistoryDoc {
     pub entry: Entry,
 }
 
+/// A knowledge entry taken out of the base: the commit that removed its file.
+/// Archiving an incident or task also removes a file, but that record stays
+/// findable by design, so only knowledge is retracted. `after` is how many
+/// history documents precede the retraction in walk order: the index places it
+/// between versions by that position, not by the 1s-granular commit clock.
+pub struct Retraction {
+    pub key: String,
+    pub committed_at: i64,
+    pub after: usize,
+}
+
 /// Every key's versions, newest first, for the whole canon. Built by one walk
 /// over history and then extended by the commits since - the repository is
 /// never walked twice for the same commits, and a key's history is a lookup.
@@ -397,15 +408,22 @@ impl Store {
     /// A version identical in content to the key's previous one (the layout
     /// migration is a pure rename) is skipped — moves are not new knowledge.
     pub fn walk_history(&self) -> Result<Vec<HistoryDoc>> {
+        Ok(self.walk_history_and_retractions()?.0)
+    }
+
+    /// Every version of every key in chronological order, and every retraction
+    /// of a knowledge entry, each placed after the versions that precede it.
+    pub fn walk_history_and_retractions(&self) -> Result<(Vec<HistoryDoc>, Vec<Retraction>)> {
         let repo = self.repo()?;
         if repo.head().is_err() {
-            return Ok(vec![]); // empty repo
+            return Ok((vec![], vec![])); // empty repo
         }
         let mut walk = repo.revwalk()?;
         walk.push_head()?;
         // topological order: same-second commits don't shuffle
         walk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
         let mut out = vec![];
+        let mut retractions = vec![];
         let mut last_content: HashMap<String, Entry> = HashMap::new();
         for oid in walk {
             let oid = oid?;
@@ -416,7 +434,17 @@ impl Store {
                 Err(_) => None,
             };
             let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+            // keys whose file this commit removed, and keys it (re)wrote: a key in
+            // both moved between layouts and was not retracted
+            let mut gone: Vec<String> = vec![];
+            let mut written: HashSet<String> = HashSet::new();
             for d in diff.deltas() {
+                if d.status() == Delta::Deleted {
+                    if let Some(k) = d.old_file().path().and_then(|p| p.to_str()).and_then(key_of_path) {
+                        gone.push(k);
+                    }
+                    continue;
+                }
                 if !matches!(d.status(), Delta::Added | Delta::Modified) {
                     continue;
                 }
@@ -430,6 +458,7 @@ impl Store {
                 let Ok(s) = std::str::from_utf8(blob.content()) else { continue };
                 match Entry::from_markdown(s) {
                     Ok(entry) => {
+                        written.insert(entry.key.clone());
                         if last_content.get(&entry.key).is_some_and(|prev| prev.same_content(&entry)) {
                             continue;
                         }
@@ -443,8 +472,24 @@ impl Store {
                     Err(err) => eprintln!("kyb: history skip {}@{oid}: {err:#}", path.display()),
                 }
             }
+            for key in gone {
+                if written.contains(&key) {
+                    continue;
+                }
+                // forgotten here too: written again later, the entry is a new
+                // version even when its text is the same as before the retraction
+                let Some(prev) = last_content.remove(&key) else { continue };
+                if prev.kind != KIND_KNOWLEDGE {
+                    continue;
+                }
+                retractions.push(Retraction {
+                    key,
+                    committed_at: commit.time().seconds(),
+                    after: out.len(),
+                });
+            }
         }
-        Ok(out)
+        Ok((out, retractions))
     }
 
     /// The history of every key at HEAD. With `prev`, only the commits since
