@@ -66,6 +66,12 @@ grep -q "image: $image@$digest" docker-compose.yml.new || { echo "could not pin 
 docker compose -f docker-compose.yml.new config -q
 # the bind comes from the host-local .env (owner's decision), never from the repo: show what will be published
 docker compose -f docker-compose.yml.new config | grep -E "host_ip|published" | sed 's/^/  bind: /' >&2
+# A page file on the volume was served instead of the release's own page by servers
+# before 0.3.0. Say so and stop: an operator moves it aside knowingly, a script does not.
+if [ -f "$HOME/kyb/data/index.html" ]; then
+  echo "an override page exists at ~/kyb/data/index.html (dated $(stat -c %y "$HOME/kyb/data/index.html" | cut -c1-16)); move it aside before rolling, or the console may not be the release's" >&2
+  exit 1
+fi
 # What runs now, by pullable digest. The rollback Compose must name exactly that;
 # a running service whose image cannot be named this way is not replaced at all.
 old_id=$(docker inspect --format '{{.Image}}' kyb 2>/dev/null || true)
@@ -141,6 +147,10 @@ if h.get("version") != want: sys.exit("deploy: healthz version is %r, Cargo.toml
   set -- $ids; running_id=$1; wanted_id=$2
   [ -n "$running_id" ] && [ "$running_id" = "$wanted_id" ] || { echo "deploy: running image id $running_id is not the pinned digest's id $wanted_id" >&2; exit 1; }
   echo "running: $image@$digest (image ${running_id:7:12})"
+  # the page people open must be this release's, not a file left on the volume
+  served=$(curl -sf -m 5 "$KYB_URL/" | grep -c 'id="placesList"' || true)
+  [ "$served" = "1" ] || { echo "deploy: GET / does not serve this release's console (marker not found)" >&2; exit 1; }
+  echo "served page: this release's console"
   # what the start cost, and whether the vector cache was reused rather than recomputed
   ssh -o ConnectTimeout=10 -o BatchMode=yes "$SERVER" 'cd ~/kyb && docker compose logs --tail 300 kyb 2>/dev/null | grep -E "kyb: (ready|reindex|semantic|lexical|listening|auth|vector cache|embeddings:|embedded)" | tail -8' || true
 fi
