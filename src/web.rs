@@ -1,3 +1,13 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
 use crate::AppState;
 use axum::extract::{Query, State};
 use axum::http::header;
@@ -14,12 +24,13 @@ use std::sync::Arc;
 pub const UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
 pub async fn serve_ui() -> impl IntoResponse {
-    let content = if let Ok(path) = std::env::var("KYB_UI_PATH") {
-        std::fs::read_to_string(&path).unwrap_or_else(|_| UI_HTML.to_string())
-    } else if let Ok(custom) = std::fs::read_to_string("/data/index.html") {
-        custom
-    } else {
-        UI_HTML.to_string()
+    // The page is the one built into the binary. A file can stand in for it only when
+    // KYB_UI_PATH names it: a development convenience, never something a stray file on
+    // the data volume can trigger (a forgotten /data/index.html once kept an old console
+    // alive across an image roll).
+    let content = match std::env::var("KYB_UI_PATH") {
+        Ok(path) => std::fs::read_to_string(&path).unwrap_or_else(|_| UI_HTML.to_string()),
+        Err(_) => UI_HTML.to_string(),
     };
     (
         [
