@@ -238,10 +238,14 @@ async fn call_tool(
         Some(n) if !n.is_empty() => n,
         _ => return Err((-32602, "tools/call requires a string `name`".into())),
     };
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let mut args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
     if !args.is_object() {
         return Err((-32602, "`arguments` must be an object".into()));
     }
+    // Who is calling, as far as the client says. `_ctx` is put into the arguments
+    // by an agent hook (it is not a tool parameter and never reaches the API);
+    // failing that, the client's own call metadata names the conversation.
+    let by = attribution(args.as_object_mut().and_then(|o| o.remove("_ctx")), params.get("_meta"));
     if readonly && WRITE_TOOLS.contains(&name) {
         return Ok(tool_error(format!(
             "{name} is a write and this endpoint was opened read-only (?readonly=1)."
@@ -252,7 +256,7 @@ async fn call_tool(
         Ok(call) => call,
         Err(message) => return Ok(tool_error(message)),
     };
-    let (status, text) = forward(st, connect, bearer, call).await;
+    let (status, text) = forward(st, connect, bearer, by.as_ref(), call).await;
     if status.is_success() {
         Ok(tool_text(text.trim().to_string()))
     } else {
@@ -260,10 +264,38 @@ async fn call_tool(
     }
 }
 
+/// The attribution of one tool call. A hook's `_ctx` (agent, session, workspace)
+/// wins; else the `_meta` the MCP client attached: Antigravity and Codex name
+/// their conversation there, Claude Code only the tool use (no session, so only
+/// the agent is known).
+fn attribution(ctx: Option<Value>, meta: Option<&Value>) -> Option<crate::auth::By> {
+    use crate::auth::By;
+    let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    if let Some(ctx) = ctx.filter(Value::is_object) {
+        let by = By::new(&s(&ctx, "agent"), &s(&ctx, "session"), &s(&ctx, "workspace"), "hook");
+        if !by.is_empty() {
+            return Some(by);
+        }
+    }
+    let meta = meta?;
+    if let Some(id) = meta.get("antigravity.google/conversation_id").and_then(Value::as_str) {
+        return Some(By::new("antigravity", id, "", "meta"));
+    }
+    if let Some(turn) = meta.get("x-codex-turn-metadata") {
+        let id = turn.get("session_id").and_then(Value::as_str).or_else(|| turn.as_str()).unwrap_or_default();
+        return Some(By::new("codex", id, "", "meta"));
+    }
+    if meta.get("claudecode/toolUseId").is_some() {
+        return Some(By::new("claude", "", "", "meta"));
+    }
+    None
+}
+
 async fn forward(
     st: &McpState,
     connect: Option<&ConnectInfo<SocketAddr>>,
     bearer: Option<&axum::http::HeaderValue>,
+    by: Option<&crate::auth::By>,
     call: Call,
 ) -> (StatusCode, String) {
     let mut uri = call.path;
@@ -288,6 +320,13 @@ async fn forward(
     }
     if let Some(token) = bearer {
         req.headers_mut().insert(header::AUTHORIZATION, token.clone());
+    }
+    if let Some(by) = by {
+        for (name, value) in [("x-kyb-agent", &by.agent), ("x-kyb-session", &by.session), ("x-kyb-workspace", &by.workspace), ("x-kyb-via", &by.via)] {
+            if let Ok(v) = axum::http::HeaderValue::from_str(value) {
+                req.headers_mut().insert(name, v);
+            }
+        }
     }
 
     let resp = st.api.clone().oneshot(req).await.expect("the router is infallible");

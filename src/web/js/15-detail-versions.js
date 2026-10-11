@@ -10,6 +10,8 @@
       return i >= 0 && i < h.length - 1 ? h[i + 1].sha : null;
     }
     function verWho(v) { return (v.author || '').replace(/\s*<[^>]*>/, '').trim(); }
+    // the agent and the workspace the write came from, when the client said: "claude · voiceofchain"
+    function verBy(v) { const b = v.by || {}; return [b.agent, b.workspace].filter(Boolean).join(' · '); }
     function verWhen(v) { return new Date(v.committed_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); }
 
     function renderVersions() {
@@ -36,7 +38,7 @@
           }
           const snap = App.verTextOpen.has(v.sha) ? (App.verSnaps.get(id) ? `<div class="prose ver-text"><h3 style="margin-top:0">${escapeHtml(App.verSnaps.get(id).title || '')}</h3>${renderMarkdown(App.verSnaps.get(id).body || '')}</div>` : '<div class="ver-note">Loading&hellip;</div>') : '';
           return `<div class="ver-ev">
-            <div class="ver-bh"><span class="mono vn">v${n}</span><span>${verWhen(v)}</span>${who ? `<span>${escapeHtml(who)}</span>` : ''}<span class="mono dim">${v.sha.slice(0, 7)}</span><span class="pm mono">${stat}</span>
+            <div class="ver-bh"><span class="mono vn">v${n}</span><span>${verWhen(v)}</span>${who ? `<span>${escapeHtml(who)}</span>` : ''}${verBy(v) ? `<span class="by" title="${escapeHtml(v.by.session || '')}">${escapeHtml(verBy(v))}</span>` : ''}<span class="mono dim">${v.sha.slice(0, 7)}</span><span class="pm mono">${stat}</span>
               ${!(d && d.created) ? `<a class="tx" href="javascript:void(0)" onclick="verToggleText(${jsArg(v.sha)})">${App.verTextOpen.has(v.sha) ? 'hide text' : 'text at v' + n}</a>` : ''}</div>
             ${body}${snap}
           </div>`;

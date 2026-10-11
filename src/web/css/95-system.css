@@ -155,3 +155,6 @@
     .search-input { height: 32px; border-radius: 7px; }
     .system-status { height: 32px; border-radius: 7px; padding: 0 10px; }
     .nav-tab { height: 34px; border-radius: 7px; }
+
+    /* --- who wrote a version: the agent and workspace the client named */
+    .ver-bh .by { color: var(--text-muted); font-size: 13px; }

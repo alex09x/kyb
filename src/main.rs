@@ -2332,6 +2332,82 @@ mod api_tests {
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
+    #[test]
+    fn attribution_trailers_round_trip_and_stay_on_one_line() {
+        let by = auth::By::new("claude", "sess-1", "kyb/ui", "cli");
+        let msg = auth::message_with_trailers("kyb: upsert x", Some(&by));
+        assert_eq!(msg, "kyb: upsert x\n\nKyb-Agent: claude\nKyb-Session: sess-1\nKyb-Workspace: kyb/ui\nKyb-Via: cli\n");
+        assert_eq!(auth::By::from_message(&msg), Some(by.clone()));
+        assert_eq!(auth::message_with_trailers("kyb: upsert x", None), "kyb: upsert x");
+        assert_eq!(auth::By::from_message("kyb: upsert x"), None);
+        // a value cannot smuggle a second trailer or a newline into the message
+        let sly = auth::By::new("codex\nKyb-Agent: root", "", "", "cli");
+        assert_eq!(sly.agent, "codexKyb-Agent: root");
+        assert_eq!(auth::By::from_message(&auth::message_with_trailers("m", Some(&sly))).unwrap().agent, "codexKyb-Agent: root");
+        // a message with a body paragraph before the trailers still reads them
+        assert_eq!(auth::By::from_message("summary\n\nsome body\n\nKyb-Agent: antigravity\nKyb-Via: meta").unwrap().agent, "antigravity");
+        // only fields that are set are written; session and workspace alone still count
+        assert_eq!(auth::By::new("", "s", "", "").trailers(), "Kyb-Session: s\n");
+        assert!(auth::By::new("", "", "", "hook").is_empty(), "a via alone is nobody");
+    }
+
+    #[tokio::test]
+    async fn attribution_from_headers_hook_and_meta_lands_on_the_commit() {
+        let (app, _data, _idx) = app_with_tmp();
+        // the CLI way: headers on the write
+        let req = Request::builder().method("POST").uri("/knowledge").header("content-type", "application/json")
+            .header("x-kyb-agent", "claude").header("x-kyb-session", "18970ebf").header("x-kyb-workspace", "knowyourbusiness/scripts").header("x-kyb-via", "cli")
+            .body(Body::from(upsert_body("by-cli", "written by the cli").to_string())).unwrap();
+        assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
+        let (_, h) = call(&app, "GET", "/knowledge/by-cli/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "session": "18970ebf", "workspace": "knowyourbusiness/scripts", "via": "cli"}));
+        // the activity ledger carries it too
+        let (_, act) = call(&app, "GET", "/api/activity?limit=5", None).await;
+        let ev = act["activity"].as_array().unwrap();
+        assert_eq!(ev.iter().find(|e| e["key"] == "by-cli").unwrap()["by"]["agent"], "claude");
+        // whoami echoes what a request claims
+        let req = Request::builder().method("GET").uri("/whoami").header("x-kyb-agent", "codex").header("x-kyb-workspace", "btcr").body(Body::empty()).unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let me: Value = serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(me["by"], json!({"agent": "codex", "workspace": "btcr"}));
+        // a write without any of it: no trailer, no `by`
+        call(&app, "POST", "/knowledge", Some(upsert_body("by-nobody", "plain"))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/by-nobody/history", None).await;
+        assert!(h["versions"][0].get("by").is_none());
+
+        // the MCP way, with a hook's _ctx in the arguments: it is stripped before the API sees it
+        let rpc = |id: u64, name: &str, args: Value, meta: Option<Value>| {
+            let mut params = json!({"name": name, "arguments": args});
+            if let Some(m) = meta { params["_meta"] = m; }
+            json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params})
+        };
+        let (st, v) = call(&app, "POST", "/mcp", Some(rpc(1, "kyb_task", json!({"key": "task-by-hook", "title": "T", "body": "b",
+            "_ctx": {"agent": "claude", "session": "sess-9", "workspace": "voiceofchain"}}), None))).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(v["result"]["isError"], Value::Null, "{v}");
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-hook/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "session": "sess-9", "workspace": "voiceofchain", "via": "hook"}));
+        // the client's own metadata: Antigravity names its conversation, Codex its session, Claude Code only the tool use
+        let (_, v) = call(&app, "POST", "/mcp", Some(rpc(2, "kyb_task", json!({"key": "task-by-ag", "title": "T", "body": "b"}),
+            Some(json!({"antigravity.google/conversation_id": "conv-42"}))))).await;
+        assert_eq!(v["result"]["isError"], Value::Null, "{v}");
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-ag/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "antigravity", "session": "conv-42", "via": "meta"}));
+        call(&app, "POST", "/mcp", Some(rpc(3, "kyb_task", json!({"key": "task-by-cx", "title": "T", "body": "b"}),
+            Some(json!({"x-codex-turn-metadata": {"session_id": "thr-7", "turn_id": "t1"}}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-cx/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "codex", "session": "thr-7", "via": "meta"}));
+        call(&app, "POST", "/mcp", Some(rpc(4, "kyb_task", json!({"key": "task-by-cc", "title": "T", "body": "b"}),
+            Some(json!({"claudecode/toolUseId": "toolu_1"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-cc/history", None).await;
+        assert_eq!(h["versions"][0]["by"], json!({"agent": "claude", "via": "meta"}));
+        // a hook's _ctx wins over the metadata, and an empty _ctx falls through to it
+        call(&app, "POST", "/mcp", Some(rpc(5, "kyb_task", json!({"key": "task-by-both", "title": "T", "body": "b", "_ctx": {}}),
+            Some(json!({"claudecode/toolUseId": "toolu_2"}))))).await;
+        let (_, h) = call(&app, "GET", "/knowledge/task-by-both/history", None).await;
+        assert_eq!(h["versions"][0]["by"]["via"], "meta");
+    }
+
     #[tokio::test]
     async fn search_changed_between() {
         let (app, _data, _idx) = app_with_tmp();

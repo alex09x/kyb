@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+# Copyright (c) 2026 Alexander Panasenko
+#
+# Contact: alex@prod.codes
+# Author: https://prod.codes/about/
+# Project: https://github.com/alex09x/kyb
+# SPDX-License-Identifier: MIT
+#
+# A Claude Code PreToolUse hook for the kyb MCP tools. Claude Code talks to the
+# server over HTTP, so nothing of the session reaches it by itself; this hook
+# puts the session id, the agent and the workspace into the tool call as `_ctx`,
+# which the server takes out of the arguments and records as trailers on the
+# commit (`kyb history <key>` shows them as `by`). Nothing else changes: the
+# model's arguments pass through untouched, and the hook never blocks a call.
+#
+# Registered by skills/install.sh in ~/.claude/settings.json:
+#   PreToolUse, matcher "mcp__kyb__.*", command ~/.local/bin/kyb-hook
+#
+# The workspace is a name and a path inside the repository, never an absolute
+# path: machine names and home directories stay out of the shared history.
+import json
+import os
+import subprocess
+import sys
+
+
+def workspace(cwd):
+    env = os.environ.get("KYB_WORKSPACE")
+    if env:
+        return env
+    try:
+        top = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        top = ""
+    if top:
+        rel = os.path.relpath(cwd, top)
+        name = os.path.basename(top)
+        return name if rel in ("", ".") else f"{name}/{rel}"
+    return os.environ.get("PROD_WORKSPACE_NAME") or os.path.basename(cwd.rstrip("/")) or ""
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return  # not for us; saying nothing lets the call proceed
+    if not str(event.get("tool_name", "")).startswith("mcp__kyb__"):
+        return
+    tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return
+    ctx = {
+        "agent": os.environ.get("KYB_AGENT") or "claude",
+        "session": os.environ.get("KYB_SESSION") or str(event.get("session_id") or ""),
+        "workspace": workspace(str(event.get("cwd") or os.getcwd())),
+    }
+    updated = dict(tool_input)
+    updated["_ctx"] = ctx
+    json.dump({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "kyb: attribution added",
+            "updatedInput": updated,
+        }
+    }, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()

@@ -118,10 +118,11 @@ def issue_token(tmp, ident, name, role):
     return out.stdout.splitlines()[0].strip()
 
 
-def api(base, method, path, body=None):
+def api(base, method, path, body=None, headers=None):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(base + path, data=data, method=method,
-                                 headers={"content-type": "application/json"} if data else {})
+    hdrs = {"content-type": "application/json"} if data else {}
+    hdrs.update(headers or {})
+    req = urllib.request.Request(base + path, data=data, method=method, headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, json.loads(r.read() or b"null")
@@ -275,6 +276,12 @@ def run(base, headed, coverage=None):
     s, _ = api(base, "POST", "/knowledge", {"key": "kyb-service", "title": "KYB service", "body": "The registry.", "tags": ["kyb"], "refs": ["vault://kyb"]})
     check("seed knowledge", s == 200, s)
     s, _ = api(base, "POST", "/knowledge", {"key": "mentions-kyb", "title": "Mentions the word", "body": "Talks about kyb without carrying the tag.", "tags": ["other"]})
+    # a second version written by a named agent: the Versions tab and the ledger show who
+    s, _ = api(base, "POST", "/knowledge", {"key": "kyb-service", "title": "KYB service", "body": "The registry, on port 9310.", "tags": ["kyb"], "refs": ["vault://kyb"]},
+               headers={"x-kyb-agent": "claude", "x-kyb-session": "sess-ui-test", "x-kyb-workspace": "knowyourbusiness/scripts", "x-kyb-via": "cli"})
+    # and one by a client that could name the agent but not a session (an MCP client's own metadata)
+    s, _ = api(base, "POST", "/knowledge", {"key": "kyb-service", "title": "KYB service", "body": "The registry, on port 9310, in docker.", "tags": ["kyb"], "refs": ["vault://kyb"]},
+               headers={"x-kyb-agent": "antigravity", "x-kyb-via": "meta"})
     check("seed decoy without the tag", s == 200, s)
     s, _ = api(base, "POST", "/incidents", {"key": I + "-seed", "title": "Seeded incident", "body": "Symptom.", "service": "svc", "severity": "high",
                                             "status": "resolved", "resolution": "fixed it", "detection": "curl -s localhost/healthz", "hosts": ["h1"], "refs": ["vault://y"]})
@@ -510,6 +517,13 @@ def run(base, headed, coverage=None):
         page.wait_for_function("document.querySelectorAll('#verList .ver-ev').length >= 2", timeout=8000)  # the edit above must show up: no stale cache
         stale = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = prefetchEntry('{N}'); App.cacheGen++; await p; return App.detailCache.has('{N}'); }}""")
         check("a prefetch that started before a write does not repopulate the cache", stale is False, stale)
+        # a version written by a named agent says so in the entry's ledger (seeded with the attribution headers)
+        page.evaluate("selectEntry('kyb-service')")
+        page.wait_for_function("App.selectedKey === 'kyb-service' && document.querySelectorAll('#verList .ver-bh .by').length >= 1", timeout=8000)
+        by = page.evaluate("[...document.querySelectorAll('#verList .ver-bh .by')].map(e => [e.textContent, e.title])")
+        check("the Versions tab names the agent and workspace of an attributed version, the session on hover", by == [["antigravity", ""], ["claude · knowyourbusiness/scripts", "sess-ui-test"]], by)
+        page.evaluate(f"selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}' && document.querySelectorAll('#verList .ver-ev').length >= 2", timeout=8000)
         drawn = page.evaluate(f"""async () => {{ App.detailCache.clear(); const p = selectEntry('kyb-service', false); App.selectedKey = '{N}'; await p;
           return [[...document.querySelectorAll('.detail-tab')].map(b => b.textContent).join('|'), App.detailCache.has('kyb-service')]; }}""")
         # the optimistic skeleton (history: 0 versions) may draw before the key changes; the fetched history must not follow it

@@ -88,15 +88,55 @@ pretty() { if command -v jq >/dev/null 2>&1; then jq .; else cat; fi; }
 
 urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${1:-}"; }
 
+# Who is writing, for the record: the agent, its session and the workspace,
+# read from the environment the agent runs the CLI in. The server writes them
+# as trailers on the commit (kyb history shows them as `by`); they are not an
+# identity and grant nothing - a token does that. Overrides: KYB_AGENT,
+# KYB_SESSION, KYB_WORKSPACE. The workspace is a name and a path inside the
+# repository, never an absolute path: machines and home directories stay out
+# of the shared history.
+# An agent's own markers come before PROD_PROVIDER: a Codex started from inside a
+# Claude Code shell inherits that shell's PROD_PROVIDER=claude, but CODEX_* is its
+# own. Agents nested the other way round cannot be told apart from here; KYB_AGENT
+# settles it when it matters.
+by_agent() {
+  if [ -n "${KYB_AGENT:-}" ]; then printf '%s' "$KYB_AGENT"
+  elif [ -n "${CODEX_THREAD_ID:-}${CODEX_SESSION_ID:-}${CODEX_SANDBOX:-}" ]; then printf 'codex'
+  elif [ -n "${ANTIGRAVITY_CONVERSATION_ID:-}${ANTIGRAVITY_SESSION_ID:-}${ANTIGRAVITY_AGENT:-}" ]; then printf 'antigravity'
+  elif [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then printf 'claude'
+  elif [ -n "${PROD_PROVIDER:-}" ]; then printf '%s' "$PROD_PROVIDER"
+  elif [ -n "${GEMINI_CLI:-}" ]; then printf 'gemini'
+  else printf 'shell'
+  fi
+}
+by_session() {
+  printf '%s' "${KYB_SESSION:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-${ANTIGRAVITY_CONVERSATION_ID:-${ANTIGRAVITY_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-${PROD_PRIMARY_SESSION_KEY:-}}}}}}}"
+}
+by_workspace() {
+  if [ -n "${KYB_WORKSPACE:-}" ]; then printf '%s' "$KYB_WORKSPACE"; return; fi
+  local top rel
+  if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ]; then
+    rel="${PWD#"$top"}"; rel="${rel#/}"
+    printf '%s%s' "$(basename "$top")" "${rel:+/$rel}"
+  elif [ -n "${PROD_WORKSPACE_NAME:-}" ]; then
+    printf '%s' "$PROD_WORKSPACE_NAME"
+  else
+    basename "$PWD"
+  fi
+}
+# curl config lines: every header the server reads, token included, in a file
+# descriptor rather than on the command line, where `ps` could show them
+request_headers() {
+  [ -n "$KYB_TOKEN" ] && printf 'header = "authorization: Bearer %s"\n' "$KYB_TOKEN"
+  printf 'header = "x-kyb-agent: %s"\nheader = "x-kyb-session: %s"\nheader = "x-kyb-workspace: %s"\nheader = "x-kyb-via: cli"\n' \
+    "$(by_agent)" "$(by_session)" "$(by_workspace)"
+}
+
 # This is a pure HTTP client for the kyb server — no ssh, no attempts to
 # start or fix anything remotely. If the server doesn't answer, say so and stop.
 kyb_curl() {
   local out rc=0
-  if [ -n "$KYB_TOKEN" ]; then
-    out="$(curl -sS -m 15 --config <(printf 'header = "authorization: Bearer %s"\n' "$KYB_TOKEN") "$@" 2>&1)" || rc=$?
-  else
-    out="$(curl -sS -m 15 "$@" 2>&1)" || rc=$?
-  fi
+  out="$(curl -sS -m 15 --config <(request_headers) "$@" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || die "cannot reach $ADDR: $out"
   printf '%s\n' "$out"
 }
@@ -461,6 +501,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     kyb_curl "$BASE/healthz" | pretty
     ;;
   whoami)
+    # the server's answer carries `by`: what it would record for a write from here
     kyb_curl "$BASE/whoami" | pretty
     ;;
   login)

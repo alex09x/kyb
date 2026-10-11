@@ -90,8 +90,105 @@ pub struct Session {
     pub role: Role,
 }
 
+/// Who is behind a write, as far as the client could tell: which agent, which
+/// of its sessions, in which workspace, and how that was learned. Recorded as
+/// trailers on the commit; never an identity, only forensics.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct By {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub session: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub workspace: String,
+    /// `cli` (the kyb script, from its environment), `hook` (an agent hook put it
+    /// in the tool call), `meta` (the MCP client's own call metadata).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub via: String,
+}
+
+/// The trailers, in the order they are written.
+pub const BY_TRAILERS: [(&str, fn(&By) -> &str); 4] = [
+    ("Kyb-Agent", |b| &b.agent),
+    ("Kyb-Session", |b| &b.session),
+    ("Kyb-Workspace", |b| &b.workspace),
+    ("Kyb-Via", |b| &b.via),
+];
+
+impl By {
+    pub fn is_empty(&self) -> bool {
+        self.agent.is_empty() && self.session.is_empty() && self.workspace.is_empty()
+    }
+
+    /// One line, printable, bounded: a trailer value must not be able to carry a
+    /// second trailer or a newline into the commit message.
+    pub fn clean(v: &str) -> String {
+        v.chars().filter(|c| !c.is_control()).take(160).collect::<String>().trim().to_string()
+    }
+
+    pub fn new(agent: &str, session: &str, workspace: &str, via: &str) -> By {
+        By { agent: Self::clean(agent), session: Self::clean(session), workspace: Self::clean(workspace), via: Self::clean(via) }
+    }
+
+    /// From the `X-Kyb-Agent` / `X-Kyb-Session` / `X-Kyb-Workspace` / `X-Kyb-Via` request headers.
+    pub fn from_headers(h: &axum::http::HeaderMap) -> Option<By> {
+        let get = |name: &str| h.get(name).and_then(|v| v.to_str().ok()).unwrap_or_default();
+        let by = By::new(get("x-kyb-agent"), get("x-kyb-session"), get("x-kyb-workspace"), get("x-kyb-via"));
+        if by.is_empty() {
+            None
+        } else {
+            Some(by)
+        }
+    }
+
+    /// The trailer lines for a commit message; nothing for nobody.
+    pub fn trailers(&self) -> String {
+        BY_TRAILERS
+            .iter()
+            .filter(|(_, f)| !f(self).is_empty())
+            .map(|(name, f)| format!("{name}: {}\n", f(self)))
+            .collect()
+    }
+
+    /// Read back from a commit message: the trailers after the last blank line.
+    pub fn from_message(message: &str) -> Option<By> {
+        let tail = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
+        let mut by = By::default();
+        for line in tail.lines() {
+            let Some((name, value)) = line.split_once(':') else { continue };
+            let value = value.trim();
+            match name.trim() {
+                "Kyb-Agent" => by.agent = value.to_string(),
+                "Kyb-Session" => by.session = value.to_string(),
+                "Kyb-Workspace" => by.workspace = value.to_string(),
+                "Kyb-Via" => by.via = value.to_string(),
+                _ => {}
+            }
+        }
+        if by.is_empty() {
+            None
+        } else {
+            Some(by)
+        }
+    }
+}
+
+/// A commit message with the caller's trailers, if the request named a caller.
+pub fn message_with_trailers(msg: &str, by: Option<&By>) -> String {
+    match by {
+        Some(b) if !b.is_empty() => format!("{msg}\n\n{}", b.trailers()),
+        _ => msg.to_string(),
+    }
+}
+
 tokio::task_local! {
     static SESSION: Session;
+    static BY: Option<By>;
+}
+
+/// The attribution of the request being served, if the client sent one.
+pub fn by() -> Option<By> {
+    BY.try_with(|b| b.clone()).ok().flatten()
 }
 
 /// The effective role of the request being served. Outside a request (start-up
@@ -516,6 +613,10 @@ pub fn book_path() -> PathBuf {
 #[derive(Clone)]
 pub struct ActorTag(pub String);
 
+/// The request's attribution, for the audit log (set on the response by the middleware).
+#[derive(Clone)]
+pub struct ByTag(pub Option<By>);
+
 pub fn refusal_response(r: &Refusal) -> Response {
     match r {
         Refusal::Unknown(why) => (
@@ -542,8 +643,11 @@ pub async fn auth_mw(State(st): State<Arc<crate::AppState>>, req: Request, next:
         }
         Ok(session) => {
             let tag = ActorTag(session.actor.as_ref().map(|a| a.id.clone()).unwrap_or_else(|| "-".into()));
-            let mut resp = SESSION.scope(session, next.run(req)).await;
+            let by = By::from_headers(req.headers());
+            let by_tag = ByTag(by.clone());
+            let mut resp = SESSION.scope(session, BY.scope(by, next.run(req))).await;
             resp.extensions_mut().insert(tag);
+            resp.extensions_mut().insert(by_tag);
             resp
         }
     }
@@ -556,6 +660,8 @@ pub async fn whoami(State(st): State<Arc<crate::AppState>>) -> Json<serde_json::
         "auth": match st.auth.mode { Mode::Off => "off", Mode::Compat => "compat", Mode::Required => "required" },
         "role": role.name(),
         "actor": actor.map(|a| json!({"id": a.id, "name": a.name})),
+        // what this request's writes would be attributed to: the client's own claim, echoed
+        "by": by(),
     }))
 }
 
