@@ -209,10 +209,7 @@
               if (data && data.hits) {
                 App.isBackendSearchResults = true;
                 App.entries = data.hits;
-                renderKnowledgeList();
-                if (data.hits.length > 0 && !App.selectedKey) {
-                  selectEntry(data.hits[0].key, false);
-                }
+                renderKnowledgeList();  // selects the top hit itself when nothing is selected
               } else {
                 renderKnowledgeList();
               }
@@ -240,5 +237,5 @@
       refreshAll().then(() => {
         applyRoute();
       });
-      setInterval(refreshAll, 4000);
+      App.refreshTimer = setInterval(refreshAll, 4000);  // kept so the loop can be paused (the UI test drives refreshes itself)
     });

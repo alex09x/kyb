@@ -8,6 +8,17 @@ The edit checks are the ones that bit: an upsert replaces the whole record,
 so saving a title must not reopen a blocked task or drop an incident's
 detection.
 
+Three layers, all in this one run:
+  - behaviour: every function, shortcut, route and filter is held to its result;
+  - reach: every control visible in every screen and dialog is checked for being
+    covered by something else, and the main flows are typed and pressed with a
+    real keyboard and mouse (the canvas included);
+  - coverage: `--coverage FILE` records which blocks of the UI script ran and
+    lists the ones that did not; `--min-coverage 100` makes a gap a failure.
+    New UI code therefore arrives with its test or the run goes red.
+What it does not prove: how anything looks. Colours, spacing and overlap of
+text are for eyes.
+
 How it runs:
 
     python3 scripts/test-web-ui.py                 # own sandbox server
@@ -115,6 +126,40 @@ window.__t = {
   set(id, v) { const el = document.getElementById(id); if (!el) throw new Error('missing #' + id); el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); },
   wait(ms) { return new Promise(r => setTimeout(r, ms)); },
   open() { return [...document.querySelectorAll('.modal-backdrop.open')].map(m => m.id); },
+  // The scenarios replace globals (fetch, the loaders, the clipboard) to provoke failures.
+  // The originals are captured once, and restore() puts every one of them back - the
+  // runner calls it after each step that touched one, whether the step threw or not.
+  orig: null,
+  capture() { this.orig = {fetch: window.fetch, apiFetch: window.apiFetch, refreshAll: window.refreshAll, selectEntry: window.selectEntry, ledLoadVisible: window.ledLoadVisible, ledFetchDiffs: window.ledFetchDiffs,
+    verLoadDiffs: window.verLoadDiffs, buildTopology: window.buildTopology, execCommand: document.execCommand, escape: CSS.escape, writeText: navigator.clipboard && navigator.clipboard.writeText, clipboard: Object.getOwnPropertyDescriptor(navigator, 'clipboard'),
+    scrollIfNeeded: Element.prototype.scrollIntoViewIfNeeded}; },
+  restore() { const o = this.orig; for (const k of ['fetch', 'apiFetch', 'refreshAll', 'selectEntry', 'ledLoadVisible', 'ledFetchDiffs', 'verLoadDiffs', 'buildTopology']) window[k] = o[k];
+    document.execCommand = o.execCommand; CSS.escape = o.escape; if (o.clipboard) Object.defineProperty(navigator, 'clipboard', o.clipboard); else delete navigator.clipboard;
+    if (navigator.clipboard && o.writeText) navigator.clipboard.writeText = o.writeText; if (o.scrollIfNeeded) Element.prototype.scrollIntoViewIfNeeded = o.scrollIfNeeded; },
+  // Every control a person can see must be the thing under the cursor at its own centre:
+  // a button that is drawn but covered by something else works in no browser.
+  covered(scope) {
+    const root = scope ? document.querySelector(scope) : document;
+    const out = [];
+    for (const el of root.querySelectorAll('button, a[href], a[onclick], select, input, textarea, .chip, .inc-r, .item-card, [onclick]')) {
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height || el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.pointerEvents === 'none' || +cs.opacity === 0) continue;
+      const x = b.left + b.width / 2, y = b.top + b.height / 2;
+      if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;   // scrolled out of view is reachable by scrolling
+      let clipped = false;                                                 // ...and so is a row scrolled out of its own pane
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const s = getComputedStyle(a); if (s.overflowY === 'visible' && s.overflowX === 'visible') continue;
+        const r = a.getBoundingClientRect(); if (x < r.left || x > r.right || y < r.top || y > r.bottom) { clipped = true; break; }
+      }
+      if (clipped) continue;
+      const top = document.elementFromPoint(x, y);
+      if (top && (top === el || el.contains(top))) continue;   // an ancestor under the cursor means something lies over the control
+      out.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ' "' + el.textContent.trim().slice(0, 24) + '" under ' + (top ? (top.id ? '#' + top.id : top.tagName.toLowerCase() + '.' + String(top.className).split(' ')[0]) : 'nothing'));
+    }
+    return out;
+  },
 };
 """
 
@@ -124,6 +169,8 @@ def main():
     ap.add_argument("--base", help="URL of a running server (UI and API on one origin)")
     ap.add_argument("--allow-writes", action="store_true", help="allow the write flows against a non-loopback --base")
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--coverage", metavar="FILE", help="record which UI code ran (Chrome precise coverage) and write the unexecuted blocks to FILE")
+    ap.add_argument("--min-coverage", type=float, metavar="PCT", help="with --coverage: fail when block coverage of the UI script is below PCT")
     args = ap.parse_args()
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="kyb-ui-test-"))
@@ -137,7 +184,9 @@ def main():
         else:
             proc, base = start_sandbox(tmp)
         print(f"== web UI against {base}")
-        run(base, args.headed)
+        pct = run(base, args.headed, args.coverage)
+        if args.min_coverage is not None and (pct is None or pct < args.min_coverage):
+            FAILED.append(f"block coverage {pct}% is below the required {args.min_coverage}% - see {args.coverage}")
     finally:
         if proc:
             proc.kill()
@@ -148,7 +197,66 @@ def main():
     print("\nall web UI checks passed")
 
 
-def run(base, headed):
+def report_coverage(result, base, out_path):
+    """Block-level coverage of the page's own script, mapped back to src/web/js files."""
+    import re
+    html = assemble()
+    m = re.search(r"<script>([\s\S]*?)</script>", html)
+    src, script_at = m.group(1), m.start(1)
+    # Exactly one script is the UI: the one that defines renderMarkdown. V8 reports its
+    # offsets either within the inline script or within the document, depending on the
+    # version. Anything unexpected here fails the run - an unrecognised script must never
+    # read as "nothing unexecuted".
+    targets = [sc for sc in result if sc["url"].startswith(base) and any(f["functionName"] == "renderMarkdown" for f in sc["functions"])]
+    if len(targets) != 1:
+        raise SystemExit(f"coverage: expected exactly one UI script, found {len(targets)}")
+    at = next(f for f in targets[0]["functions"] if f["functionName"] == "renderMarkdown")["ranges"][0]["startOffset"]
+    if "renderMarkdown" in src[at:at + 40]:
+        script_at = 0
+    elif "renderMarkdown" not in src[at - script_at:at - script_at + 40]:
+        raise SystemExit("coverage: offsets match neither the script nor the document")
+    counts = [None] * len(src)
+    ranges = [(r["startOffset"], r["endOffset"], r["count"]) for fn in targets[0]["functions"] for r in fn["ranges"]]
+    # outer ranges first, inner ranges override: that is how V8 reports nested blocks
+    for a, b, c in sorted(ranges, key=lambda r: (r[0], -(r[1] - r[0]))):
+        a, b = max(0, a - script_at), min(len(src), b - script_at)
+        for i in range(a, b):
+            counts[i] = c
+    code = [i for i, ch in enumerate(src) if not ch.isspace()]
+    untracked = [i for i in code if counts[i] is None]
+    if untracked:  # V8 wraps the whole script in a top-level range, so every character must carry a count
+        raise SystemExit(f"coverage: {len(untracked)} characters of the UI script are outside every reported range (first at offset {untracked[0]})")
+    dead = [i for i in code if counts[i] == 0]
+    pct = 100.0 * (len(code) - len(dead)) / len(code)
+    # map offsets to source files
+    parts, pos = [], 0
+    for f in sorted((REPO / "src/web/js").iterdir()):
+        t = f.read_text(encoding="utf-8")
+        parts.append((pos, pos + len(t), f.name, t))
+        pos += len(t)
+    blocks, start, prev = [], None, None
+    for i in dead:
+        if prev is None or i > prev + 40:
+            if start is not None:
+                blocks.append((start, prev))
+            start = i
+        prev = i
+    if start is not None:
+        blocks.append((start, prev))
+    lines = [f"block coverage {pct:.2f}% - {len(blocks)} unexecuted blocks, {len(dead)} of {len(code)} non-space chars"]
+    for a, b in blocks:
+        for lo, hi, name, t in parts:
+            if lo <= a < hi:
+                line = t.count("\n", 0, a - lo) + 1
+                snippet = " ".join(src[a:b + 1].split())[:150]
+                lines.append(f"{name}:{line}  {snippet}")
+                break
+    pathlib.Path(out_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"\n{lines[0]} -> {out_path}")
+    return pct
+
+
+def run(base, headed, coverage=None):
     stamp = format(int(time.time()), "x")
     K, I, N = f"task-ui-test-{stamp}", f"inc-ui-test-{stamp}", f"ui-test-{stamp}"
 
@@ -170,11 +278,48 @@ def run(base, headed):
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=not headed)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        cdp = None
+        if coverage:
+            cdp = page.context.new_cdp_session(page)
+            cdp.send("Profiler.enable")
+            cdp.send("Profiler.startPreciseCoverage", {"callCount": True, "detailed": True})
         errors = []
         page.on("pageerror", lambda e: errors.append(f"pageerror {e}"))
-        page.on("console", lambda m: errors.append(f"console.error {m.text}") if m.type == "error" else None)
+        # Records the test invents (made-up keys and shas) have nothing on the server. A 404 for
+        # exactly such a path is the test's own doing; any other status on it, or a 404 anywhere
+        # else, is reported like every other error.
+        synthetic = ("e" * 40, "f" * 40, "a" * 40, "/knowledge/k-two-authors", "/knowledge/bare-incident", "/knowledge/inc-nodate", "/knowledge/g-plain", "/knowledge/nh")
+        expected_404 = set()
+        page.on("response", lambda r: expected_404.add(r.url) if r.status == 404 and any(x in r.url for x in synthetic) else None)
+        # The ledger check invents an event for key k1 at sha s2; a diff fetch the ledger's observer
+        # schedules for it can land after that check restored the real loader, and its 404 is ours.
+        synthetic = synthetic + ("/knowledge/k1/diff",)
+
+        def on_console(m):
+            if m.type != "error":
+                return
+            url = m.location.get("url", "")
+            if "status of 404" in m.text and url in expected_404:
+                return
+            errors.append(f"console.error {m.text} @ {url[-70:]}")
+        page.on("console", on_console)
+
+        def forgive_console(since, *expected):
+            """After a step that made requests fail on purpose: drop the UI's own log line for each request named in
+            `expected` ("GET /path" or "POST /path" - method and exact endpoint). A failed request the step did not
+            plan, anything else logged, and any exception still fail the run."""
+            want = {f"console.error API {m} Error {path} " for m, path in (e.split(" ", 1) for e in expected)}
+            errors[since:] = [e for e in errors[since:] if not any(e.startswith(w) for w in want)]
         page.goto(base + "/#/search", wait_until="networkidle")
         page.evaluate(HELPERS)
+        page.evaluate("__t.capture()")
+        # The page refreshes itself every four seconds. That is checked once, here; then the loop is
+        # paused and every later refresh is one the test asks for - otherwise a background redraw
+        # landing in the middle of a step decides whether the step passes.
+        t0 = page.evaluate("App.lastSyncTime")
+        page.wait_for_function(f"App.lastSyncTime > {t0}", timeout=9000)
+        check("the page refreshes itself on a timer", True)
+        page.evaluate("clearInterval(App.refreshTimer)")
         page.wait_for_function("document.querySelectorAll('#knowledgeList .item-card').length > 0", timeout=10000)
 
         # --- every screen renders, no script errors
@@ -269,6 +414,20 @@ def run(base, headed):
           App.incidents = [{key: 'zz-new', title: 'new', status: 'open', severity: 'critical', detected_at: new Date().toISOString(), updated_at: new Date().toISOString()}, ...save];
           renderIncidents(true); const r = [k, App.incidentCursorKey, App.incidentCursor]; App.incidents = save; renderIncidents(true); return r; }""")
         check("incident selection follows the entry across a refresh", kept[0] == kept[1] and kept[2] == 2, kept)
+        # ...and through refreshAll itself, with the server's answer changed under it
+        through = page.evaluate("""async () => { const real = window.fetch; try {
+          switchTab('incidents'); await refreshAll(); App.incidentStatusFilter = 'all'; App.incidentSeverityFilter = 'all'; App.incidentQueue = null; App.incidentCursor = 1; renderIncidents(); const ik = App.incidentCursorKey;
+          App.taskStatusFilter = 'live'; App.taskQueue = null; App.taskCursor = 1; renderTasks(); const tk = App.taskCursorKey;
+          window.fetch = async (u, o) => { const r = await real(u, o); const url = String(u);
+            if (url.startsWith('/incidents')) { const d = await r.json(); d.incidents.unshift({key: 'zz-new-critical', title: 'Arrived meanwhile', status: 'open', severity: 'critical', detected_at: new Date().toISOString(), updated_at: new Date().toISOString()}); return new Response(JSON.stringify(d), {status: 200}); }
+            if (url.startsWith('/tasks')) { const d = await r.json(); d.tasks.unshift({key: 'task-zz-new-blocked', title: 'Arrived meanwhile', status: 'blocked', priority: 'critical', blocked_reason: 'x', updated_at: new Date().toISOString()}); return new Response(JSON.stringify(d), {status: 200}); }
+            return r; };
+          await refreshAll();
+          return {ik, ikAfter: App.incidentCursorKey, iIdx: App.incidentCursor, iFirst: incFiltered()[0].key, iCur: document.querySelector('#incidentRows .inc-r.cur .t span').textContent,
+                  tk, tkAfter: App.taskCursorKey, tIdx: App.taskCursor, tFirst: taskFiltered()[0].key};
+        } finally { window.fetch = real; await refreshAll(); } }""")
+        check("refreshAll keeps the incident under the cursor when a new critical arrives above it", through["iFirst"] == "zz-new-critical" and through["ik"] == through["ikAfter"] == through["iCur"] and through["iIdx"] == 2, through)
+        check("refreshAll keeps the task under the cursor when a new blocked task arrives above it", through["tFirst"] == "task-zz-new-blocked" and through["tk"] == through["tkAfter"] and through["tIdx"] == 2, through)
 
         # --- the ledger shows a change in full
         page.evaluate("switchTab('feed')")
@@ -443,9 +602,9 @@ def run(base, headed):
         page.evaluate(f"openDiffForEntry('{K}')")
         page.wait_for_function(f"App.selectedKey === '{K}' && App.detailTab === 'history'", timeout=5000)
         check("d/Diff from a row opens the same Versions ledger", True)
-        copied = page.evaluate("""() => { const real = navigator.clipboard; Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
-          let got = null; const ex = document.execCommand; document.execCommand = (c) => { if (c === 'copy') got = document.activeElement && document.activeElement.value; return true; };
-          copyToClipboard('fallback text', 'x'); document.execCommand = ex; Object.defineProperty(navigator, 'clipboard', {value: real, configurable: true}); return got; }""")
+        copied = page.evaluate("""() => { let got = null; try { Object.defineProperty(navigator, 'clipboard', {value: undefined, configurable: true});
+          document.execCommand = (c) => { if (c === 'copy') got = document.activeElement && document.activeElement.value; return true; };
+          copyToClipboard('fallback text', 'x'); } finally { __t.restore(); } return got; }""")
         check("without the clipboard API the copy falls back to execCommand", copied == "fallback text", copied)
 
         # modals and refresh
@@ -465,7 +624,17 @@ def run(base, headed):
         # ------------------------------------------------------------------
         # Every function has a contract; here each one is held to it directly.
         # ------------------------------------------------------------------
-        ev = page.evaluate
+        patches = ("window.fetch =", "window.apiFetch =", "window.refreshAll =", "window.selectEntry =", "window.ledLoadVisible =", "window.ledFetchDiffs =", "window.verLoadDiffs =", "window.buildTopology =",
+                   "document.execCommand =", "CSS.escape =", "writeText =", "'clipboard'", "scrollIntoViewIfNeeded")
+
+        def ev(js):
+            """page.evaluate; a step that replaces a global gets every global restored afterwards, even when it throws."""
+            if not any(m in js for m in patches):
+                return page.evaluate(js)
+            try:
+                return page.evaluate(js)
+            finally:
+                page.evaluate("__t.restore()")
 
         # pure helpers
         md = ev("""renderMarkdown('# T\\n\\n**b** *i* `c` [x](other-key) [y](https://e.com) [z](#/incidents)\\n\\n- a\\n- [x] done\\n- [ ] todo\\n\\n> q\\n\\n```sh\\nls\\n```\\n\\n<script>1</script>')""")
@@ -772,8 +941,819 @@ def run(base, headed):
         hist1 = api(base, "GET", f"/knowledge/{I}-open1/history")[1]
         check("archiving an incident shows up in its history (cache dropped)", len(hist1.get("versions", [])) == hist0 + 1 and hist1["versions"][0]["change"] == "deleted", (hist0, len(hist1.get("versions", [])), [v["change"] for v in hist1.get("versions", [])]))
 
+
+        # ------------------------------------------------------------------
+        # The paths a healthy base never takes: records with fields missing,
+        # a server that fails, a click with a modifier held, an empty form.
+        # ------------------------------------------------------------------
+        ev("switchTab('search'); setGlobalSearchQuery('')")
+
+        # records with almost nothing in them still render, with honest defaults
+        bare = ev("""(() => {
+          const save = {e: App.entries, i: App.incidents, t: App.tasks, a: App.activity, au: App.audit, tags: App.tags, q: App.incidentQueue};
+          const out = {};
+          App.entries = [{key: 'bare-incident', kind: 'incident'}, {key: 'bare-task', kind: 'task'}, {key: 'bare-note'}];
+          App.incidents = [{key: 'bare-incident', title: 'Bare', status: 'open'}];
+          App.tasks = [{key: 'bare-task', title: 'Bare task'}, {key: 'done-task', title: 'Done', status: 'done', priority: 'critical', resolution: 'shipped'},
+                       {key: 'dropped-task', title: 'Dropped', status: 'dropped', resolution: 'not needed'}, {key: 'child-task', title: 'Child', status: 'open', parent_task: 'bare-task'}];
+          App.activity = []; App.audit = []; App.tags = [];
+          renderHeaderStats(); renderKnowledgeList();
+          out.list = [...document.querySelectorAll('#knowledgeList .item-card')].map(c => c.textContent.replace(/\\s+/g, ' ').trim());
+          out.badgeFeed = document.getElementById('badgeFeedCount').textContent;
+          App.incidentStatusFilter = 'all'; App.incidentSeverityFilter = 'all'; App.incidentQueue = null; App.incidentCursor = 0; renderIncidents();
+          out.incRow = document.querySelector('#incidentRows .inc-r').textContent.replace(/\\s+/g, ' ').trim();
+          out.incPeek = document.querySelector('#incidentRows .inc-peek').textContent.replace(/\\s+/g, ' ').trim();
+          out.incAge = incAgeLabel({});
+          const taskText = () => [...document.querySelectorAll('#taskRows .inc-r')].map(r => r.textContent.replace(/\\s+/g, ' ').trim());
+          App.taskStatusFilter = 'live'; App.taskQueue = null; App.taskCursor = 0; renderTasks(); out.taskRows = taskText();
+          App.taskStatusFilter = 'done'; App.taskCursor = 0; renderTasks(); out.taskRows = out.taskRows.concat(taskText());
+          out.reopen = !!document.querySelector('#taskRows .inc-r.cur .acts') && document.querySelector('#taskRows .inc-r.cur .acts').textContent.includes('Reopen');
+          renderFeed();
+          out.ledEmpty = document.getElementById('ledBody').textContent;
+          App.entries = []; App.incidents = []; App.tasks = [];
+          renderHeaderStats(); renderIncidents(); renderTasks();
+          out.zeroInc = document.getElementById('statIncidents').className + '|' + document.getElementById('badgeIncidentsCount').className;
+          out.emptyInc = document.getElementById('incidentRows').textContent; out.emptyTask = document.getElementById('taskRows').textContent;
+          Object.assign(App, {entries: save.e, incidents: save.i, tasks: save.t, activity: save.a, audit: save.au, tags: save.tags, incidentQueue: save.q});
+          App.taskStatusFilter = 'live'; App.taskCursor = 0; App.incidentCursor = 0;
+          renderHeaderStats(); renderKnowledgeList(); renderIncidents(); renderTasks(); renderFeed();
+          return out; })()""")
+        check("a bare incident card falls back to the word 'incident' and its key", any("bare-incident" in x and "incident" in x for x in bare["list"]), bare["list"])
+        check("a bare entry shows its key as the title", any(x.startswith("bare-note") for x in bare["list"]), bare["list"])
+        check("an incident with no service is 'infrastructure', with no dates has no age", "infrastructure" in bare["incRow"] and bare["incAge"] == "", bare["incRow"])
+        check("the peek admits there is no detection", "no detection recorded" in bare["incPeek"], bare["incPeek"])
+        check("a task with no status is open and unassigned", any("Bare task" in r and "open" in r and "unassigned" in r for r in bare["taskRows"]), bare["taskRows"])
+        check("closed tasks show their resolution and offer Reopen", any("Done" in r and "shipped" in r for r in bare["taskRows"]) and any("Dropped" in r and "not needed" in r for r in bare["taskRows"]) and bare["reopen"], bare["taskRows"])
+        check("a child task names its parent", any("part of bare-task" in r for r in bare["taskRows"]), bare["taskRows"])
+        check("an empty ledger says so", "No changes recorded yet" in bare["ledEmpty"], bare["ledEmpty"])
+        check("zero open incidents turns the header calm", "green" in bare["zeroInc"] and "red" not in bare["zeroInc"], bare["zeroInc"])
+        check("empty incident and task lists show the empty state", "Nothing matches" in bare["emptyInc"] and "Nothing matches" in bare["emptyTask"])
+
+        # the detail pane for records with nothing but a key
+        det = ev("""(() => { const out = {};
+          renderDetailView({key: 'bare-note'}, []); out.note = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
+          renderDetailView({key: 'bare-incident', kind: 'incident', status: 'open', knowledge: ['kyb-service'], open_followups: 2}, [{sha: 'a'.repeat(40), author: 'Zed <z@z>', committed_at: new Date().toISOString()}]);
+          out.inc = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
+          renderDetailView({key: 'bare-task', kind: 'task', parent_task: 'task-parent'}, []); out.task = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
+          renderDetailView({key: 'prog-task', kind: 'task', status: 'in_progress', title: 'P'}, []); out.prog = [...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim());
+          renderDetailView({key: 'done-task', kind: 'task', status: 'done', title: 'D', resolution: 'ok'}, []); out.done = [...document.querySelectorAll('.task-hero-panel .btn')].map(b => b.textContent.trim());
+          return out; })()""")
+        page.wait_for_timeout(500)
+        check("a bare knowledge entry renders with its key and kind", "bare-note" in det["note"] and "knowledge" in det["note"].lower(), det["note"][:120])
+        check("a bare incident shows default severity and service, its links and who last changed it", "MEDIUM" in det["inc"] and "infrastructure" in det["inc"] and "kyb-service" in det["inc"] and "Zed" in det["inc"], det["inc"][:300])
+        check("a bare task is unassigned and names its parent", "Unassigned" in det["task"] and "task-parent" in det["task"], det["task"][:300])
+        check("an in-progress task offers Block, Resolve, Backlog", det["prog"][:3] == ["Block Task", "Resolve Task", "Move to Backlog"], det["prog"])
+        check("a done task offers only Re-open", det["done"] == ["Re-open Task"], det["done"])
+        ev(f"selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
+
+        # a server that fails: every caller says so and nothing throws
+        n_err = len(errors)
+        down = ev("""async () => { const real = window.fetch; const out = {};
+          const toasts = () => [...document.querySelectorAll('#toastContainer .toast.error')].map(t => t.textContent);
+          window.fetch = () => Promise.reject(new Error('down'));
+          out.get = await apiFetch('/x'); out.post = await apiPost('/x', {});
+          window.fetch = () => Promise.resolve(new Response('nope', {status: 500}));
+          out.get500 = await apiFetch('/x'); out.post500 = await apiPost('/x', {});
+          App.detailCache.clear(); App.entryPrefetch.clear();
+          await selectEntry('no-such-key', false); out.detail = document.getElementById('detailView').textContent;
+          await prefetchEntry('no-such-key-2'); out.prefetched = App.entryPrefetch.has('no-such-key-2');
+          await inspectRevision('no-such-key', 'abcdef1234');
+          await openEditModal('no-such-key');
+          openNewModal('knowledge'); __t.set('newTitle', 'T'); __t.set('newKey', 'k'); __t.set('newBody', 'b'); await submitNewModal(); out.newStillOpen = __t.open();
+          closeModal('newModal');
+          await transitionTask('task-x', 'open');
+          App.activeResolveKey = 'inc-x'; __t.set('resolveIncidentOutcome', 'o'); await submitResolveIncident();
+          App.activeResolveKey = 'task-x'; __t.set('resolveTaskOutcome', 'o'); await submitResolveTask();
+          App.ledDiffs.clear(); await ledFetchDiffs([{key: 'k', sha: 'deadbeef', action: 'updated'}]); out.ledNull = App.ledDiffs.get('deadbeef');
+          App.verDiffs.clear(); App.verKey = 'k'; App.currentHistoryList = [{sha: 'b'.repeat(40), committed_at: new Date().toISOString()}]; await verLoadDiffs(); out.verKept = App.verDiffs.size;
+          out.toasts = toasts(); window.fetch = real; return out; }""")
+        forgive_console(n_err, "GET /x", "POST /x")  # the only two requests that were made to reject; the rest returned 500, which the UI does not log
+        check("apiFetch returns null and apiPost reports not-ok when the server is down or errors", down["get"] is None and down["get500"] is None and down["post"]["ok"] is False and down["post500"]["ok"] is False, down)
+        check("a card that cannot load says so", "Error loading entry no-such-key" in down["detail"], down["detail"][:80])
+        check("a failed prefetch caches nothing", down["prefetched"] is False)
+        check("a failed create keeps the dialog open", down["newStillOpen"] == ["newModal"])
+        for needle in ("Failed to load historical snapshot", "Failed to load no-such-key for editing", "Failed to save", "Transition failed", "Failed:"):
+            check(f"error toast: {needle}", any(needle in t for t in down["toasts"]), down["toasts"])
+        check("a diff that failed to load is remembered as absent, a version diff is not cached at all", down["ledNull"] is None and down["verKept"] == 0, down)
+        ev(f"refreshAll().then(() => selectEntry('{N}'))")
+        page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=8000)
+
+        # a failed edit keeps the dialog and says why
+        n_err = len(errors)
+        ed = ev(f"""async () => {{ await openEditModal('{N}'); await __t.wait(200); const real = window.fetch;
+          window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response(JSON.stringify({{error: 'boom'}}), {{status: 400}})) : real(u, o);
+          await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); window.fetch = real;
+          const open = __t.open(); __t.set('editTitle', ''); await submitEditModal();
+          const t2 = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent); closeModal('editModal'); return [t, open, t2]; }}""")
+        forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
+        check("a rejected edit shows the server's reason and keeps the dialog", any("boom" in t for t in ed[0]) and ed[1] == ["editModal"], ed)
+        check("an edit without a title is refused before it is sent", any("Title and body are required" in t for t in ed[2]), ed[2])
+        check("editing with nothing selected says so", ev("(async () => { const k = App.selectedKey; App.selectedKey = null; await openEditModal(); App.selectedKey = k; return [...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('No entry selected')); })()"))
+
+        # empty forms are refused with a reason
+        val = ev(f"""async () => {{ const out = [];
+          const last = () => [...document.querySelectorAll('#toastContainer .toast.error')].map(t => t.textContent).pop();
+          openResolveIncidentModal('{I}-open0', 't'); await submitResolveIncident(); out.push(last()); closeModal('resolveIncidentModal');
+          openResolveTaskModal('{K}', 't'); await submitResolveTask(); out.push(last()); closeModal('resolveTaskModal');
+          promptBlockTask('{K}'); await submitBlockTask(); out.push(last()); closeModal('blockTaskModal');
+          moveTaskTo('', '{K}', 't'); moveTaskTo('done', '{K}', 't'); out.push(__t.open().join()); closeModal('resolveTaskModal');
+          return out; }}""")
+        check("resolve incident without an outcome is refused", "resolution outcome" in val[0], val)
+        check("done without an outcome is refused", "completion outcome" in val[1], val)
+        check("block without a reason is refused", "reason why this task is blocked" in val[2], val)
+        check("moveTaskTo('done') opens the Done dialog; an empty target does nothing", val[3] == "resolveTaskModal", val)
+
+        # a click with a modifier held is the browser's (new tab), not ours
+        mods = ev(f"""(() => {{ const e = () => new MouseEvent('click', {{metaKey: true, cancelable: true}}); const before = [location.hash, App.selectedKey, App.activeTab, document.getElementById('globalSearch').value];
+          handleCardClick(e(), 'kyb-service', 'knowledge'); navigateToGraphNode(e(), 'kyb-service'); handleTagClick(e(), 'kyb'); handleSearchFeedClick(e(), 'x');
+          handleGraphChipClick(e(), 'kyb-service'); handleDrawerOpenFullClick(e(), 'kyb-service');
+          const after = [location.hash, App.selectedKey, App.activeTab, document.getElementById('globalSearch').value];
+          return [before, after]; }})()""")
+        check("modifier-clicks change nothing", mods[0] == mods[1], mods)
+        ev(f"switchTab('feed'); handleCardClick(new MouseEvent('click'), '{N}', 'knowledge')")
+        check("a card clicked from another tab brings the Knowledge tab forward", ev("App.activeTab") == "search")
+        ev(f"handleCardClick(new MouseEvent('click'), '{K}', 'tasks')")
+        check("a task card deep-links into the tasks tab", ev("location.hash") == f"#/tasks/{K}")
+        check("highlightCard and the helpers tolerate empty input", ev("[highlightCard('incidents', ''), highlightCard('incidents', 'x\"]'), highlightText('', 'q'), verWho({author: ''})]") == [False, False, "", ""])
+
+        # keyboard paths not walked yet
+        page.mouse.click(5, 400)
+        ev("switchTab('incidents'); filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentQueue = null; App.incidentCursor = 0; renderIncidents()")
+        k0 = ev("incFiltered()[0].key")
+        page.keyboard.press("d")
+        page.wait_for_function(f"App.selectedKey === '{k0}' && App.detailTab === 'history' && App.activeTab === 'search'", timeout=5000)
+        check("incidents: d opens Versions for the cursor row", True)
+        ev("switchTab('incidents')")
+        page.keyboard.press("h")
+        page.wait_for_function("App.activeTab === 'search'", timeout=5000)
+        check("incidents: h opens Versions too", ev("App.selectedKey") == k0)
+        ev("switchTab('incidents'); App.incidentCursor = 0; renderIncidents()")
+        page.keyboard.press("ArrowDown"); page.keyboard.press("ArrowUp")
+        check("incidents: arrows move the cursor like j/k", ev("App.incidentCursor") == 0)
+        ev("document.getElementById('globalSearch').focus()")
+        page.keyboard.press("j")
+        check("typing in the search box does not move the incident cursor", ev("App.incidentCursor") == 0)
+        ev("document.getElementById('globalSearch').value = ''; document.getElementById('globalSearch').blur(); setGlobalSearchQuery(''); switchTab('incidents'); openShortcutsModal()")
+        page.keyboard.press("j")
+        check("an open dialog swallows list keys", ev("App.incidentCursor") == 0)
+        page.keyboard.press("Escape")
+        ev("switchTab('tasks'); taskSetStatus('live'); App.taskQueue = null; App.taskCursor = 0; renderTasks()")
+        t0 = ev("taskFiltered()[0].key")
+        page.keyboard.press("e")
+        page.wait_for_function("document.querySelector('#editModal.open')", timeout=5000)
+        check("tasks: e edits the cursor row", ev("document.getElementById('editKey').value") == t0)
+        page.keyboard.press("Escape")
+        page.keyboard.press("d")
+        page.wait_for_function(f"App.selectedKey === '{t0}' && App.activeTab === 'search'", timeout=5000)
+        check("tasks: d opens Versions", True)
+        ev("switchTab('tasks')")
+        page.keyboard.press("h")
+        page.wait_for_function("App.activeTab === 'search'", timeout=5000)
+        check("tasks: h opens Versions too", True)
+        ev("switchTab('tasks'); taskSelectQueue('blocked')")
+        page.keyboard.press("Escape")
+        check("tasks: Escape clears the queue", ev("App.taskQueue") is None)
+        page.keyboard.press("ArrowDown"); page.keyboard.press("ArrowUp")
+        check("tasks: arrows move the cursor", ev("App.taskCursor") == 0)
+        ev("document.getElementById('globalSearch').focus()"); page.keyboard.press("j")
+        check("tasks: keys typed into the search box are text", ev("App.taskCursor") == 0)
+        ev("document.getElementById('globalSearch').value = ''; document.getElementById('globalSearch').blur(); setGlobalSearchQuery(''); switchTab('tasks'); openShortcutsModal()"); page.keyboard.press("j")
+        check("tasks: an open dialog swallows list keys", ev("App.taskCursor") == 0)
+        page.keyboard.press("Escape")
+        ev("switchTab('tasks'); taskSetStatus('done'); renderTasks()")
+        page.keyboard.press("x")
+        check("tasks: keys on an empty list do nothing", ev("__t.open()") == [])
+        ev("taskSetStatus('live'); switchTab('search')")
+        t_sync = ev("App.lastSyncTime")
+        page.mouse.click(5, 400); page.keyboard.press("r")
+        page.wait_for_function(f"App.lastSyncTime > {t_sync}", timeout=8000)
+        check("r refreshes", True)
+        ev("App.selectedKey = null")
+        page.keyboard.press("e")
+        check("e with nothing selected opens nothing", ev("__t.open()") == [])
+        ev(f"selectEntry('{N}')")
+        ev("document.getElementById('globalSearch').focus()"); page.keyboard.press("Escape")
+        check("Escape leaves the search box", ev("document.activeElement.id") != "globalSearch")
+
+        # the routes the main flows never took
+        for h, cond, name in (("#/", "App.activeTab === 'search'", "an empty route is the Knowledge tab"),
+                              (f"#/doc/{N}", f"App.selectedKey === '{N}'", "#/doc/<key> is an alias for an entry"),
+                              ("#/knowledge?key=kyb-service", "App.selectedKey === 'kyb-service'", "?key= selects the entry"),
+                              ("#/tasks", "App.activeTab === 'tasks' && document.title.includes('Fleet Tasks')", "#/tasks without a key"),
+                              (f"#/incidents?key={I}-open0", "App.activeTab === 'incidents' && document.title.includes('Incident:')", "#/incidents?key= names the incident"),
+                              ("#/activity", "App.activeTab === 'feed'", "#/activity is the ledger"),
+                              ("#/topology", "App.activeTab === 'graph' && document.title.includes('Topology')", "#/topology is the graph"),
+                              ("#/no-such-place", "App.activeTab === 'search'", "an unknown route falls back to Knowledge")):
+            ev(f"location.hash = {h!r}")
+            page.wait_for_function(cond, timeout=6000)
+            check(f"route: {name}", True)
+        sha1 = ev(f"fetch('/knowledge/{N}/history').then(r => r.json()).then(d => d.versions[d.versions.length - 1].sha)")
+        ev(f"location.hash = '#/knowledge/{N}?rev={sha1}'")
+        page.wait_for_function("document.getElementById('detailBodyContent') && document.getElementById('detailBodyContent').textContent.includes('Historical Snapshot')", timeout=8000)
+        check("route: ?rev= opens that revision", True)
+        ev("setGlobalSearchQuery('entry'); location.hash = '#/knowledge/kyb-service'")
+        page.wait_for_function("App.selectedKey === 'kyb-service' && document.getElementById('globalSearch').value === ''", timeout=6000)
+        check("route: opening an entry clears a leftover search", ev("App.searchQuery") == "")
+        ev("location.hash = '#/search?q=zzz-no-such-thing-zzz'")
+        page.wait_for_function("App.isBackendSearchResults === true && App.entries.length === 0", timeout=8000)
+        check("route: a search with no hits shows the empty state", "No entries matching" in ev("document.getElementById('knowledgeList').textContent"))
+        ev("document.getElementById('globalSearch').value = ''; document.getElementById('globalSearch').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))")
+        page.wait_for_function("App.isBackendSearchResults === false && App.entries.length > 0", timeout=8000)
+        ev("App.selectedKey = null; location.hash = '#/search?q=Seeded'")
+        page.wait_for_function("App.isBackendSearchResults === true && App.selectedKey !== null", timeout=8000)
+        check("route: a search with nothing selected opens one of its hits", ev("App.entries.some(e => e.key === App.selectedKey)"), ev("[App.selectedKey, App.entries.map(e => e.key)]"))
+        ev("document.getElementById('globalSearch').value = ''; document.getElementById('globalSearch').dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))")
+        page.wait_for_function("App.isBackendSearchResults === false && App.entries.length > 0", timeout=8000)
+        ev("App.selectedKey = null; location.hash = '#/x'; location.hash = '#/'")
+        page.wait_for_function("App.selectedKey !== null", timeout=6000)
+        check("route: the empty route selects the first entry when none is", True)
+
+
+        # ------------------------------------------------------------------
+        # The remaining corners: defaults, guards and fallbacks, each provoked on purpose.
+        # ------------------------------------------------------------------
+        ev("""(() => { window.__t.without = (id, fn) => { const el = document.getElementById(id); el.id = id + '__gone'; let r; try { r = fn(); } catch (e) { el.id = id; throw e; }
+                 if (r && typeof r.then === 'function') return r.finally(() => { el.id = id; }); el.id = id; return r; };
+              window.__t.swap = async (obj, fn) => { const save = {}; for (const k in obj) { save[k] = App[k]; App[k] = obj[k]; } try { return await fn(); } finally { Object.assign(App, save); } }; })()""")
+        ev("switchTab('search'); setGlobalSearchQuery(''); location.hash = '#/search'")
+
+        # knowledge list: sorting and searching records that lack the fields sorted and searched by
+        srt = ev("""__t.swap({entries: [{key: 'b-key'}, {key: 'a-key', committed_at: '2026-01-01T00:00:00Z'}, {key: 'c-key', title: 'A title'}], searchQuery: '', tagFilter: null, isBackendSearchResults: false}, () => {
+          const sel = document.getElementById('sortSelect'); const out = {};
+          for (const mode of ['oldest', 'az', '']) { sel.value = mode; out[mode || 'none'] = getFilteredEntries().map(e => e.key); }
+          App.searchQuery = 'a-k'; out.search = getFilteredEntries().map(e => e.key); App.searchQuery = '';
+          App.tagFilter = 'x'; out.tag = getFilteredEntries().length; App.tagFilter = null;
+          sel.value = 'newest'; return out; })""")
+        check("sorting tolerates missing dates and titles", srt["az"][0] == "c-key" and set(srt["oldest"]) == {"a-key", "b-key", "c-key"} and len(srt["none"]) == 3, srt)
+        check("searching and tag-filtering entries without tags does not throw", srt["search"] == ["a-key"] and srt["tag"] == 0, srt)
+
+        # guards
+        g = ev(f"""async () => {{ const out = {{}};
+          await prefetchEntry(''); await selectEntry(''); await openHistoryForEntry(''); await openDiffForEntry('');
+          const real = window.apiFetch; window.apiFetch = () => {{ throw new Error('sync boom'); }};
+          App.entryPrefetch.clear(); await prefetchEntry('whatever'); out.prefetchSurvivedThrow = !App.entryPrefetch.has('whatever'); window.apiFetch = real;
+          out.verNoEl = __t.without('verList', () => {{ renderVersions(); return true; }});
+          const h = App.currentHistoryList; App.currentHistoryList = null; renderVersions(); out.verNull = document.querySelector('#verList .ver-empty') !== null; await verLoadDiffs(); App.currentHistoryList = h; renderVersions();
+          out.feedNoEl = __t.without('ledBody', () => {{ renderFeed(); ledLoadVisible(); return true; }});
+          out.tasksNoEl = __t.without('taskTop', () => {{ renderTasks(); return true; }});
+          out.drawerNoEl = __t.without('graphDrawer', () => {{ openGraphDrawer({{id: 'x', label: 'x', type: 'knowledge'}}); closeGraphDrawer(); return true; }});
+          openGraphDrawer(null); focusNode(null);
+          out.topoNoCount = __t.without('topoSearchCount', () => {{ setTopoSearch('x'); setTopoSearch(''); return true; }});
+          return out; }}""")
+        check("empty keys, a throwing fetch and missing panes are all survived", all(g.values()), g)
+
+        # selectEntry: the optimistic skeleton, the alternate history field, and the two late exits after history
+        sk = ev(f"""async () => {{ const out = {{}}; const real = window.fetch; let release; const gate = new Promise(r => release = r);
+          const body = o => Promise.resolve(new Response(JSON.stringify(o), {{status: 200, headers: {{'content-type': 'application/json'}}}}));
+          await __t.swap({{entries: [...App.entries, {{key: 'no-body-yet', title: 'Skeleton'}}]}}, async () => {{
+            window.fetch = u => String(u).includes('/history') ? gate.then(() => body({{history: [{{sha: 'c'.repeat(40), author: 'H <h@h>', committed_at: new Date().toISOString()}}]}})) : gate.then(() => body({{key: 'no-body-yet', title: 'Skeleton', body: 'arrived'}}));
+            App.detailCache.clear(); App.entryPrefetch.clear();
+            const p = selectEntry('no-body-yet', false); out.skeleton = document.getElementById('detailView').textContent.includes('Loading document body');
+            release(); await p; out.arrived = document.getElementById('detailView').textContent.includes('arrived'); out.altHistory = (App.detailCache.get('no-body-yet') || {{}}).history?.length;
+          }});
+          // history arrives after the person moved on
+          let rel2; const gate2 = new Promise(r => rel2 = r);
+          window.fetch = u => String(u).includes('/history') ? gate2.then(() => body({{versions: []}})) : body({{key: 'late-a', title: 'Late', body: 'x'}});
+          App.detailCache.clear(); const p2 = selectEntry('late-a', false); await __t.wait(50); App.selectedKey = 'someone-else'; rel2(); await p2; out.lateNotCached = !App.detailCache.has('late-a');
+          // history arrives after a write
+          let rel3; const gate3 = new Promise(r => rel3 = r); let calls = 0;
+          window.fetch = u => String(u).includes('/history') ? (calls++ === 0 ? gate3.then(() => body({{versions: []}})) : body({{versions: []}})) : body({{key: 'late-b', title: 'Late', body: 'x'}});
+          App.detailCache.clear(); const p3 = selectEntry('late-b', false); await __t.wait(50); App.cacheGen++; rel3(); await p3; out.refetched = App.detailCache.has('late-b') && calls >= 2;
+          window.fetch = real; return out; }}""")
+        check("an entry known only by title shows a loading skeleton, then its body", sk["skeleton"] and sk["arrived"] and sk["altHistory"] == 1, sk)
+        check("history that arrives late is dropped or re-asked, never cached stale", sk["lateNotCached"] and sk["refetched"], sk)
+        ev(f"selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}' && document.getElementById('verList') !== null", timeout=5000)
+
+        # the version ledger over diffs of every shape
+        vr = ev("""(() => { const save = [App.currentHistoryList, App.verKey, new Map(App.verDiffs), new Set(App.verTextOpen), new Map(App.verSnaps)];
+          const t = new Date().toISOString(); App.verKey = 'vk';
+          App.currentHistoryList = [{sha: 'v5', committed_at: t}, {sha: 'v4', committed_at: t, author: 'A <a>'}, {sha: 'v3', committed_at: t}, {sha: 'v2', committed_at: t}, {sha: 'v1', committed_at: t}];
+          App.verDiffs = new Map([['vk@v5', {}], ['vk@v4', {fields: [{field: 'title', to: null}], body: {}}], ['vk@v3', {fields: [{field: 'updated_at', from: 'a', to: 'b'}], body: {added: [], removed: []}}],
+                                  ['vk@v2', {fields: [], body: {added: ['x'], removed: ['y']}}], ['vk@v1', {created: true, lines: 3}]]);
+          App.verTextOpen = new Set(['v5', 'v2', 'v1']); App.verSnaps = new Map([['vk@v2', {}], ['vk@v1', {title: 'First', body: 'born'}]]);
+          const real = window.verLoadDiffs; window.verLoadDiffs = () => {}; renderVersions(); window.verLoadDiffs = real;
+          const out = {text: document.getElementById('verList').textContent.replace(/\\s+/g, ' '), blocks: document.querySelectorAll('#verList .ver-ev').length};
+          [App.currentHistoryList, App.verKey, App.verDiffs, App.verTextOpen, App.verSnaps] = save; renderVersions(); return out; })()""")
+        check("versions: an unchanged version says so, an open snapshot still loading says so, labels flip to 'hide'", vr["blocks"] == 5 and "nothing in the text or the fields changed" in vr["text"] and "Loading" in vr["text"] and "hide text" in vr["text"] and "hide the document as first written" in vr["text"] and "born" in vr["text"], vr["text"][:400])
+        sha_new = ev("App.currentHistoryList[0].sha")
+        ev(f"App.verSnaps.delete(App.verKey + '@{sha_new}'); verToggleText('{sha_new}')")
+        page.wait_for_function("document.querySelectorAll('#verList .ver-text').length === 1", timeout=5000)
+        check("'text at vN' loads the snapshot of a later version on demand", True)
+        ev(f"verToggleText('{sha_new}')")
+
+        # clipboard that refuses, and a browser with no clipboard at all that refuses too
+        cb = ev("""async () => { const real = navigator.clipboard.writeText.bind(navigator.clipboard); const ex = document.execCommand; let fell = null;
+          navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); document.execCommand = c => { fell = c; return true; };
+          copyToClipboard('x', 'copied via fallback'); await __t.wait(100);
+          document.execCommand = () => { throw new Error('no'); }; fallbackCopy('x', 'm');
+          const denied = [...document.querySelectorAll('#toastContainer .toast.error')].some(t => t.textContent.includes('Clipboard access denied'));
+          navigator.clipboard.writeText = real; document.execCommand = ex; return [fell, denied]; }""")
+        check("a refused clipboard falls back to execCommand; a refused fallback says access was denied", cb == ["copy", True], cb)
+
+        # highlightCard when the selector itself is unusable
+        hc = ev("""(() => { const real = CSS.escape; CSS.escape = () => { throw new Error('no'); }; const d = document.createElement('div'); d.id = 'task-hc-probe'; document.body.appendChild(d);
+          const r = [highlightCard('tasks', 'hc-probe'), d.classList.contains('target-highlight'), highlightCard('incidents', 'nope')]; d.remove(); CSS.escape = real; return r; })()""")
+        check("highlightCard falls back to an id lookup and marks the card", hc == [True, True, False], hc)
+
+        # incidents: every default and guard in the row, the peek, the filters and the keys
+        inc = ev("""__t.swap({incidents: [
+            {key: 'i-future', title: 'Future', status: 'open', detected_at: new Date(Date.now() + 3600e3).toISOString()},
+            {key: 'i-follow1', title: 'One follow-up', status: 'open', severity: 'critical', open_followups: 1, detection: 'true', hosts: ['h9'], detected_at: new Date().toISOString()},
+            {key: 'i-follow2', title: 'Two follow-ups', status: 'open', open_followups: 2, detected_at: new Date().toISOString()},
+            {key: 'i-res', title: 'Resolved', status: 'resolved', resolution: 'done', detected_at: new Date(Date.now() + 5e3).toISOString(), resolved_at: new Date().toISOString()},
+            {key: 'i-res2', title: 'Resolved silently', status: 'resolved', detected_at: new Date().toISOString()}],
+            incidentStatusFilter: 'all', incidentSeverityFilter: 'all', incidentQueue: null, incidentCursor: 0, incidentShown: 40}, () => {
+          const out = {}; const peek = () => (document.querySelector('#incidentRows .inc-peek') || {textContent: ''}).textContent.replace(/\\s+/g, ' ');
+          renderIncidents(); out.order = incFiltered().map(i => i.key); out.peek1 = peek(); out.futureAge = incAgeLabel(App.incidents[0]);
+          App.incidentCursor = out.order.indexOf('i-follow2'); renderIncidents(); out.peek2 = peek();
+          App.incidentSeverityFilter = 'medium'; out.medium = incFiltered().map(i => i.key); App.incidentSeverityFilter = 'all';
+          App.incidentStatusFilter = 'resolved'; App.incidentCursor = 0; renderIncidents(); out.resPeek = peek(); out.resNotes = [...document.querySelectorAll('#incidentRows .inc-note')].map(n => n.textContent);
+          const real = Element.prototype.scrollIntoViewIfNeeded; delete Element.prototype.scrollIntoViewIfNeeded; App.incidentKeyNav = true; renderIncidents(); out.noScrollApi = App.incidentKeyNav === false;
+          if (real) Element.prototype.scrollIntoViewIfNeeded = real; App.incidentKeyNav = true; renderIncidents();
+          App.incidentStatusFilter = 'all'; return out; })""")
+        check("critical sorts first, an incident without severity counts as medium", inc["order"][0] == "i-follow1" and set(inc["medium"]) == {"i-future", "i-follow2"}, inc)
+        check("the peek counts follow-ups in singular and plural, and lists hosts", "1 open follow-up" in inc["peek1"] and "1 open follow-ups" not in inc["peek1"] and "h9" in inc["peek1"] and "2 open follow-ups" in inc["peek2"], (inc["peek1"], inc["peek2"]))
+        check("an incident dated in the future has no age", inc["futureAge"] == "")
+        check("a resolved incident under the cursor offers no Resolve and shows its resolution", "Resolve" not in inc["resPeek"].replace("Resolution", "") and "done" in inc["resPeek"] and inc["noScrollApi"], inc["resPeek"])
+        ev("renderIncidents(true); switchTab('incidents'); __t.set('resolveIncidentAuthor', '')")
+        ev("filterIncidentsSeverity('low'); filterIncidents('mitigated')")
+        page.mouse.click(5, 400); page.keyboard.press("Enter")
+        check("keys on an empty incident list do nothing", ev("location.hash").startswith("#/incidents") or ev("App.activeTab") == "incidents")
+        ev("filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentCursor = null; App.incidentQueue = null")
+        page.keyboard.press("j")
+        check("a cursor that was never set starts from the top", ev("App.incidentCursor") == 1)
+
+        # tasks: the same
+        tk = ev("""__t.swap({tasks: [
+            {key: 't-crit', title: 'Critical', status: 'open', priority: 'critical'}, {key: 't-nostatus', title: 'No status'},
+            {key: 't-stalled', title: 'Stalled', status: 'in_progress', updated_at: '2020-01-01'}, {key: 't-blocked', title: 'Blocked with parent', status: 'blocked', blocked_reason: 'vendor', parent_task: 't-crit'},
+            {key: 't-blocked2', title: 'Blocked silently', status: 'blocked'}],
+            taskStatusFilter: null, taskQueue: null, taskCursor: 0, taskShown: 40}, () => {
+          const out = {}; renderTasks(); out.rows = [...document.querySelectorAll('#taskRows .inc-r')].map(r => r.textContent.replace(/\\s+/g, ' ').trim());
+          out.dots = [...document.querySelectorAll('#taskRows .inc-r .dot')].map(d => d.className); out.counts = [...document.querySelectorAll('#taskQueue .b b')].map(b => b.textContent);
+          App.taskCursor = taskFiltered().findIndex(t => t.key === 't-crit'); renderTasks(); out.move = [...document.querySelectorAll('#taskRows .inc-r.cur option')].map(o => o.value + (o.disabled ? '!' : ''));
+          App.taskStatusFilter = 'open'; out.open = taskFiltered().map(t => t.key); App.taskStatusFilter = 'live'; return out; })""")
+        check("tasks without a status are open; blocked rows carry reason and parent; a critical row is marked", any("Blocked with parent" in r and "vendor" in r and "part of t-crit" in r for r in tk["rows"]) and any("critical" in d for d in tk["dots"]) and set(tk["open"]) == {"t-crit", "t-nostatus"}, tk)
+        check("queue counters: 2 blocked, 1 stalled, 2 unowned", tk["counts"] == ["2", "1", "2"], tk["counts"])
+        check("the Move menu disables the task's own status", "open!" in tk["move"], tk["move"])
+        ev("renderTasks(true); switchTab('tasks'); taskSetStatus('live'); App.taskCursor = null; App.taskQueue = null; __t.set('resolveTaskAuthor', ''); __t.set('blockTaskAuthor', '')")
+        page.mouse.click(5, 400); page.keyboard.press("j")
+        check("a task cursor that was never set starts from the top", ev("App.taskCursor") == 1)
+        ev(f"App.tasks.push({{key: 'ghost'}}); promptBlockTask('{K}', ''); ")
+        check("the block dialog finds the title itself when not given one", "UI test task edited" in ev("document.getElementById('blockTaskTargetText').textContent"))
+        ev("promptBlockTask('nobody-has-this-key', '')")
+        check("and falls back to the key", "nobody-has-this-key" in ev("document.getElementById('blockTaskTargetText').textContent"))
+        ev("closeModal('blockTaskModal')")
+
+        # ledger: events with missing fields, a search with a broken escape, one search by one agent, closing a fold
+        led = ev("""__t.swap({activity: [{ts: new Date().toISOString(), action: 'resolved', kind: 'incident', sha: 's1', author: ''}, {ts: new Date(Date.now() - 60e3).toISOString(), action: 'updated', kind: 'knowledge', key: 'k1', title: 'K one', sha: 's2', author: 'A <a>'},
+                                          {ts: new Date(Date.now() - 86400e3 * 3).toISOString(), action: 'created', kind: 'task', message: 'only a message', sha: 's3'}],
+            audit: [{ts: new Date(Date.now() - 30e3).toISOString(), path: '/search', query: 'q=100%25%zz', ip: '1'}, {ts: new Date(Date.now() - 31e3).toISOString(), path: '/search', query: 'limit=5', ip: '1'}, {ts: new Date(Date.now() - 32e3).toISOString(), path: '/search', query: 'q=', ip: '2'}],
+            activityFilter: 'all', ledOpenFolds: new Set(), ledDiffs: new Map([['s2', {changed: true, fields: [{field: 'title'}, {field: 'updated_at', from: 'a', to: 'b'}], body: {}}], ['s1', {changed: true}]])}, () => {
+          const real = window.ledLoadVisible; window.ledLoadVisible = () => {}; const out = {};
+          renderFeed(); out.text = document.getElementById('ledBody').textContent.replace(/\\s+/g, ' '); out.fold = (document.querySelector('#ledBody .led-fold') || {textContent: ''}).textContent.replace(/\\s+/g, ' ');
+          out.days = document.querySelectorAll('#ledBody .led-day').length; out.resDot = !!document.querySelector('#ledBody .dot.res');
+          ledToggleFold(1); out.opened = document.querySelectorAll('#ledBody .led-q').length; ledToggleFold(1); out.closed = document.querySelectorAll('#ledBody .led-q').length;
+          window.ledLoadVisible = real; return out; })""")
+        check("ledger: one search by one agent is singular; a query with a broken escape still shows; folds close again", "1 search by 1 agent" in led["fold"] and led["opened"] == 1 and led["closed"] == 0, led)
+        check("ledger: events without key, title or author still render; days are separated; a missing field value is shown as empty", led["days"] == 2 and "only a message" in led["text"] and "unknown" in led["text"] and "∅" in led["text"] and led["resDot"], led["text"][:300])
+        n_err = len(errors)
+        rej = ev("""async () => { const real = window.ledFetchDiffs; window.ledFetchDiffs = () => Promise.reject(new Error('x')); switchTab('feed'); App.ledLoading = false; ledLoadVisible(); await __t.wait(50); window.ledFetchDiffs = real; const r = App.ledLoading;
+          const rf = window.apiFetch; window.apiFetch = () => { throw new Error('sync'); }; App.ledDiffs.delete('zz'); await ledFetchDiffs([{key: 'k', sha: 'zz', action: 'updated'}]); window.apiFetch = rf; return [r, App.ledDiffs.get('zz')]; }""")
+        forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
+        check("a failed diff load releases the loading flag and records the diff as absent", rej == [False, None], rej)
+        ev("renderFeed()")
+
+        # refresh with the ledger paused skips the activity request
+        paused = ev("""async () => { const before = performance.getEntriesByType('resource').filter(r => r.name.includes('/api/activity')).length; App.feedPaused = true; await refreshAll(); App.feedPaused = false;
+          return performance.getEntriesByType('resource').filter(r => r.name.includes('/api/activity')).length - before; }""")
+        check("a paused ledger is not re-fetched", paused == 0, paused)
+
+        # dialogs: defaults in new forms, every shape in the edit form, focus handling
+        frm = ev(f"""async () => {{ const real = window.fetch; const sent = []; const out = {{}};
+          window.fetch = (u, o) => {{ if (o && o.method === 'POST') {{ sent.push([String(u), JSON.parse(o.body)]); return Promise.resolve(new Response('{{}}', {{status: 200}})); }} return real(u, o); }};
+          const real_refresh = window.refreshAll; window.refreshAll = async () => {{}}; const real_select = window.selectEntry; window.selectEntry = async () => {{}};
+          openNewModal('incident'); __t.set('newTitle', 'T'); __t.set('newKey', 'inc-defaults'); __t.set('newBody', 'b'); __t.set('newService', ''); document.getElementById('newSeverity').value = ''; await submitNewModal();
+          openNewModal('task'); __t.set('newTitle', 'T'); __t.set('newKey', 'task-defaults'); __t.set('newBody', 'b'); __t.set('newAssignee', ''); await submitNewModal();
+          openNewModal('knowledge'); __t.set('newTitle', 'T'); __t.set('newKey', 'k-defaults'); __t.set('newBody', 'b'); await submitNewModal();
+          const bare = async (entry, fill) => {{ window.fetch = (u, o) => o && o.method === 'POST' ? (sent.push([String(u), JSON.parse(o.body)]), Promise.resolve(new Response('{{}}', {{status: 200}}))) : Promise.resolve(new Response(JSON.stringify(entry), {{status: 200}}));
+            await openEditModal(entry.key); const html = document.getElementById('editModalBody').innerHTML; fill && fill(); __t.set('editTitle', 'T'); __t.set('editBody', 'b'); __t.set('editAuthor', ''); await submitEditModal(); return html; }};
+          out.incHtml = await bare({{key: 'e-inc', kind: 'incident'}}, () => {{ __t.set('editService', ''); document.getElementById('editSeverity').value = ''; }});
+          for (const sev of ['critical', 'high', 'low']) await bare({{key: 'e-inc', kind: 'incident', severity: sev, title: 't', body: 'b', service: 's', hosts: ['h']}});
+          out.taskHtml = await bare({{key: 'e-task', kind: 'task'}}, () => {{ __t.set('editAssignee', ''); }});
+          out.knowHtml = await bare({{key: 'e-know'}});
+          window.fetch = real; window.refreshAll = real_refresh; window.selectEntry = real_select; out.sent = sent; return out; }}""")
+        by = {u.split("/")[-1] + ":" + b["key"]: b for u, b in frm["sent"]}
+        check("a new incident with nothing chosen is medium on 'infrastructure'", by["incidents:inc-defaults"]["service"] == "infrastructure" and by["incidents:inc-defaults"]["severity"] == "medium", by.get("incidents:inc-defaults"))
+        check("a new task with no assignee typed gets the default one and no priority", by["tasks:task-defaults"]["assignee"] == "Alexander Panasenko" and by["tasks:task-defaults"]["priority"] == "", by.get("tasks:task-defaults"))
+        check("a new knowledge entry with no tags sends none", by["knowledge:k-defaults"]["tags"] == [], by.get("knowledge:k-defaults"))
+        check("editing a bare incident, task and note fills honest defaults and a default author", by["incidents:e-inc"]["author"].startswith("Alexander") and by["tasks:e-task"]["assignee"] == "Alexander Panasenko" and by["knowledge:e-know"]["tags"] == [] and "Edit INCIDENT" not in frm["incHtml"], {k: by[k] for k in ("tasks:e-task", "knowledge:e-know")})
+        foc = ev("""(() => { openNewModal('knowledge'); document.getElementById('newTitle').focus(); const inside = document.activeElement.id; openModal('shortcutsModal'); const replaced = __t.open();
+          openNewModal('knowledge'); document.getElementById('newTitle').focus(); closeModal('newModal'); return [inside, replaced, document.activeElement.id, __t.open()]; })()""")
+        check("opening a dialog replaces the one behind it; closing one drops focus from its fields", foc == ["newTitle", ["shortcutsModal"], "", []], foc)
+        ev(f"refreshAll().then(() => selectEntry('{N}'))")
+        page.wait_for_function(f"App.selectedKey === '{N}'", timeout=8000)
+
+        # list navigation with nothing to navigate, route extras
+        ev("switchTab('search'); setGlobalSearchQuery('zzz-nothing-zzz')")
+        page.mouse.click(5, 400); page.keyboard.press("j")
+        check("j on an empty list does nothing", ev("App.selectedKey") == N)
+        ev("setGlobalSearchQuery('')")
+        rt = ev(f"""async () => {{ const out = {{}}; const realEsc = CSS.escape;
+          const nodes = App.graphNodes; App.graphNodes = []; location.hash = '#/graph/{N}'; await __t.wait(150); out.pending = App.pendingGraphNode; App.graphNodes = nodes; buildTopology(); await __t.wait(250);
+          out.consumed = App.pendingGraphNode === null && document.getElementById('drawerKey').textContent === '{N}'; closeGraphDrawer();
+          CSS.escape = () => {{ throw new Error('no'); }}; location.hash = '#/knowledge/kyb-service'; await __t.wait(200); CSS.escape = realEsc; out.survivedEscape = App.selectedKey === 'kyb-service';
+          const real = window.fetch; window.fetch = (u, o) => String(u).includes('/search?q=') ? Promise.reject(new Error('down')) : real(u, o);
+          location.hash = '#/search?q=whatever'; await __t.wait(300); window.fetch = real; out.searchDown = App.activeTab === 'search'; return out; }}""")
+        forgive_console(0, "GET /search?q=whatever&limit=100")
+        check("a graph deep-link before the graph exists waits for the first build", rt["pending"] == N and rt["consumed"], rt)
+        check("routes survive an unusable CSS.escape and a search that cannot be reached", rt["survivedEscape"] and rt["searchDown"], rt)
+        ev("document.querySelector('.nav-tab[data-tab=\"incidents\"]').click()")
+        check("a real click on a tab switches to it", ev("App.activeTab") == "incidents" and ev("location.hash") == "#/incidents")
+        ev("setGlobalSearchQuery(''); location.hash = '#/search'")
+
+
+        # ------------------------------------------------------------------
+        # The graph, driven with a real mouse; and the last defaults.
+        # ------------------------------------------------------------------
+        ev("location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
+        ev("refreshAll()")
+        page.wait_for_timeout(700)
+        ev("""(() => { window.__t.xy = id => { const n = App.graphNodes.find(x => x.id === id); const r = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
+                 return [r.left + n.x * c.zoom + c.x, r.top + n.y * c.zoom + c.y]; };
+               window.__t.pinAll = () => App.graphNodes.forEach(n => { n.pinned = true; n.vx = 0; n.vy = 0; });
+               // a node the mouse can reach unambiguously: on screen, off the minimap, and nearer to the cursor than any other node's hit radius
+               window.__t.reachable = pred => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera(); const hit = n => n.width ? Math.max(n.width / 2, n.height / 2) + 6 : n.radius + 12;
+                 for (const n of App.graphNodes) { if (!pred(n)) continue; const sx = n.x * c.zoom + c.x, sy = n.y * c.zoom + c.y;
+                   if (sx < 60 || sx > b.width - 60 || sy < 60 || sy > b.height - 60) continue; if (sx < 190 && sy > b.height - 135) continue;
+                   if (App.graphNodes.every(o => o === n || Math.hypot(o.x - n.x, o.y - n.y) > hit(o) + 4)) return n.id; }
+                 return null; }; })()""")
+        for layout in ("radar", "hierarchy", "grid", "orbit"):
+            ev(f"setGraphLayout('{layout}')")
+            page.wait_for_timeout(250)
+            check(f"layout {layout}: every node has a finite target and position", ev("App.graphNodes.every(n => Number.isFinite(n.targetX) && Number.isFinite(n.targetY) && Number.isFinite(n.x) && Number.isFinite(n.y))") and ev("App.graphLayout") == layout)
+        ev("setGraphFilter('task')")
+        page.wait_for_timeout(250)
+        check("filter 'task' marks its button and is drawn without error", ev("document.getElementById('gFilterTasks').classList.contains('active')"))
+        ev("fitGraphCamera()")
+        check("fit with a filter aims at the visible nodes", ev("Number.isFinite(graphCamera().targetZoom)"))
+        # A hundred seeded nodes overlap; put four where the mouse can reach each unambiguously
+        # and park the rest far away. Positions and pins survive the 4-second rebuild.
+        ev("setGraphFilter('all')")
+        tgt, ent = N, "mentions-kyb"
+        hub = ev("App.graphNodes.find(n => n.type === 'host').id")
+        svc = ev("App.graphNodes.find(n => n.type === 'service').id")
+        ev(f"""(() => {{ window.__t.stage = () => {{ const c = graphCamera(); const w = (sx, sy) => [(sx - c.x) / c.zoom, (sy - c.y) / c.zoom];
+            const spot = {{'{tgt}': [420, 200], '{hub}': [760, 200], '{svc}': [760, 440], '{ent}': [420, 440]}};
+            App.graphNodes.forEach((n, i) => {{ const p = spot[n.id] ? w(...spot[n.id]) : w(20000 + (i % 10) * 900, 20000 + Math.floor(i / 10) * 900); n.x = n.targetX = p[0]; n.y = n.targetY = p[1]; n.vx = n.vy = 0; n.pinned = true; }}); }}; }})()""")
+        page.wait_for_timeout(1800)  # let the camera settle; it is not touched again while the mouse works
+        ev("__t.stage()")
+        page.wait_for_timeout(300)
+
+        def aim(node_id):
+            """Where a node is on screen once the camera has stopped. Pressing a node re-aims the camera at it,
+            so the camera is aimed there first: the press then moves nothing, and the second click of a
+            double-click lands where the first did."""
+            ev(f"focusNode(App.graphNodes.find(n => n.id === '{node_id}'))")
+            page.wait_for_function("!graphCamera().moving", timeout=15000)
+            page.wait_for_timeout(80)
+            return ev(f"__t.xy('{node_id}')")
+
+        # hover, press, drag, release, double-click - on the canvas, with the mouse
+        x, y = aim(tgt)
+        page.mouse.move(x, y)
+        page.wait_for_timeout(200)
+        check("hovering a node turns the cursor into a pointer", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
+        page.mouse.down()
+        check("pressing a node opens its drawer", ev("document.getElementById('graphDrawer').classList.contains('open')") and ev("document.getElementById('drawerKey').textContent") == tgt, ev("document.getElementById('drawerKey').textContent"))
+        page.mouse.move(x + 40, y + 30, steps=4)
+        page.mouse.up()
+        page.wait_for_timeout(200)
+        check("dragging a node moves and pins it", ev(f"App.graphNodes.find(n => n.id === '{tgt}').pinned") and ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Pinned'))"))
+        check("a pinned node says so in its drawer", "PINNED" in ev(f"(openGraphDrawer(App.graphNodes.find(n => n.id === '{tgt}')), document.getElementById('drawerMeta').textContent)"))
+        x, y = aim(tgt)
+        page.mouse.dblclick(x, y)
+        page.wait_for_timeout(200)
+        check("double-clicking a pinned node unpins it", ev("[...document.querySelectorAll('#toastContainer .toast')].some(t => t.textContent.includes('Unpinned'))"))
+        ev("closeGraphDrawer(); __t.pinAll()")
+        hx, hy = aim(hub)
+        page.mouse.move(hx, hy)
+        page.wait_for_timeout(250)
+        check("hovering a host hub", ev("document.getElementById('topoCanvas').style.cursor") == "pointer")
+        page.mouse.click(hx, hy)
+        check("a host hub's drawer is labelled as a host", ev("document.getElementById('drawerBadge').textContent") == "HOST BLADE")
+        ev("closeGraphDrawer()")
+        # empty space: pan, wheel, minimap
+        r = ev("(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()")
+        page.wait_for_function("!graphCamera().moving", timeout=15000)  # pressing the hub re-aimed the camera
+        empty = ev("""(() => { const b = document.getElementById('topoCanvas').getBoundingClientRect(); const c = graphCamera();
+          for (let px = 320; px < 940; px += 40) for (let py = 90; py < b.height - 160; py += 40) {
+            const gx = (px - c.x) / c.zoom, gy = (py - c.y) / c.zoom;
+            if (App.graphNodes.every(n => Math.hypot(n.x - gx, n.y - gy) > 160)) return [b.left + px, b.top + py]; }
+          return null; })()""")
+        check("there is empty canvas to pan on", empty is not None)
+        c0 = ev("graphCamera()")
+        page.mouse.move(empty[0], empty[1]); page.mouse.down(); page.mouse.move(empty[0] - 60, empty[1] + 40, steps=3)
+        c1 = ev("graphCamera()")
+        page.mouse.up()
+        check("dragging empty space pans the camera", ((c1["x"] - c0["x"]) ** 2 + (c1["y"] - c0["y"]) ** 2) ** 0.5 > 40 and c1["zoom"] == c0["zoom"], (c0, c1))
+        check("releasing restores the grab cursor", ev("document.getElementById('topoCanvas').style.cursor") == "grab")
+        page.mouse.move(empty[0] - 60, empty[1] + 40)
+        z0 = ev("graphCamera().zoom")
+        page.mouse.wheel(0, -200)
+        page.wait_for_timeout(100)
+        z1 = ev("graphCamera().zoom")
+        page.mouse.wheel(0, 200)
+        page.wait_for_timeout(100)
+        check("the wheel zooms in and out", z1 > z0 and ev("graphCamera().zoom") < z1, (z0, z1))
+        page.mouse.click(r[0] + 18 + 75, r[1] + r[3] - 18 - 45)
+        check("clicking the minimap aims the camera there", ev("graphCamera().targetZoom") == ev("graphCamera().zoom"))
+        page.wait_for_timeout(1800)
+        ev("__t.stage()")
+        page.wait_for_timeout(300)
+        # double-click on a hub searches by it; on an entry opens it
+        ev("closeGraphDrawer()")
+        sx, sy = aim(svc)
+        ev(f"App.graphNodes.find(n => n.id === '{svc}').pinned = false")  # pinned would mean 'unpin', not 'search'
+        page.mouse.dblclick(sx, sy)
+        page.wait_for_function("App.activeTab === 'search'", timeout=5000)
+        check("double-clicking a hub searches for its service", ev("document.getElementById('globalSearch').value") == svc.split(":", 1)[1])
+        ev("setGlobalSearchQuery(''); location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph'", timeout=5000)
+        page.wait_for_timeout(600)
+        ev("closeGraphDrawer()")
+        page.wait_for_timeout(1800)
+        ev("__t.stage()")
+        page.wait_for_timeout(300)
+        x, y = aim(ent)
+        ev(f"App.graphNodes.find(n => n.id === '{ent}').pinned = false")  # a pinned node would be unpinned by the double-click instead of opened
+        page.mouse.dblclick(x, y)
+        page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{ent}'", timeout=5000)
+        check("double-clicking an entry opens it", True)
+
+        # drawer buttons, pressed
+        ev("location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph'", timeout=5000)
+        ev(f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
+        page.click("#drawerCopyBtn")
+        page.wait_for_timeout(150)
+        check("drawer: Copy copies the key", ev("navigator.clipboard.readText()") == N)
+        page.click("#drawerCopyLinkBtn")
+        page.wait_for_timeout(150)
+        check("drawer: Link copies a graph link", ev("navigator.clipboard.readText()") == f"{base}/#/graph/{N}")
+        page.click("#drawerCenterBtn")
+        check("drawer: Center aims the camera at the node", ev("graphCamera().targetZoom") >= 1.3)
+        page.click("#drawerEditBtn")
+        page.wait_for_function("document.querySelector('#editModal.open')", timeout=5000)
+        check("drawer: Edit opens the editor on the node", ev("document.getElementById('editKey').value") == N)
+        page.keyboard.press("Escape")
+        page.click("#drawerOpenFullBtn")
+        page.wait_for_function(f"App.activeTab === 'search' && App.selectedKey === '{N}'", timeout=5000)
+        check("drawer: Open full lands on the entry", True)
+
+        # drawer and graph over data of every shape
+        gs = ev("""__t.swap({entries: [{key: 'g-plain'}, {key: 'g-hosttag', tags: ['host-zeta', 'api'], title: 'Host by tag'}, {key: 'task-g-child', kind: 'task', parent_task: 'g-plain', tags: [7]},
+                                     {key: 'inc-g', kind: 'incident', hosts: ['alpha', '', 5], service: 'api', knowledge: ['g-plain', 'missing']}]}, () => {
+          const out = {}; const saveNodes = App.graphNodes, saveLinks = App.graphLinks; App.graphNodes = null; buildTopology();
+          const id = n => typeof n === 'string' ? n : n.id; const has = (a, b) => App.graphLinks.some(l => (id(l.source) === a && id(l.target) === b));
+          out.hosts = App.graphNodes.filter(n => n.type === 'host').map(n => n.label).sort(); out.label = App.graphNodes.find(n => n.id === 'g-plain').label;
+          out.links = [has('task-g-child', 'g-plain'), has('inc-g', 'g-plain'), has('inc-g', 'host:alpha'), has('g-hosttag', 'host:host-zeta'), has('inc-g', 'missing')];
+          openGraphDrawer(App.graphNodes.find(n => n.id === 'g-plain')); out.loading = document.getElementById('drawerContent').textContent;
+          const lonely = {id: 'lonely', type: 'knowledge', data: {body: 'has body'}}; openGraphDrawer(lonely); out.noLinks = document.getElementById('drawerLinks').textContent; out.title = document.title;
+          for (const mode of ['orbit', 'radar', 'hierarchy', 'grid']) calculateLayoutTargets(mode);
+          App.entries = []; App.graphNodes = null; buildTopology(); out.empty = App.graphNodes.length;
+          for (const mode of ['orbit', 'radar', 'hierarchy', 'grid']) calculateLayoutTargets(mode);
+          App.graphNodes = null; calculateLayoutTargets('orbit'); unpinAllGraphNodes(); reheatSimulation(0.5); focusNodeById(null); focusNodeById('nobody'); setTopoSearch('x'); setTopoSearch(''); fitGraphCamera();
+          const saveFilter = App.graphFilter; App.graphNodes = [{id: 'only', type: 'knowledge', label: 'only', x: 0, y: 0}]; App.graphFilter = 'incident'; fitGraphCamera(); App.graphFilter = saveFilter;
+          const lay = App.graphLayout; App.graphLayout = ''; App.graphNodes = saveNodes; App.graphLinks = saveLinks; closeGraphDrawer(); App.graphLayout = lay; return out; })""")
+        check("hosts come from hosts[] and host-* tags; non-string values are ignored", gs["hosts"] == ["alpha", "host-zeta"], gs["hosts"])
+        check("links: task to parent, incident to knowledge and host, entry to its host tag; nothing to a missing key", gs["links"] == [True, True, True, True, False], gs["links"])
+        check("a node without a title is labelled by its key; a body-less node says it is loading; a node without links says so", gs["label"] == "g-plain" and "Loading document body" in gs["loading"] and "No active links" in gs["noLinks"] and "lonely" in gs["title"], gs)
+        check("an empty base builds an empty graph and every layout tolerates it", gs["empty"] == 0)
+        ev("buildTopology()")
+        hid = ev("""(() => { const c = document.getElementById('graphContainer'); const d = c.style.display; c.style.display = 'none'; const n = App.graphNodes[0];
+          focusNode(n); const a = graphCamera().targetZoom; zoomGraph(1.1); fitGraphCamera(); c.style.display = d;
+          const noCanvas = __t.without('topoCanvas', () => { fitGraphCamera(); focusNode(n); zoomGraph(1.1); initCanvasGraph(); return true; }); return [a >= 1.3, noCanvas]; })()""")
+        check("the camera math survives a hidden container and a missing canvas", hid == [True, True], hid)
+        page.wait_for_function("!graphCamera().moving", timeout=15000)
+        check("a settled camera reports its own zoom as the target", ev("graphCamera().targetZoom === graphCamera().zoom"))
+
+        # the last defaults in lists, forms and routes
+        ev("switchTab('incidents'); filterIncidents('all'); filterIncidentsSeverity('all'); App.incidentCursor = 0; renderIncidents()")
+        page.mouse.click(5, 400); page.keyboard.press("k")
+        check("k at the top stays at the top", ev("App.incidentCursor") == 0)
+        ev("switchTab('tasks'); taskSetStatus('live'); App.taskCursor = 0; renderTasks()")
+        page.keyboard.press("k")
+        check("tasks: k at the top stays at the top", ev("App.taskCursor") == 0)
+        tk2 = ev("""__t.swap({tasks: [{key: 't-prog', title: 'In progress, undated', status: 'in_progress'}, {key: 't-blk', title: 'Blocked', status: 'blocked'}], taskStatusFilter: 'live', taskQueue: null, taskCursor: 0}, () => {
+          const out = {}; renderTasks(); out.first = [...document.querySelectorAll('#taskRows .inc-r.cur option')].map(o => o.value + (o.disabled ? '!' : ''));
+          App.taskCursor = 1; renderTasks(); out.second = [...document.querySelectorAll('#taskRows .inc-r.cur option')].map(o => o.value + (o.disabled ? '!' : '')); out.stalled = App.tasks.filter(TASK_QUEUES[1].test).length; return out; })""")
+        check("the Move menu disables 'blocked' on a blocked task and 'in_progress' on one in progress; an undated task in progress counts as stalled", "blocked!" in tk2["first"] and "in_progress!" in tk2["second"] and tk2["stalled"] == 1, tk2)
+        ev("renderTasks(true)")
+        sub = ev(f"""async () => {{ const real = window.fetch; const sent = []; window.fetch = (u, o) => o && o.method === 'POST' ? (sent.push([String(u), JSON.parse(o.body)]), Promise.resolve(new Response('{{}}', {{status: 200}}))) : real(u, o);
+          const rr = window.refreshAll; window.refreshAll = async () => {{}};
+          openResolveIncidentModal('inc-x', 't'); __t.set('resolveIncidentOutcome', 'o'); __t.set('resolveIncidentAuthor', ''); await submitResolveIncident();
+          openResolveTaskModal('task-x', 't'); __t.set('resolveTaskOutcome', 'o'); __t.set('resolveTaskAuthor', ''); await submitResolveTask();
+          promptBlockTask('task-x', 't'); __t.set('blockTaskReason', 'r'); __t.set('blockTaskAuthor', ''); await submitBlockTask();
+          App.activeBlockKey = 'task-y'; const noEls = __t.without('blockTaskReason', () => __t.without('blockTaskAuthor', () => submitBlockTask())); await noEls;
+          __t.without('blockTaskTargetText', () => __t.without('blockTaskReason', () => promptBlockTask('task-z', 't'))); closeModal('blockTaskModal');
+          window.fetch = (u, o) => o && o.method === 'POST' ? Promise.reject(new Error('offline')) : real(u, o);
+          await openEditModal('{N}'); await submitEditModal(); const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal');
+          window.fetch = real; window.refreshAll = rr; return [sent, t]; }}""")
+        forgive_console(0, "POST /knowledge")
+        check("resolve, done and block go out with the default author when none is typed", len(sub[0]) == 3 and sub[0][2][1].get("author", "").startswith("Alexander") and sub[0][2][1].get("blocked_reason") == "r", sub[0])
+        check("an edit that cannot reach the server says 'offline'", "offline" in sub[1], sub[1])
+        dv = ev("""(() => { const out = {};
+          renderDetailView({key: 'inc-nodate', kind: 'incident', resolution: 'fixed', title: 'No dates'}, []); out.inc = document.getElementById('detailView').textContent.replace(/\\s+/g, ' ');
+          const t = new Date().toISOString(); renderDetailView({key: 'k-two-authors', title: 'Two'}, [{sha: 'e'.repeat(40), author: 'Second <s>', committed_at: t}, {sha: 'f'.repeat(40), author: 'First <f>', committed_at: t}]);
+          out.know = document.getElementById('detailView').textContent.replace(/\\s+/g, ' '); return out; })()""")
+        page.wait_for_timeout(400)
+        check("an undated incident is 'recent', open by default, and shows a resolution without a resolved date", "recent" in dv["inc"] and "OPEN" in dv["inc"].upper() and "fixed" in dv["inc"] and "Resolved:" not in dv["inc"], dv["inc"][:300])
+        check("an entry last changed by someone other than its author names both", "Authored by First" in dv["know"] and "Last updated by Second" in dv["know"], dv["know"][:300])
+        nh = ev("""async () => { const real = window.fetch; const body = o => Promise.resolve(new Response(JSON.stringify(o), {status: 200}));
+          window.fetch = u => String(u).includes('/history') ? Promise.resolve(new Response('{}', {status: 404})) : String(u).includes('?at=') ? body({key: 'nh', title: 'NH'}) : body({key: 'nh', title: 'NH', body: 'b'});
+          App.detailCache.clear(); App.entryPrefetch.clear(); await selectEntry('nh', false); const h = App.detailCache.get('nh').history.length;
+          App.verDiffs.clear(); App.verSnaps.clear(); App.verKey = 'nh'; App.currentHistoryList = [{sha: '9'.repeat(40), committed_at: new Date().toISOString()}]; await verLoadDiffs();
+          const d = App.verDiffs.get('nh@' + '9'.repeat(40)); window.fetch = real; return [h, d]; }""")
+        check("an entry with no history has none; a first version whose snapshot has no body counts zero lines", nh[0] == 0 and nh[1] == {"created": True, "lines": 0}, nh)
+        led2 = ev("""__t.swap({activity: null, audit: null, ledEvents: null, ledOpenFolds: undefined}, () => { renderFeed(); const a = document.getElementById('ledBody').textContent; ledLoadVisible();
+          App.activity = [{ts: new Date().toISOString(), action: 'updated', kind: 'knowledge', key: 'k', title: 'K'}]; App.audit = [{ts: new Date(Date.now() + 5e3).toISOString(), path: '/search', query: 'q=a', ip: '1'}, {ts: new Date(Date.now() + 6e3).toISOString(), path: '/search', query: 'q=b', ip: '2'}];
+          const real = window.ledLoadVisible; window.ledLoadVisible = () => {}; renderFeed(); window.ledLoadVisible = real; return [a, document.querySelector('#ledBody .led-fold').textContent.replace(/\\s+/g, ' ')]; })""")
+        check("a ledger with no data says so; two searches by two agents are plural", "No changes recorded yet" in led2[0] and "2 searches by 2 agents" in led2[1], led2)
+        ev("renderFeed()")
+        rt2 = ev(f"""async () => {{ const out = {{}}; switchTab('tasks'); history.replaceState(null, '', location.pathname); window.dispatchEvent(new HashChangeEvent('hashchange')); await __t.wait(150); out.bare = App.activeTab;
+          switchTab('feed'); location.hash = '#/?x=1'; await __t.wait(150); out.rootless = App.activeTab; return out; }}""")
+        check("no hash at all, and a hash with only a query, both mean Knowledge", rt2 == {"bare": "search", "rootless": "search"}, rt2)
+        ev(f"location.hash = '#/search'; selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)
+
+
+        # ------------------------------------------------------------------
+        # Nothing a person can see is covered by something else, in any state.
+        # ------------------------------------------------------------------
+        ev("document.querySelectorAll('#toastContainer .toast').forEach(t => t.remove())")
+        states = [("knowledge list and card", f"location.hash = '#/knowledge/{N}'", f"App.selectedKey === '{N}' && document.getElementById('verList')"),
+                  ("card: Versions", "switchDetailTab('history')", "App.detailTab === 'history'"),
+                  ("card: Raw", "switchDetailTab('raw')", "App.detailTab === 'raw'"),
+                  ("incident card", f"switchDetailTab('content'); location.hash = '#/knowledge/{I}-open0'", f"App.selectedKey === '{I}-open0' && document.querySelector('.incident-hero-panel')"),
+                  ("task card", f"location.hash = '#/knowledge/{K}'", f"App.selectedKey === '{K}' && document.querySelector('.task-hero-panel')"),
+                  ("incidents", "location.hash = '#/incidents'", "App.activeTab === 'incidents' && document.querySelector('#incidentRows .inc-r')"),
+                  ("incidents: a queue selected", "incSelectQueue('unverifiable')", "App.incidentQueue === 'unverifiable'"),
+                  ("tasks", "incClearCell(); location.hash = '#/tasks'", "App.activeTab === 'tasks' && document.querySelector('#taskRows .inc-r')"),
+                  ("ledger", "location.hash = '#/feed'", "App.activeTab === 'feed' && document.querySelector('#ledBody .led-ev')"),
+                  ("graph", "location.hash = '#/graph'; closeGraphDrawer()", "App.activeTab === 'graph'"),
+                  ("graph with the drawer open", f"openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))", "document.getElementById('graphDrawer').classList.contains('open')"),
+                  ("new-entry dialog: knowledge", "closeGraphDrawer(); location.hash = '#/search'; openNewModal('knowledge')", "document.querySelector('#newModal.open')"),
+                  ("new-entry dialog: incident", "switchNewModalType('incident')", "App.newModalKind === 'incident'"),
+                  ("new-entry dialog: task", "switchNewModalType('task')", "App.newModalKind === 'task'"),
+                  ("edit dialog", f"closeModal('newModal'); openEditModal('{K}')", "document.querySelector('#editModal.open')"),
+                  ("resolve-incident dialog", f"closeModal('editModal'); openResolveIncidentModal('{I}-open0', 't')", "document.querySelector('#resolveIncidentModal.open')"),
+                  ("done dialog", f"openResolveTaskModal('{K}', 't')", "document.querySelector('#resolveTaskModal.open')"),
+                  ("block dialog", f"promptBlockTask('{K}', 't')", "document.querySelector('#blockTaskModal.open')"),
+                  ("shortcuts dialog", "openShortcutsModal()", "document.querySelector('#shortcutsModal.open')")]
+        for name, act, ready in states:
+            ev(act)
+            page.wait_for_function(ready, timeout=8000)
+            page.wait_for_timeout(450)  # slide-in transitions
+            scope = ".modal-backdrop.open" if "dialog" in name else None
+            cov = ev(f"__t.covered({scope!r})" if scope else "__t.covered()")
+            check(f"nothing is covered: {name}", cov == [], cov[:6])
+        ev("[...document.querySelectorAll('.modal-backdrop.open')].forEach(m => m.classList.remove('open'))")
+
+        # and the controls are pressed for real: Playwright refuses to click what is hidden, disabled or covered
+        ev(f"location.hash = '#/graph'; openGraphDrawer(App.graphNodes.find(n => n.id === '{N}'))")
+        page.wait_for_timeout(450)
+        for label in ("Stabilize", "Fit to View", "+ Zoom", "- Zoom", "Unpin All", "Reset"):
+            page.click(f".graph-controls-bar button:text-is('{label}')")
+        check("graph bar: all six controls can be pressed with the drawer open", True)
+        for btn in ("layoutRadarBtn", "layoutHierarchyBtn", "layoutGridBtn", "layoutOrbitBtn", "gFilterKnowledge", "gFilterIncidents", "gFilterTasks", "gFilterAll"):
+            page.click(f"#{btn}")
+        check("graph panel: layout and filter buttons pressed", ev("App.graphLayout") == "orbit" and ev("App.graphFilter") == "all")
+        page.click("#graphDrawer button[onclick='closeGraphDrawer()']")
+        check("drawer: its close button closes it", not ev("document.getElementById('graphDrawer').classList.contains('open')"))
+        for tab in ("incidents", "tasks", "graph", "feed", "search"):
+            page.click(f".nav-tab[data-tab='{tab}']")
+            check(f"nav: pressing {tab}", ev("App.activeTab") == tab)
+        page.click("#refreshBtn")
+        page.click("#btnOpenNew")
+        page.wait_for_function("document.querySelector('#newModal.open')", timeout=5000)
+        page.click("#modalTypeTask"); page.click("#modalTypeIncident"); page.click("#modalTypeKnowledge")
+        page.fill("#newTitle", "Typed By Hand")
+        check("typing a title fills the key as you type", page.input_value("#newKey") == "typed-by-hand")
+        page.fill("#newKey", f"typed-{stamp}")
+        page.fill("#newBody", "Typed and clicked.")
+        page.fill("#newTags", "typed, clicked")
+        page.click("#newModalSubmitBtn")
+        page.wait_for_function(f"App.selectedKey === 'typed-{stamp}' && !document.querySelector('#newModal.open')", timeout=8000)
+        s, e = api(base, "GET", f"/knowledge/typed-{stamp}")
+        check("an entry created with keyboard and mouse only", s == 200 and e.get("title") == "Typed By Hand" and e.get("tags") == ["typed", "clicked"], (s, e))
+        page.click("#btnEditEntry")
+        page.wait_for_function("document.querySelector('#editModal.open')", timeout=5000)
+        page.fill("#editTitle", "Typed By Hand, Edited")
+        page.click("#editModalSubmitBtn")
+        page.wait_for_function("!document.querySelector('#editModal.open')", timeout=8000)
+        s, e = api(base, "GET", f"/knowledge/typed-{stamp}")
+        check("and edited the same way", e.get("title") == "Typed By Hand, Edited" and e.get("tags") == ["typed", "clicked"], e)
+        page.click(".detail-tab:text('Versions')")
+        page.wait_for_function("document.querySelectorAll('#verList .ver-ev').length === 2", timeout=8000)
+        page.click("#verList .ver-ev >> nth=0 >> a.tx")
+        page.wait_for_function("document.querySelectorAll('#verList .ver-text').length === 1", timeout=5000)
+        check("Versions: 'text at v2' pressed shows that version's text", "Typed and clicked." in page.locator("#verList .ver-text").inner_text() and "Typed By Hand, Edited" in page.locator("#verList .ver-text").inner_text(), page.locator("#verList .ver-text").inner_text()[:120])
+        page.click(".detail-tab:text('Raw')"); page.click(".detail-tab:text('Document')")
+        page.click("#btnCopyDirectLink")
+        page.wait_for_timeout(150)
+        check("Link pressed copies this entry's link", ev("navigator.clipboard.readText()") == f"{base}/#/knowledge/typed-{stamp}")
+        page.click(f"#knowledgeList .item-card[data-key='kyb-service']")
+        page.wait_for_function("App.selectedKey === 'kyb-service'", timeout=5000)
+        check("a list card pressed opens it", True)
+        page.click("#tagPills .badge-tag >> nth=0")
+        check("a tag pill pressed filters by it", ev("App.tagFilter") is not None)
+        page.fill("#globalSearch", "")
+        page.select_option("#sortSelect", "az")
+        check("the sort menu sorts", ev("getFilteredEntries().map(e => (e.title || e.key).toLowerCase())") == sorted(ev("getFilteredEntries().map(e => (e.title || e.key).toLowerCase())")))
+        page.select_option("#sortSelect", "newest")
+        page.click(".chip[data-filter='task']"); page.click(".chip[data-filter='all']")
+        page.click(".nav-tab[data-tab='incidents']")
+        page.click("#incQueue .b >> nth=1")
+        check("incident queue pressed", ev("App.incidentQueue") == "unverifiable")
+        page.click("#incQueue .b >> nth=1")
+        page.click("#incTop .chip:text-is('resolved')"); page.click("#incTop .chip:text-is('open + mitigated')")
+        page.click("#incTop .chip:text-is('high')"); page.click("#incTop .chip:text-is('any severity')")
+        page.click("#incidentRows .inc-r >> nth=1")
+        check("an incident row pressed takes the cursor", ev("App.incidentCursor") == 1)
+        page.click("#incidentRows .inc-peek button:text('Resolve')")
+        page.wait_for_function("document.querySelector('#resolveIncidentModal.open')", timeout=5000)
+        page.fill("#resolveIncidentOutcome", "Resolved by pressing the button.")
+        rkey = ev("App.activeResolveKey")
+        page.click("#resolveIncidentModal button[onclick='submitResolveIncident()']")
+        page.wait_for_function("!document.querySelector('#resolveIncidentModal.open')", timeout=8000)
+        s, e = api(base, "GET", f"/knowledge/{rkey}")
+        check("an incident resolved by pressing Resolve", e.get("status") == "resolved" and "pressing" in e.get("resolution", ""), e.get("status"))
+        page.click(".nav-tab[data-tab='tasks']")
+        page.click("#taskQueue .b >> nth=0"); page.click("#taskQueue .b >> nth=0")
+        page.click("#taskTop .chip:text-is('blocked')"); page.click("#taskTop .chip:text-is('live')")
+        page.click("#taskRows .inc-r >> nth=0")
+        tkey = ev("taskFiltered()[App.taskCursor].key")
+        page.select_option("#taskRows .inc-r.cur select", "in_progress")
+        page.wait_for_function(f"App.tasks.find(t => t.key === '{tkey}').status === 'in_progress'", timeout=8000)
+        check("a task moved with its Move menu", api(base, "GET", f"/knowledge/{tkey}")[1].get("status") == "in_progress")
+        page.click(".nav-tab[data-tab='feed']")
+        page.click("#ledTop .chip:text-is('tasks')"); page.click("#ledTop .chip:text-is('everything')")
+        check("ledger chips pressed", ev("App.activityFilter") == "all")
+        page.click(".nav-tab[data-tab='search']")
+
+
+        # the last two dozen blocks
+        ev("location.hash = '#/graph'")
+        page.wait_for_function("App.activeTab === 'graph' && (App.graphNodes || []).length > 0", timeout=8000)
+        last = ev(f"""async () => {{ const out = {{}}; const cv = document.getElementById('topoCanvas'); const b = cv.getBoundingClientRect();
+          // a frame, a mouse and a rebuild with no graph at all
+          // the 4-second refresh rebuilds the graph; hold it off so "no graph" stays true for these frames
+          const rebuild = window.buildTopology; window.buildTopology = () => {{}};
+          const nodes = App.graphNodes, links = App.graphLinks; App.graphNodes = null; App.graphLinks = null; await __t.wait(120);
+          const at = (x, y) => ({{clientX: b.left + x, clientY: b.top + y, preventDefault() {{}}, deltaY: -1}});
+          cv.onmousedown(at(60, b.height - 60)); window.onmouseup(); cv.onmousedown(at(500, 300)); window.onmousemove(at(520, 310)); window.onmouseup(); window.onmousemove(at(500, 300)); cv.ondblclick(at(500, 300));
+          openGraphDrawer({{id: 'no-links', label: 'n', type: 'knowledge', data: {{body: 'b'}}}}); out.noLinks = document.getElementById('drawerLinks').textContent.includes('No active links'); closeGraphDrawer();
+          out.noCanvasLayout = __t.without('topoCanvas', () => {{ App.graphNodes = nodes; calculateLayoutTargets('orbit'); return true; }});
+          App.graphNodes = nodes; App.graphLinks = links;   // the rebuild stays held off: the steps below edit this same node list
+          // physics with two nodes on the same spot and a link of zero length
+          const [a, c] = nodes.filter(n => !n.isHub); const keep = [a.x, a.y, c.x, c.y, a.pinned, c.pinned]; c.x = a.x; c.y = a.y; a.pinned = c.pinned = false; links.push({{source: a, target: c}}); reheatSimulation(1); await __t.wait(150);
+          out.finite = [a.x, a.y, c.x, c.y].every(Number.isFinite); links.pop(); [a.x, a.y, c.x, c.y, a.pinned, c.pinned] = keep;
+          // a node with no label is drawn, a search dims the rest
+          nodes.push({{id: 'nolabel', type: 'knowledge', x: 300, y: 300, vx: 0, vy: 0, radius: 9, pinned: true}}); await __t.wait(120); nodes.pop();
+          setTopoSearch('kyb'); await __t.wait(200); out.searchCount = document.getElementById('topoSearchCount').textContent; setTopoSearch('');
+          // a drawer for a node that carries no body fetches it
+          openGraphDrawer({{id: '{N}', label: 'x', type: 'knowledge'}}); await __t.wait(600); out.fetchedBody = document.getElementById('drawerContent').textContent.includes('UI test'); closeGraphDrawer();
+          // radar with entries that belong to no service; a rebuild with no layout chosen
+          await __t.swap({{entries: [{{key: 'orphan-a'}}, {{key: 'orphan-b'}}], graphLayout: ''}}, () => {{ const n2 = App.graphNodes, l2 = App.graphLinks; try {{ rebuild(); calculateLayoutTargets('radar'); out.orphans = App.graphNodes.every(n => Number.isFinite(n.targetX)); }} finally {{ App.graphNodes = n2; App.graphLinks = l2; }} }});
+          window.buildTopology = rebuild; buildTopology(); return out; }}""")
+        check("the graph survives having no data mid-frame, a missing canvas, coincident nodes, an unlabelled node and orphans", last["noLinks"] and last["noCanvasLayout"] and last["finite"] and last["orphans"], last)
+        check("graph search counts its matches while drawing", "matching node" in last["searchCount"], last["searchCount"])
+        check("a drawer opened on a bare node fetches the body", last["fetchedBody"], last)
+        led3 = ev("""async () => { switchTab('feed'); const calls = []; const real = window.ledFetchDiffs; window.ledFetchDiffs = async evs => { calls.push(evs.length); return false; };
+          renderFeed(); await __t.wait(30);                                   // the ordinary load, through the stub, finishes first
+          App.ledEvents = null; App.ledLoading = false; ledLoadVisible(); const asked = calls[calls.length - 1];   // the loader calls the fetcher synchronously
+          await __t.wait(30); window.ledFetchDiffs = real; return [asked, App.ledLoading]; }""")
+        check("with no event list the ledger loader asks for nothing and does not stay 'loading'", led3 == [0, False], led3)
+        noip = ev("""__t.swap({activity: [{ts: new Date().toISOString(), action: 'updated', kind: 'knowledge', key: 'k', title: 'K'}], audit: [{ts: new Date(Date.now() + 5e3).toISOString(), path: '/search', query: 'q=anon'}], ledOpenFolds: new Set([0])}, () => {
+          const real = window.ledLoadVisible; window.ledLoadVisible = () => {}; renderFeed(); window.ledLoadVisible = real; return document.querySelector('#ledBody .led-q').textContent.replace(/\\s+/g, ' ').trim(); })""")
+        check("a logged search with no address still lists its query", "anon" in noip, noip)
+        ev("renderFeed()")
+        n_err = len(errors)
+        se = ev(f"""async () => {{ await openEditModal('{N}'); await __t.wait(200); const real = window.fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response('{{}}', {{status: 500}})) : real(u, o);
+          await submitEditModal(); window.fetch = real; const t = [...document.querySelectorAll('#toastContainer .toast.error')].map(x => x.textContent).pop(); closeModal('editModal'); return t; }}""")
+        forgive_console(n_err)  # mocked HTTP errors are not logged by the UI; nothing to forgive
+        check("a server error with no message is still named", "Server error" in se, se)
+        ev(f"location.hash = '#/search'; selectEntry('{N}')")
+        page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)
+
         check("no script errors in the per-function checks", not errors, "; ".join(errors[:3]))
+        pct = report_coverage(cdp.send("Profiler.takePreciseCoverage")["result"], base, coverage) if cdp else None
         browser.close()
+    return pct
 
 
 if __name__ == "__main__":

@@ -43,7 +43,10 @@
       border-radius: 8px;
       backdrop-filter: blur(8px);
       z-index: 50;
+      transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
+    /* The drawer opens over the same corner; the bar steps aside instead of covering the drawer's own buttons. */
+    .graph-drawer.open ~ .graph-controls-bar { right: calc(380px + 14px + 12px); }
 
     .node-hud {
       position: absolute;

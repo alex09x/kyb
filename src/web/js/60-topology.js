@@ -30,7 +30,7 @@
       App.entries.forEach(e => {
         let svc = e.service;
         if (!svc && e.tags && e.tags.length) {
-          const t = e.tags.find(tag => !hostSet.has(tag.toLowerCase().trim()));
+          const t = e.tags.find(tag => typeof tag === 'string' && !hostSet.has(tag.toLowerCase().trim()));  // a tag an agent wrote as a number must not take the graph down
           if (t) svc = t;
         }
         if (svc) serviceSet.add(svc.toLowerCase().trim());
@@ -108,7 +108,7 @@
       App.entries.forEach(e => {
         const isInc = e.kind === 'incident';
         const isTask = e.kind === 'task';
-        const svc = (e.service || (e.tags && e.tags[0]) || 'system').toLowerCase();
+        const svc = String(e.service || (e.tags && e.tags.find(t => typeof t === 'string')) || 'system').toLowerCase();
         const prev = existingPosMap.get(e.key);
 
         let startX, startY;
@@ -150,11 +150,10 @@
 
       // 5. Connect Links & Calculate Satellite Counts
       App.entries.forEach(e => {
-        const srcNode = nodeMap.get(e.key);
-        if (!srcNode) return;
+        const srcNode = nodeMap.get(e.key);  // step 4 added a node for every entry
 
         // Connect to Service Hub
-        const svc = (e.service || (e.tags && e.tags[0]) || '').toLowerCase();
+        const svc = String(e.service || (e.tags && e.tags.find(t => typeof t === 'string')) || '').toLowerCase();
         if (svc && nodeMap.has('svc:' + svc)) {
           const sHub = nodeMap.get('svc:' + svc);
           links.push({ source: srcNode, target: sHub });
@@ -217,7 +216,7 @@
     let graphAnimId = null;
     let camera = { x: 0, y: 0, zoom: 1 };
     // Read-only view of the camera for tests and the HUD; the state itself stays private.
-    function graphCamera() { return { ...camera, targetZoom: (typeof targetCamera !== 'undefined' && targetCamera) ? targetCamera.zoom : camera.zoom }; }
+    function graphCamera() { return { ...camera, targetZoom: targetCamera ? targetCamera.zoom : camera.zoom, moving: !!targetCamera }; }
     let targetCamera = null;
     let draggedNode = null;
     let dragStartPos = { x: 0, y: 0 };
@@ -390,7 +389,6 @@
 
       function checkResize() {
         const parent = canvas.parentElement;
-        if (!parent) return;
         const w = parent.clientWidth;
         const h = parent.clientHeight;
         if (w > 0 && h > 0) {
@@ -696,7 +694,7 @@
             ctx.font = '10px -apple-system, sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(n.label.slice(0, 16), rx + 18, n.y);
+            ctx.fillText((n.label || '').slice(0, 16), rx + 18, n.y);
           }
 
           // Pinned indicator
@@ -794,8 +792,8 @@
 
         // Check Mini-Map Click Navigation
         const parent = canvas.parentElement;
-        const width = parent ? parent.clientWidth : 960;
-        const height = parent ? parent.clientHeight : 640;
+        const width = parent.clientWidth;
+        const height = parent.clientHeight;
         const mmW = 150, mmH = 95, mmX = 18, mmY = height - mmH - 18;
 
         if (mx >= mmX && mx <= mmX + mmW && my >= mmY && my <= mmY + mmH) {
@@ -862,7 +860,7 @@
           }
         }
         hoveredNode = found;
-        canvas.style.cursor = found ? 'pointer' : (isPanning ? 'grabbing' : 'grab');
+        canvas.style.cursor = found ? 'pointer' : 'grab';  // while panning this line is never reached
       };
 
       window.onmouseup = () => {
