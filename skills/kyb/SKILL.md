@@ -197,7 +197,9 @@ kubernetes, `orders api` reaches the key `orders-api-deploy`.
 ## 6. Read an entry and its history
 
 ```bash
-kyb query "..." --as-of 2026-08-01  # what the base said then, one version per key
+kyb query "..." --as-of 2026-08-01  # what the base said then: the version current at that
+                                    # instant per key (never a superseded one that still had
+                                    # the word), knowledge deleted by then absent
 kyb query "" --changed-between 2026-08-01,2026-08-07   # what moved while you were away
 kyb diff <key> [--from <rev>] [--to <rev>]             # what changed in it, field by field
 # these three check /healthz first: an older server would ignore the parameter

@@ -1709,6 +1709,13 @@ async fn remove_committed(
             }
             Ok(Some(sha)) => {
                 st.index.delete_head(w, key);
+                let at = st
+                    .store
+                    .rev_time(&sha)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| chrono::Utc::now().timestamp());
+                st.index.retract(key, at);
                 if let Err(e) = st.index.commit_and_reload(w) {
                     return err500(
                         e.context("git committed but the index was not updated — run POST /reindex"),
@@ -2539,6 +2546,19 @@ mod api_tests {
         let (st, _) =
             call(&app, "GET", "/search?q=port&as_of=2026-08-01T12%3A00%3A00Z", None).await;
         assert_eq!(st, StatusCode::OK);
+    }
+
+    /// A deletion made through the API is a retraction the snapshot sees at
+    /// once, without a reindex; history still knows the entry existed.
+    #[tokio::test]
+    async fn search_as_of_forgets_an_entry_deleted_over_http() {
+        let (app, _data, _idx) = app_with_tmp();
+        call(&app, "POST", "/knowledge", Some(upsert_body("svc", "the port is 8080"))).await;
+        assert_eq!(call(&app, "DELETE", "/knowledge/svc", None).await.0, StatusCode::OK);
+        let (_, v) = call(&app, "GET", "/search?q=port&as_of=2999-01-01", None).await;
+        assert_eq!(v["count"], 0, "retracted before T: no current version, got {v}");
+        let (_, v) = call(&app, "GET", "/search?q=port&history=true", None).await;
+        assert_eq!(v["count"], 1, "history still has the version that existed");
     }
 
     #[rstest]

@@ -3,7 +3,7 @@ use crate::store::Store;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use tantivy::collector::TopDocs;
+use tantivy::collector::{Count, DocSetCollector, TopDocs};
 use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, FAST, INDEXED, STORED,
@@ -11,18 +11,12 @@ use tantivy::schema::{
 };
 use tantivy::tokenizer::{Language, LowerCaser, SimpleTokenizer, Stemmer, TextAnalyzer};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::RwLock;
 use tantivy::{Index, IndexReader, IndexWriter, Order, TantivyDocument, Term};
 
 /// Russian stemmer: bodies are mostly Russian; latin identifiers
 /// (CreateOrUpdateStream, NATS) pass through unchanged after lowercasing.
 const ANALYZER: &str = "ru_stem";
-
-/// How many history documents an as_of query collects before collapsing to one
-/// per key. The base is designed for hundreds to thousands of entries, so this
-/// covers the whole matching set rather than a sliding window - a key with a
-/// long revision history must not be able to crowd the result with its own
-/// superseded versions.
-const AS_OF_CANDIDATES: usize = 10_000;
 
 pub struct Fields {
     doc_id: Field,
@@ -86,6 +80,11 @@ pub struct SearchIndex {
     /// Next insertion sequence number; rebuilt by reindex(), advanced by
     /// upsert_head(). Startup always reindexes, so it is never stale.
     next_seq: AtomicU64,
+    /// Retracted knowledge: key -> (committed_at, seq) of every deletion. Not a
+    /// document - nothing should ever find a tombstone - but the as_of snapshot
+    /// needs to know that a key had stopped existing by T. Rebuilt by
+    /// reindex(), extended by retract(); startup always reindexes.
+    tombstones: RwLock<HashMap<String, Vec<(i64, u64)>>>,
 }
 
 #[derive(serde::Serialize)]
@@ -274,7 +273,13 @@ impl SearchIndex {
             updated_at: f("updated_at"),
         };
         let reader = index.reader()?;
-        Ok(SearchIndex { index, reader, fields, next_seq: AtomicU64::new(1) })
+        Ok(SearchIndex {
+            index,
+            reader,
+            fields,
+            next_seq: AtomicU64::new(1),
+            tombstones: RwLock::new(HashMap::new()),
+        })
     }
 
     pub fn writer(&self) -> Result<IndexWriter> {
@@ -382,6 +387,13 @@ impl SearchIndex {
         w.delete_term(Term::from_field_text(self.fields.doc_id, &head_doc_id(key)));
     }
 
+    /// A knowledge entry was deleted now: from this instant on, an as_of
+    /// snapshot no longer has a current version of it.
+    pub fn retract(&self, key: &str, committed_at: i64) {
+        let seq = self.next_seq.fetch_add(1, AtomicOrdering::SeqCst);
+        self.tombstones.write().unwrap().entry(key.to_string()).or_default().push((committed_at, seq));
+    }
+
     pub fn commit_and_reload(&self, w: &mut IndexWriter) -> Result<()> {
         w.commit()?;
         self.reader.reload()?;
@@ -402,7 +414,7 @@ impl SearchIndex {
         // complete generation until the replacement generation commits below.
         w.commit()?;
         // walk_history is chronological, so seq = walk order
-        let hist = store.walk_history()?;
+        let (hist, retractions) = store.walk_history_and_retractions()?;
         let mut seq = 0u64;
         let mut last: HashMap<String, (Entry, String, i64, u64)> = HashMap::new();
         for h in &hist {
@@ -410,6 +422,12 @@ impl SearchIndex {
             w.add_document(self.make_doc(&h.entry, &h.sha, h.committed_at, false, seq))?;
             last.insert(h.entry.key.clone(), (h.entry.clone(), h.sha.clone(), h.committed_at, seq));
         }
+        // a retraction after `n` documents outranks seq n and everything before it
+        let mut tombstones: HashMap<String, Vec<(i64, u64)>> = HashMap::new();
+        for r in retractions {
+            tombstones.entry(r.key).or_default().push((r.committed_at, r.after as u64));
+        }
+        *self.tombstones.write().unwrap() = tombstones;
         let heads = store.list_head()?;
         let mut live = 0usize;
         let mut alive: HashSet<&str> = HashSet::new();
@@ -543,14 +561,15 @@ impl SearchIndex {
         }
         let query = BooleanQuery::new(clauses);
         let limit = opts.limit.max(1);
-        // An as_of answer is one document per key, and which one wins is decided
-        // after retrieval - so the top-k must be taken from the whole matching
-        // set, not from a k-sized window that a single busy key could fill with
-        // its own superseded versions. The corpus is hundreds to thousands of
-        // entries by design (see the README), so collecting every match and
-        // collapsing in memory is both exact and cheap.
+        // An as_of or changed_between answer is one document per key, and which
+        // one wins is decided after retrieval - so the top-k must be taken from
+        // the whole matching set, not from a k-sized window that a single busy
+        // key could fill with its own superseded versions. The matching set is
+        // counted first, so no budget can truncate it. The corpus is hundreds to
+        // thousands of entries by design (see the README), so collecting every
+        // match and collapsing in memory is both exact and cheap.
         let collapse = as_of.is_some() || window.is_some();
-        let fetch = if collapse { limit.max(AS_OF_CANDIDATES) } else { limit };
+        let fetch = if collapse { searcher.search(&query, &Count)?.max(limit) } else { limit };
         let top: Vec<(f32, tantivy::DocAddress)> = if opts.recent {
             // seq, not committed_at: git time is 1s-granular and a write burst
             // ties on it, turning "latest first" into segment-order roulette
@@ -566,8 +585,17 @@ impl SearchIndex {
         } else {
             searcher.search(&query, &TopDocs::with_limit(fetch))?
         };
+        // as_of is a snapshot question: which version of each key was current
+        // at T is decided first, and only that version is asked whether it
+        // matches the words and the filters. Deciding after filtering would let
+        // a superseded version answer for a key whose current version at T no
+        // longer says the word, or no longer carries the status.
+        let snapshot = match as_of {
+            Some(at) => Some(self.current_version_per_key(&searcher, at, window)?),
+            None => None,
+        };
         let top = if collapse {
-            self.collapse_to_latest_per_key(&searcher, top, limit)?
+            self.collapse_to_latest_per_key(&searcher, top, limit, snapshot.as_ref())?
         } else {
             top
         };
@@ -578,7 +606,72 @@ impl SearchIndex {
         Ok(hits)
     }
 
-    /// One document per key: the newest version that survived the as_of bound.
+    /// The version of every key that was current at `at`: key -> `seq` of its
+    /// newest history document committed at or before that instant (and inside
+    /// the window, when one is set). Every history document up to T is visited,
+    /// so a key is never lost to a candidate budget; the corpus is hundreds to
+    /// thousands of entries by design, so this is a few milliseconds.
+    fn current_version_per_key(
+        &self,
+        searcher: &tantivy::Searcher,
+        at: i64,
+        window: Option<(i64, i64)>,
+    ) -> Result<HashMap<String, u64>> {
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_u64(self.fields.is_head, 0),
+                    IndexRecordOption::Basic,
+                )),
+            ),
+            (
+                Occur::Must,
+                Box::new(RangeQuery::new_i64(
+                    "committed_at".to_string(),
+                    i64::MIN..at.saturating_add(1),
+                )),
+            ),
+        ];
+        if let Some((lo, hi)) = window {
+            clauses.push((
+                Occur::Must,
+                Box::new(RangeQuery::new_i64(
+                    "committed_at".to_string(),
+                    lo..hi.saturating_add(1),
+                )),
+            ));
+        }
+        let addrs = searcher.search(&BooleanQuery::new(clauses), &DocSetCollector)?;
+        let mut current: HashMap<String, u64> = HashMap::new();
+        for addr in addrs {
+            let doc: TantivyDocument = searcher.doc(addr)?;
+            let key = doc.get_first(self.fields.key).and_then(|v| v.as_str()).unwrap_or_default();
+            let seq = doc.get_first(self.fields.seq).and_then(|v| v.as_u64()).unwrap_or(0);
+            match current.get_mut(key) {
+                Some(best) => *best = (*best).max(seq),
+                None => {
+                    current.insert(key.to_string(), seq);
+                }
+            }
+        }
+        // a knowledge entry deleted by T, and not written again since, had no
+        // current version at T
+        let tombstones = self.tombstones.read().unwrap();
+        current.retain(|key, seq| {
+            !tombstones
+                .get(key)
+                .is_some_and(|ts| ts.iter().any(|(t_at, t_seq)| *t_at <= at && *t_seq >= *seq))
+        });
+        Ok(current)
+    }
+
+    /// One document per key.
+    ///
+    /// With a snapshot (as_of), a row survives only if it is the version that
+    /// was current at T - a superseded version that still matched the query is
+    /// dropped even when nothing newer matched. Without one (changed_between),
+    /// the newest matching version inside the window wins.
     ///
     /// Ordering is by `seq`, the chronological walk position assigned when the
     /// index was built, never by `committed_at` - git timestamps are 1s-granular
@@ -590,6 +683,7 @@ impl SearchIndex {
         searcher: &tantivy::Searcher,
         top: Vec<(f32, tantivy::DocAddress)>,
         limit: usize,
+        snapshot: Option<&HashMap<String, u64>>,
     ) -> Result<Vec<(f32, tantivy::DocAddress)>> {
         let mut best: HashMap<String, (u64, usize)> = HashMap::new();
         let mut rows: Vec<(f32, tantivy::DocAddress)> = Vec::with_capacity(top.len());
@@ -601,6 +695,15 @@ impl SearchIndex {
                 .unwrap_or_default()
                 .to_string();
             let seq = doc.get_first(self.fields.seq).and_then(|v| v.as_u64()).unwrap_or(0);
+            if let Some(current) = snapshot {
+                if current.get(&key) == Some(&seq) {
+                    rows.push((score, addr));
+                    if rows.len() == limit {
+                        break;
+                    }
+                }
+                continue;
+            }
             let idx = rows.len();
             rows.push((score, addr));
             match best.get(&key) {
@@ -609,6 +712,9 @@ impl SearchIndex {
                     best.insert(key, (seq, idx));
                 }
             }
+        }
+        if snapshot.is_some() {
+            return Ok(rows);
         }
         let keep: HashSet<usize> = best.values().map(|(_, idx)| *idx).collect();
         Ok(rows
@@ -1081,6 +1187,102 @@ mod tests {
         let hits = index.search("value", &opts).unwrap();
         assert_eq!(hits.len(), 1, "still exactly one row per key");
         assert!(hits[0].body.contains("value two"), "a tie resolves to the later version");
+    }
+
+    /// The snapshot is chosen before it is searched. A version that was already
+    /// superseded at T must not answer for its key just because it still says
+    /// the word - or still carries the status - that the version current at T
+    /// no longer does.
+    #[test]
+    fn as_of_never_answers_from_a_version_already_superseded_at_that_instant() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+
+        store.upsert(entry("svc", "Service", "runs on legacyhost"), "2026-07-19").unwrap();
+        let mut inc = entry("inc-1", "Outage", "the api was down");
+        inc.kind = "incident".into();
+        inc.service = "api".into();
+        inc.status = "open".into();
+        store.upsert(inc.clone(), "2026-07-19").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        store.upsert(entry("svc", "Service", "runs on newhost"), "2026-07-20").unwrap();
+        inc.status = "resolved".into();
+        store.upsert(inc, "2026-07-20").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let after_both = chrono::Utc::now().timestamp();
+
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+
+        // the word was removed by the version current at T: no answer, not the old one
+        let at = |q: &str, status: Option<&str>| {
+            let opts = SearchOpts {
+                as_of: Some(after_both),
+                status: status.map(String::from),
+                limit: 10,
+                ..Default::default()
+            };
+            index.search(q, &opts).unwrap()
+        };
+        assert!(
+            at("legacyhost", None).is_empty(),
+            "a superseded version must not answer: {:?}",
+            at("legacyhost", None).iter().map(|h| &h.body).collect::<Vec<_>>()
+        );
+        let hits = at("newhost", None);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].body.contains("newhost"));
+
+        // the same for a filter: the incident was resolved by T, so it is not open at T
+        assert!(at("", Some("open")).is_empty(), "status is read from the version current at T");
+        let hits = at("", Some("resolved"));
+        assert_eq!(hits.iter().map(|h| h.key.as_str()).collect::<Vec<_>>(), vec!["inc-1"]);
+    }
+
+    /// A retracted knowledge entry stops existing at the instant of its deletion:
+    /// before it the snapshot has it, after it nothing does - until it is written
+    /// again. An archived incident is not a retraction; it stays findable at its
+    /// last version, as it does at head.
+    #[test]
+    fn as_of_forgets_retracted_knowledge_from_the_instant_of_its_deletion() {
+        let data = tempfile::tempdir().unwrap();
+        let idxd = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let index = SearchIndex::open_or_create(idxd.path()).unwrap();
+        let pause = || std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        store.upsert(entry("gone", "Gone", "an ephemeral fact"), "2026-07-19").unwrap();
+        let mut inc = entry("inc-old", "Old outage", "the queue was stuck");
+        inc.kind = "incident".into();
+        inc.service = "queue".into();
+        inc.status = "resolved".into();
+        store.upsert(inc, "2026-07-19").unwrap();
+        pause();
+        let while_alive = chrono::Utc::now().timestamp();
+        pause();
+        store.delete("gone").unwrap();
+        store.archive("inc-old").unwrap();
+        pause();
+        let after_deletion = chrono::Utc::now().timestamp();
+
+        let mut w = index.writer().unwrap();
+        index.reindex(&mut w, &store).unwrap();
+        let at = |q: &str, t: i64| {
+            let opts = SearchOpts { as_of: Some(t), limit: 10, ..Default::default() };
+            index.search(q, &opts).unwrap()
+        };
+        assert_eq!(at("ephemeral", while_alive).len(), 1, "it existed then");
+        assert!(at("ephemeral", after_deletion).is_empty(), "retracted: no current version at T");
+        assert_eq!(at("queue", after_deletion).len(), 1, "archived is not retracted");
+
+        // written again with the very same text: a new version, current from then on
+        pause();
+        store.upsert(entry("gone", "Gone", "an ephemeral fact"), "2026-07-22").unwrap();
+        index.reindex(&mut w, &store).unwrap();
+        assert!(at("ephemeral", after_deletion).is_empty(), "still gone at the earlier instant");
+        assert_eq!(at("ephemeral", chrono::Utc::now().timestamp() + 60).len(), 1, "back since the rewrite");
     }
 
     #[test]
