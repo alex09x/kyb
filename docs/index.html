@@ -138,7 +138,7 @@
     </h1>
 
     <p style="font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 62ch; margin: 0 0 20px; text-wrap: pretty;">
-      <strong style="color: var(--text); font-weight: 600;">KYB — Know Your Business</strong> is a git-backed, searchable knowledge base for fleets of AI agents. Which servers exist, how services are wired, what broke and how it ended, what is still open — the operational truth that survives between sessions and across machines. Every write says which agent made it, from which session and workspace.
+      <strong style="color: var(--text); font-weight: 600;">KYB — Know Your Business</strong> is a git-backed, searchable knowledge base for fleets of AI agents. Which servers exist, how services are wired, what broke and how it ended, what is still open — the operational truth that survives between sessions and across machines. Every write keeps the attribution its client supplied: which agent, and when known, which session and workspace.
     </p>
 
     <div style="display: flex; flex-wrap: wrap; gap: 9px; margin: 26px 0 32px;">
@@ -236,7 +236,7 @@
       <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--accent); font-size: 18px; margin-bottom: 16px;">✎</div>
         <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 19px; margin: 0 0 8px;">Every write says who</h3>
-        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">Each commit carries the agent, its session and the workspace it ran in — as git trailers, as <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">by</span> in history and the ledger, on every version in the console. <strong style="color: var(--text); font-weight: 600;">Forensics, not identity:</strong> attribution grants nothing; tokens do.</p>
+        <p style="margin: 0; color: var(--muted); font-size: 15px; text-wrap: pretty;">A commit records the attribution its client supplied — the agent, and when known its session and the workspace it ran in — as git trailers, as <span style="font-family: 'IBM Plex Mono'; font-size: 13px;">by</span> in history and the ledger, on each version in the console. A write without context has none; older commits are not attributed after the fact. <strong style="color: var(--text); font-weight: 600;">Forensics, not identity:</strong> attribution grants nothing; tokens do.</p>
       </div>
       <div style="border-radius: 14px; border: 1px solid var(--border); background: var(--panel); padding: 24px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; font-family: 'IBM Plex Mono'; color: var(--good); font-size: 18px; margin-bottom: 16px;">⌂</div>
@@ -464,11 +464,11 @@
     <div style="border-radius: 18px; border: 1px solid var(--border); background: oklch(0.185 0.014 260 / 0.5); padding: 40px 34px;">
       <div style="font-family: 'IBM Plex Mono'; font-size: 13px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px;">// Attribution</div>
       <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; margin: 0 0 12px;">Who wrote what, on every version.</h2>
-      <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 24px; text-wrap: pretty;">Since 0.3.0 every write is committed with four trailers naming the agent, its session, the workspace it ran in and where that came from. History and the activity ledger return them as <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">by</span>; the console shows them on each version; <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">kyb whoami</span> shows what the current shell would write. Workspaces are a repository name and a path inside it, never an absolute path. The git author stays the service&#8217;s unless tokens name a principal.</p>
+      <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 24px; text-wrap: pretty;">Since 0.3.0 a write is committed with up to four trailers: the agent, its session, the workspace it ran in and where that record came from — whichever of them the client could tell; empty fields are left out, and a write with no context carries none. History and the activity ledger return them as <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">by</span>; the console shows them on each version; <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">kyb whoami</span> shows what the current shell would write. Workspaces are a repository name and a path inside it, never an absolute path. The git author stays the service&#8217;s unless tokens name a principal.</p>
 
       <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.8; overflow-x: auto; margin-bottom: 24px; white-space: pre;"><span style="color: var(--faint);">kyb: upsert inc-2026-10-11-orders-api-oom</span>
 <span style="color: var(--accent);">Kyb-Agent:</span> codex
-<span style="color: var(--accent);">Kyb-Session:</span> 01a0a36d-6157-7ae3-a75b-41dbe426ae76
+<span style="color: var(--accent);">Kyb-Session:</span> example-session-001
 <span style="color: var(--accent);">Kyb-Workspace:</span> orders-api
 <span style="color: var(--accent);">Kyb-Via:</span> cli</div>
 
@@ -487,7 +487,7 @@
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">via: headers</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Any client: <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">X-Kyb-Agent</span>, <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">X-Kyb-Session</span>, <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">X-Kyb-Workspace</span>. One record per write, chosen from one source; a session is never borrowed from a source that names another agent.</p>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Any client: <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">X-Kyb-Agent</span>, <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">X-Kyb-Session</span>, <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">X-Kyb-Workspace</span>. Sources are read in order — hook, then the client&#8217;s metadata, then headers. The agent and its session come from the first source that names an agent; a workspace missing there may come from a lower one. <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">via</span> names the agent&#8217;s source; which source filled each field is not recorded.</p>
         </div>
       </div>
       <p style="margin: 20px 0 0; color: var(--faint); font-size: 13.5px; max-width: 70ch;">The record is what the caller supplied, not an authenticated identity. <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">GET /whoami</span> echoes it back. Access is a separate matter: tokens with read, write and admin roles, off by default.</p>
@@ -506,11 +506,11 @@
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Versions</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">An entry&#8217;s own ledger: every version, newest first, with the whole of what it changed, who wrote it and from where. Any version is one click away as it was first written.</p>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">An entry&#8217;s own ledger: every version, newest first, with the whole of what it changed and, when the client said, who wrote it and from where. Any version is one click away as it was first written.</p>
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Ledger</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Activity is a change ledger: the whole change, not a feed. Each row names the agent and workspace behind it.</p>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Activity is a change ledger: the whole change, not a feed. Each row names the author when tokens identify one, otherwise the agent and workspace when the client supplied them, otherwise unknown.</p>
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Services and hosts</h3>

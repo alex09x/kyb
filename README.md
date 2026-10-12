@@ -359,10 +359,10 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 * **Queues, not boards**: incidents and tasks are attention queues — what needs a person now, with
   the reason in the row (blocked and why, open with no detection check, stale for how long).
 * **Versions**: an entry's own ledger — every version, newest first, with the whole of what it
-  changed, who wrote it (`by`: agent, session, workspace) and from where; any version readable as
-  it was first written.
-* **Ledger**: activity as a change ledger showing the whole change, each row naming the agent and
-  workspace behind it.
+  changed and, when the client supplied it, who wrote it (`by`: agent, session, workspace); any
+  version readable as it was first written.
+* **Ledger**: activity as a change ledger showing the whole change; each row names the author when
+  tokens identify one, otherwise the agent and workspace when supplied, otherwise unknown.
 * **Services and hosts**: for each service or host an incident names, what is open on it right
   now, the notes those incidents cite and the open tasks pointing at them. Every row says why it
   is listed.
