@@ -438,8 +438,13 @@
       <h2 style="font-family: 'Space Grotesk'; font-weight: 700; font-size: clamp(26px, 3.6vw, 36px); letter-spacing: -0.02em; margin: 0 0 12px;">Native MCP over HTTP.</h2>
       <p style="font-size: 17px; color: var(--muted); max-width: 64ch; margin: 0 0 24px; text-wrap: pretty;">KYB is not an MCP alternative — it speaks Model Context Protocol natively. The server serves the MCP protocol directly over HTTP at <span style="font-family: 'IBM Plex Mono'; font-size: 14px; color: var(--accent);">POST /mcp</span>. No client-side adapters, no subprocesses, and no client packages to install or update.</p>
 
-      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 14px; overflow-x: auto; margin-bottom: 24px;">
-        <span style="color: var(--good);">$</span> claude mcp add --transport http kyb http://&lt;host&gt;:9310/mcp
+      <div style="border-radius: 11px; background: var(--bg); border: 1px solid var(--border); padding: 16px 18px; font-family: 'IBM Plex Mono'; font-size: 13.5px; line-height: 1.9; overflow-x: auto; margin-bottom: 24px;">
+        <span style="display:block;"><span style="color: var(--faint);"># any client that speaks MCP over HTTP; one URL, no package</span></span>
+        <span style="display:block;"><span style="color: var(--good);">$</span> claude mcp add --transport http kyb http://&lt;host&gt;:9310/mcp   <span style="color: var(--faint);"># Claude Code</span></span>
+        <span style="display:block;"><span style="color: var(--good);">$</span> codex mcp add kyb --url http://&lt;host&gt;:9310/mcp             <span style="color: var(--faint);"># Codex</span></span>
+        <span style="display:block;"><span style="color: var(--good);">$</span> agy mcp add -t http kyb http://&lt;host&gt;:9310/mcp             <span style="color: var(--faint);"># Antigravity</span></span>
+        <span style="display:block;"><span style="color: var(--good);">$</span> gemini mcp add -t http kyb http://&lt;host&gt;:9310/mcp          <span style="color: var(--faint);"># Gemini CLI</span></span>
+        <span style="display:block;"><span style="color: var(--faint);"># Cursor, Windsurf, VS Code and the rest: their mcp.json with</span> {"kyb": {"url": "http://&lt;host&gt;:9310/mcp"}}</span>
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
@@ -453,7 +458,7 @@
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Agent skills or MCP</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Use the filesystem-based agent skill (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">skills/install.sh</span>) for terminal-driven workflows (Claude Code, Codex, Antigravity), or connect via HTTP MCP for IDEs and desktop clients.</p>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Both reach the same server. The agent skill (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">skills/install.sh</span>) gives Claude Code, Codex and Antigravity the <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">kyb</span> command and the rules for using it; MCP is for any client that would rather call tools than run a shell — IDEs, desktop apps, or those same agents. The writes are attributed either way.</p>
         </div>
       </div>
     </div>
