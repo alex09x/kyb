@@ -444,7 +444,7 @@
         <span style="display:block;"><span style="color: var(--good);">$</span> codex mcp add kyb --url http://&lt;host&gt;:9310/mcp             <span style="color: var(--faint);"># Codex</span></span>
         <span style="display:block;"><span style="color: var(--good);">$</span> agy mcp add -t http kyb http://&lt;host&gt;:9310/mcp             <span style="color: var(--faint);"># Antigravity</span></span>
         <span style="display:block;"><span style="color: var(--good);">$</span> gemini mcp add -t http kyb http://&lt;host&gt;:9310/mcp          <span style="color: var(--faint);"># Gemini CLI</span></span>
-        <span style="display:block;"><span style="color: var(--faint);"># Cursor, Windsurf, VS Code and the rest: their mcp.json with</span> {"kyb": {"url": "http://&lt;host&gt;:9310/mcp"}}</span>
+        <span style="display:block;"><span style="color: var(--faint);"># Cursor, Windsurf, VS Code and any other client that speaks MCP over HTTP: the same URL, in that client&#8217;s own configuration file and schema</span></span>
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px;">
@@ -458,7 +458,7 @@
         </div>
         <div style="border-radius: 12px; border: 1px solid var(--border); background: var(--bg); padding: 18px 20px;">
           <h3 style="font-family: 'Space Grotesk'; font-weight: 600; font-size: 16px; margin: 0 0 6px;">Agent skills or MCP</h3>
-          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Both reach the same server. The agent skill (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">skills/install.sh</span>) gives Claude Code, Codex and Antigravity the <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">kyb</span> command and the rules for using it; MCP is for any client that would rather call tools than run a shell — IDEs, desktop apps, or those same agents. The writes are attributed either way.</p>
+          <p style="margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6;">Both reach the same server. The agent skill (<span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">skills/install.sh</span>) gives Claude Code, Codex and Antigravity the <span style="font-family: 'IBM Plex Mono'; font-size: 12.5px;">kyb</span> command and the rules for using it; MCP is for any client that would rather call tools than run a shell — IDEs, desktop apps, or those same agents. Either path records attribution when the client supplies it: the CLI reads its environment, MCP needs the hook, the client&#8217;s metadata or the headers described under <a href="#attribution" style="color: var(--accent); text-decoration: none;">Attribution</a>; a client registered with nothing but the URL writes unattributed.</p>
         </div>
       </div>
     </div>

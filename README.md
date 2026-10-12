@@ -264,7 +264,9 @@ gemini mcp add -t http kyb http://<host>:9310/mcp           # Gemini CLI
 ```
 
 Cursor, Windsurf, VS Code and any other client that speaks MCP over HTTP take the same URL in
-their `mcp.json` (`{"kyb": {"url": "http://<host>:9310/mcp"}}`). That is the whole setup. The tool list comes from the server, so upgrading the server is how
+their own configuration file, in that client's schema (VS Code, for instance, lists it under
+`servers` with `type: http`). That is the whole setup on the server side; attribution of writes
+made over MCP depends on what the client sends - see [Attribution](#attribution-which-agent-wrote-what). The tool list comes from the server, so upgrading the server is how
 every connected agent gets new tools — there is no client to update, and no version of a
 client that can disagree with the server about what exists.
 
