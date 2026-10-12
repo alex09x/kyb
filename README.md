@@ -257,10 +257,16 @@ npx skills add alex09x/kyb
 The server speaks MCP itself, at `POST /mcp`. Nothing is installed on the client:
 
 ```sh
-claude mcp add --transport http kyb http://<host>:9310/mcp
+claude mcp add --transport http kyb http://<host>:9310/mcp   # Claude Code
+codex mcp add kyb --url http://<host>:9310/mcp              # Codex
+agy mcp add -t http kyb http://<host>:9310/mcp              # Antigravity
+gemini mcp add -t http kyb http://<host>:9310/mcp           # Gemini CLI
 ```
 
-That is the whole setup. The tool list comes from the server, so upgrading the server is how
+Cursor, Windsurf, VS Code and any other client that speaks MCP over HTTP take the same URL in
+their own configuration file, in that client's schema (VS Code, for instance, lists it under
+`servers` with `type: http`). That is the whole setup on the server side; attribution of writes
+made over MCP depends on what the client sends - see [Attribution](#attribution-which-agent-wrote-what). The tool list comes from the server, so upgrading the server is how
 every connected agent gets new tools — there is no client to update, and no version of a
 client that can disagree with the server about what exists.
 
