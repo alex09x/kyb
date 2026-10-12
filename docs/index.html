@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>KYB — Shared Memory &amp; Incident Tracker for AI Agent Fleets</title>
-<meta name="description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.">
+<meta name="description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, access tokens and roles optional. Open source, Rust, MIT.">
 <link rel="canonical" href="https://kybmemory.com/">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" content="#131720">
@@ -14,7 +14,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="KYB — Know Your Business">
 <meta property="og:title" content="KYB — the shared memory your AI agent fleet keeps forgetting it needs">
-<meta property="og:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.">
+<meta property="og:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, access tokens and roles optional. Open source, Rust, MIT.">
 <meta property="og:url" content="https://kybmemory.com/">
 <meta property="og:image" content="https://kybmemory.com/og.png">
 <meta property="og:image:width" content="1200">
@@ -22,7 +22,7 @@
 <meta property="og:image:alt" content="KYB — git-backed shared memory and incident tracker for AI agent fleets">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="KYB — shared memory for AI agent fleets">
-<meta name="twitter:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.">
+<meta name="twitter:description" content="KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, access tokens and roles optional. Open source, Rust, MIT.">
 <meta name="twitter:image" content="https://kybmemory.com/og.png">
 
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -34,8 +34,8 @@
 
 <script type="application/ld+json">
 {"@context":"https://schema.org","@graph":[
-{"@type":"SoftwareApplication","name":"KYB — Know Your Business","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Docker","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.","url":"https://kybmemory.com/","softwareVersion":"0.3.0","license":"https://opensource.org/licenses/MIT","programmingLanguage":"Rust","author":{"@type":"Person","name":"Alexander Panasenko","url":"https://prod.codes/about/"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"codeRepository":"https://github.com/alex09x/kyb"},
-{"@type":"WebSite","name":"KYB","url":"https://kybmemory.com/","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, no auth by design. Open source, Rust, MIT.","author":{"@type":"Person","name":"Alexander Panasenko","url":"https://prod.codes/about/"}},
+{"@type":"SoftwareApplication","name":"KYB — Know Your Business","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux, Docker","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, access tokens and roles optional. Open source, Rust, MIT.","url":"https://kybmemory.com/","softwareVersion":"0.3.0","license":"https://opensource.org/licenses/MIT","programmingLanguage":"Rust","author":{"@type":"Person","name":"Alexander Panasenko","url":"https://prod.codes/about/"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"codeRepository":"https://github.com/alex09x/kyb"},
+{"@type":"WebSite","name":"KYB","url":"https://kybmemory.com/","description":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. Fast hybrid BM25 + CPU vector search, no database, access tokens and roles optional. Open source, Rust, MIT.","author":{"@type":"Person","name":"Alexander Panasenko","url":"https://prod.codes/about/"}},
 {"@type":"FAQPage","mainEntity":[
 {"@type":"Question","name":"What is KYB?","acceptedAnswer":{"@type":"Answer","text":"KYB is a git-backed, searchable knowledge base and incident tracker for fleets of AI agents. It stores which servers exist, how services are wired, what broke and how it ended, and what work is still in flight — so the operational truth survives between agent sessions and across machines."}},
 {"@type":"Question","name":"Does KYB need a database?","acceptedAnswer":{"@type":"Answer","text":"No. Git is the canon: one markdown file per entry, one commit per change, and a commit sha is a version id. The Tantivy search index is a disposable cache rebuilt from git on every start."}},
