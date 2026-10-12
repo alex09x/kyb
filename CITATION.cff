@@ -20,16 +20,13 @@ authors:
     given-names: Alexander
     email: alex@prod.codes
     orcid: "https://orcid.org/0009-0003-3569-6490"
-version: 0.2.3
-date-released: "2026-09-23"
-doi: 10.5281/zenodo.23027682
+version: 0.3.0
+date-released: "2026-10-12"
+doi: 10.5281/zenodo.22850723
 identifiers:
   - description: "The concept DOI of the work."
     type: doi
     value: 10.5281/zenodo.22850723
-  - description: "The versioned DOI for version 0.2.3 of the work."
-    type: doi
-    value: 10.5281/zenodo.23027682
 license: MIT
 repository-code: "https://github.com/alex09x/kyb"
 url: "https://kybmemory.com"
