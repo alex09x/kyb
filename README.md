@@ -18,7 +18,7 @@ truth that survives between sessions and across machines.
 
 [![crates.io](https://img.shields.io/crates/v/knowyourbusiness?color=00b3c4&labelColor=1a1d24)](https://crates.io/crates/knowyourbusiness)
 [![license](https://img.shields.io/badge/license-MIT-00b3c4?labelColor=1a1d24)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-321_cases-2ea043?labelColor=1a1d24)](#stack--tests)
+[![tests](https://img.shields.io/badge/tests-421_cases-2ea043?labelColor=1a1d24)](#stack--tests)
 [![build](https://img.shields.io/badge/build-passing-2ea043?labelColor=1a1d24)](#stack--tests)
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
@@ -353,16 +353,27 @@ identity: it grants nothing (tokens do that) and `GET /whoami` echoes what a req
 
 ## Web UI and Control Room
 
-`kyb-server` embeds a zero-dependency, dark-mode Web UI served directly at `http://<host>:9310/`:
+`kyb-server` serves a zero-dependency, dark-mode web console at `http://<host>:9310/`, assembled
+from `src/web/css` and `src/web/js` at compile time and driven end to end by a browser test in CI:
 
-* **Live Fleet Feed**: real-time activity stream of agent reads, writes, and tool executions from the audit log.
-* **Services and hosts**: for each service or host an incident names, what is open on it right now, the notes those incidents cite and the open tasks pointing at them. Every row says why it is listed.
-* **Related entries**: each card lists what it refers to and what refers to it, taken only from typed fields (`knowledge`, `parent_task`) and internal links in the text (`[[key]]`, `[text](key)`). Shared tags are a filter, not a relation.
-* **Incident Control Center**: status board (Open / Mitigated / Resolved), executable detection check commands, and mandatory post-mortem resolutions.
-* **Agent Task Kanban**: columns for Backlog, In Progress, Blocked (with reasons highlighted), and Closed tasks.
-* **Knowledge Explorer**: instant search, full Markdown document rendering, revision histories, and line-by-line visual git diffs.
+* **Queues, not boards**: incidents and tasks are attention queues — what needs a person now, with
+  the reason in the row (blocked and why, open with no detection check, stale for how long).
+* **Versions**: an entry's own ledger — every version, newest first, with the whole of what it
+  changed and, when the client supplied it, who wrote it (`by`: agent, session, workspace); any
+  version readable as it was first written.
+* **Ledger**: activity as a change ledger showing the whole change; each row names the author when
+  tokens identify one, otherwise the agent and workspace when supplied, otherwise unknown.
+* **Services and hosts**: for each service or host an incident names, what is open on it right
+  now, the notes those incidents cite and the open tasks pointing at them. Every row says why it
+  is listed.
+* **Related entries**: each card lists what it refers to and what refers to it, taken only from
+  typed fields (`knowledge`, `parent_task`) and internal links in the text (`[[key]]`,
+  `[text](key)`). Shared tags are a filter, not a relation.
+* **Knowledge explorer**: instant search, `#tag` filters, deep links, full Markdown rendering.
+* **Tokens**: when the server asks for one, the console asks you and hides what your role cannot do.
 
 ---
+
 
 ## HTTP API
 
@@ -431,7 +442,7 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 321 cases
+cargo test        # 421 cases
 ```
 
 CI builds the image and smoke-tests that the container starts and answers `/healthz`.
