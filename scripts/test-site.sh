@@ -28,6 +28,12 @@ if missing:
     raise SystemExit(f"missing site assets: {', '.join(missing)}")
 
 
+ANALYTICS_SCRIPTS = {
+    "https://www.googletagmanager.com/gtag/js?id=G-3LG1NMQXB9",
+    "/assets/ga.js",
+}
+
+
 class SiteParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -48,8 +54,11 @@ class SiteParser(HTMLParser):
             value = values.get(attr, "")
             if value.startswith("/"):
                 self.local_assets.append(urlsplit(value).path)
+        # The only runtime scripts allowed are the Google Analytics loader and its
+        # configuration file; anything else, and any inline script, still fails.
         if tag == "script" and values.get("type") != "application/ld+json":
-            self.runtime_scripts += 1
+            if values.get("src") not in ANALYTICS_SCRIPTS:
+                self.runtime_scripts += 1
 
 
 def resolve(link):
@@ -87,7 +96,7 @@ for page in pages:
     if missing_assets:
         raise SystemExit(f"{where}: missing local assets: {', '.join(missing_assets)}")
     if parser.runtime_scripts:
-        raise SystemExit(f"{where}: the static site must not contain runtime scripts")
+        raise SystemExit(f"{where}: the static site must not contain runtime scripts other than analytics")
 
     if page.name != "404.html":
         marker = '<script type="application/ld+json">'
