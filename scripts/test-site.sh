@@ -41,8 +41,14 @@ class SiteParser(HTMLParser):
         self.anchors = []
         self.local_assets = []
         self.runtime_scripts = 0
+        self.analytics = []
 
     def handle_starttag(self, tag, attrs):
+        names = [name for name, _ in attrs]
+        if tag == "script" and len(names) != len(set(names)):
+            # The browser honours the first of two equal attributes and dict() keeps
+            # the last, so a duplicate src could smuggle a script past the allowlist.
+            raise SystemExit(f"duplicate attribute on a script element: {attrs}")
         values = dict(attrs)
         if "id" in values:
             if values["id"] in self.ids:
@@ -57,7 +63,9 @@ class SiteParser(HTMLParser):
         # The only runtime scripts allowed are the Google Analytics loader and its
         # configuration file; anything else, and any inline script, still fails.
         if tag == "script" and values.get("type") != "application/ld+json":
-            if values.get("src") not in ANALYTICS_SCRIPTS:
+            if values.get("src") in ANALYTICS_SCRIPTS:
+                self.analytics.append(values["src"])
+            else:
                 self.runtime_scripts += 1
 
 
@@ -97,6 +105,8 @@ for page in pages:
         raise SystemExit(f"{where}: missing local assets: {', '.join(missing_assets)}")
     if parser.runtime_scripts:
         raise SystemExit(f"{where}: the static site must not contain runtime scripts other than analytics")
+    if sorted(parser.analytics) != sorted(ANALYTICS_SCRIPTS):
+        raise SystemExit(f"{where}: every page carries the analytics loader and its configuration exactly once")
 
     if page.name != "404.html":
         marker = '<script type="application/ld+json">'
