@@ -85,6 +85,19 @@ fn build(st: &AppState, p: &ExportQ) -> Result<std::result::Result<String, (Stat
     // the index is read after the snapshot is fixed, so it covers it; versions
     // committed after the snapshot are filtered out by ancestry
     let ix = st.history_index()?;
+    // the index describes the history of HEAD; a commit off that line (a side
+    // branch, a dangling commit) has versions it does not know, and an export
+    // built from it could drop a key and still say complete
+    let covered = match ix.head.as_deref() {
+        Some(head) => st.store.in_history_of(head, &sha)?,
+        None => false,
+    };
+    if !covered {
+        return Ok(Err((
+            StatusCode::BAD_REQUEST,
+            format!("at: {sha} is not in the history of HEAD; export reads HEAD or one of its ancestors"),
+        )));
+    }
     let reach = st.store.ancestry(&sha)?;
     let live = st.store.keys_at(&sha)?;
     let keys: BTreeSet<String> = ix.keys().cloned().chain(live.iter().cloned()).collect();
@@ -94,6 +107,9 @@ fn build(st: &AppState, p: &ExportQ) -> Result<std::result::Result<String, (Stat
         let versions: Vec<_> = ix.versions(&key).into_iter().filter(|v| reach.contains(&v.sha)).collect();
         let content = versions.iter().find(|v| v.change != "deleted").cloned();
         if live.contains(&key) {
+            if content.is_none() {
+                anyhow::bail!("'{key}' is in the tree at {sha} but history has no version of it");
+            }
             rows.push(Row { key, state: "active", removed: None, version: content, versions: versions.len() });
             continue;
         }
@@ -280,6 +296,22 @@ mod tests {
         let (_, now) = lines(&app, "/export").await;
         assert_eq!(now[0]["total"], 7);
         assert_eq!(now[0]["counts"]["knowledge"], json!({"active": 1, "retracted": 2}));
+    }
+
+    /// A commit off HEAD's line has history the index does not hold, so it is
+    /// refused rather than exported partially.
+    #[tokio::test]
+    async fn a_commit_outside_head_history_is_refused() {
+        let (app, data, _i) = app_with_tmp();
+        post(&app, "/knowledge", know("one", "x")).await;
+        let repo = git2::Repository::open(data.path()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let sig = git2::Signature::now("t", "t@t").unwrap();
+        let side = repo.commit(None, &sig, &sig, "side", &head.tree().unwrap(), &[&head]).unwrap();
+        let (st, v) = call(&app, "GET", &format!("/export?at={side}"), None).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+        let (st, _) = lines(&app, &format!("/export?at={}", head.id())).await;
+        assert_eq!(st, StatusCode::OK);
     }
 
     #[tokio::test]

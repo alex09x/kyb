@@ -420,6 +420,14 @@ impl Store {
         Ok(out)
     }
 
+    /// Whether `sha` is `head` or one of its ancestors: a commit the history
+    /// index rooted at `head` fully describes.
+    pub fn in_history_of(&self, head: &str, sha: &str) -> Result<bool> {
+        let repo = self.repo()?;
+        let (head, sha) = (git2::Oid::from_str(head)?, git2::Oid::from_str(sha)?);
+        Ok(head == sha || repo.graph_descendant_of(head, sha)?)
+    }
+
     /// Every commit reachable from `sha`, itself included: the history a
     /// snapshot at `sha` is made of, whatever was committed after it.
     pub fn ancestry(&self, sha: &str) -> Result<HashSet<String>> {

@@ -57,4 +57,31 @@ cmp -s "$work/all.jsonl" "$work/pinned.jsonl" || fail "an export pinned to $snap
 "$cli" export --out "$work/now.jsonl" > "$work/now.json" || fail "current export did not verify"
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["entries"]==9 and s["counts"]["knowledge"]=={"active":4,"retracted":2}, s' "$work/now.json"
 
-echo "kyb export: 3 exports verified (paged, pinned after later writes, current)"
+# a server that ignores the cursor: the same page with the same next cursor
+# forever. The CLI must stop at the second page, not loop.
+stub_port=$((port + 1))
+python3 - "$stub_port" > /dev/null 2>&1 <<'PY' &
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/healthz"):
+            body = json.dumps({"version": "stub", "capabilities": ["export"]})
+        else:
+            body = "\n".join(json.dumps(x) for x in [
+                {"type": "snapshot", "snapshot": "abc", "total": 9, "counts": {"knowledge": {"active": 9}}},
+                {"type": "entry", "key": "a", "kind": "knowledge", "state": "active"},
+                {"type": "end", "snapshot": "abc", "returned": 1, "next_after": "a", "complete": False},
+            ]) + "\n"
+        self.send_response(200); self.end_headers(); self.wfile.write(body.encode())
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+stub_pid=$!
+trap 'kill "$stub_pid" 2>/dev/null; cleanup' EXIT
+for _ in $(seq 1 50); do curl -sf "http://127.0.0.1:$stub_port/healthz" >/dev/null && break; sleep 0.1; done
+if KYB_URL="http://127.0.0.1:$stub_port" perl -e "alarm 20; exec @ARGV" "$cli" export --out "$work/stub.jsonl" 2> "$work/stub.err"; then
+  fail "an export from a server that ignores the cursor was accepted"
+fi
+grep -q "no progress\|not strictly after the cursor" "$work/stub.err" || fail "the CLI did not stop on a stuck cursor: $(cat "$work/stub.err")"
+
+echo "kyb export: 3 exports verified (paged, pinned after later writes, current); a stuck cursor is refused"

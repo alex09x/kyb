@@ -541,7 +541,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     require_capability export "kyb export" "An older server has no such route and would simply answer 404."
     pages="$(mktemp -d "${TMPDIR:-/tmp}/kyb-export.XXXXXX")"
     trap 'rm -rf "$pages"' EXIT
-    after=""; n=0
+    after=""; snap=""; n=0
     while :; do
       n=$((n + 1))
       file="$pages/$(printf '%06d' "$n").jsonl"
@@ -549,22 +549,42 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
       [ -n "$at" ] && url="$url&at=$(urlenc "$at")"
       [ -n "$after" ] && url="$url&after=$(urlenc "$after")"
       kyb_curl "$url" > "$file"
-      # the first page fixes the snapshot; every later one asks for it by sha
-      next="$(python3 - "$file" <<'PY'
+      # the first page fixes the snapshot; every later one asks for it by sha.
+      # Each page is checked before the next is asked for: the same snapshot, keys
+      # after the cursor and in order, and a cursor that is this page's last key -
+      # so a server that ignored the cursor fails here instead of looping forever.
+      next="$(python3 - "$file" "$snap" "$after" <<'PY'
 import json, sys
-lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
-try:
-    head, end = json.loads(lines[0]), json.loads(lines[-1])
-except (IndexError, json.JSONDecodeError):
-    head, end = {}, {}
-if head.get("type") != "snapshot" or end.get("type") != "end":
-    print("kyb: export: the server did not answer with an export page: " + " ".join(lines)[:300], file=sys.stderr)
+path, snap, prev = sys.argv[1], sys.argv[2], sys.argv[3]
+lines = open(path, encoding="utf-8").read().splitlines()
+def fail(msg):
+    print("kyb: export: " + msg, file=sys.stderr)
     raise SystemExit(1)
-print((head["snapshot"] or "-") + " " + (end["next_after"] or ""))
+try:
+    rows = [json.loads(l) for l in lines]
+except json.JSONDecodeError:
+    rows = []
+if len(rows) < 2 or rows[0].get("type") != "snapshot" or rows[-1].get("type") != "end":
+    fail("the server did not answer with an export page: " + " ".join(lines)[:300])
+head, end = rows[0], rows[-1]
+keys = [r["key"] for r in rows[1:-1]]
+if snap and head["snapshot"] != snap:
+    fail(f"page names snapshot {head['snapshot']}, the export is reading {snap}")
+if end["snapshot"] != head["snapshot"]:
+    fail("a page whose end names another snapshot than its start")
+if keys != sorted(set(keys)) or (prev and keys and keys[0] <= prev):
+    fail(f"keys of a page are not strictly after the cursor '{prev}' and in order")
+nxt = end["next_after"] or ""
+if end["complete"] != (nxt == ""):
+    fail("a page that is complete and also names a next cursor, or neither")
+if nxt and (not keys or nxt != keys[-1]):
+    fail(f"the cursor '{nxt}' is not the last key of its page: no progress")
+print((head["snapshot"] or "-") + " " + nxt)
 PY
 )" || exit 1
-      read -r at after <<< "$next"
-      [ "$at" = "-" ] && at=""
+      read -r snap after <<< "$next"
+      [ "$snap" = "-" ] && snap=""
+      at="$snap"
       [ -n "$after" ] || break
     done
     python3 - "$pages" "${out:--}" <<'PY'
