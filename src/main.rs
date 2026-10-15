@@ -2,6 +2,7 @@ mod audit;
 mod auth;
 mod config;
 mod embed;
+mod export;
 mod index;
 mod links;
 mod mcp;
@@ -299,6 +300,7 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/tasks/{key}/resolve", post(resolve_task))
         .route("/tasks/{key}/transition", post(transition_task))
         .route("/search", get(search))
+        .route("/export", get(export::export))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
         // auth inside audit: a refused request is logged too, with who it was refused to
@@ -1776,7 +1778,7 @@ async fn reindex(State(st): St) -> Reply {
 /// So the check has to happen on the client, before the request, against a list
 /// the server publishes. Names match the query parameters exactly; entries are
 /// only ever added, never renamed, because an older CLI matches on the string.
-const CAPABILITIES: [&str; 3] = ["as_of", "changed_between", "diff"];
+const CAPABILITIES: [&str; 4] = ["as_of", "changed_between", "diff", "export"];
 
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
@@ -4039,6 +4041,7 @@ mod published_claims {
             ("as_of", "/search?q=one&as_of=2999-01-01"),
             ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
             ("diff", "/knowledge/svc/diff"),
+            ("export", "/export"),
         ];
         assert_eq!(probes.len(), super::CAPABILITIES.len(), "a capability was added without a probe");
 
@@ -4063,12 +4066,14 @@ mod published_claims {
             claims(doc, "--as-of");
             claims(doc, "--changed-between");
             claims(doc, "kyb diff");
+            claims(doc, "kyb export");
         }
         let cli = published("skills/kyb/bin/kyb");
         for flag in ["--as-of", "--changed-between"] {
             assert!(cli.contains(flag), "the docs promise {flag} but the CLI does not parse it");
         }
         assert!(cli.contains("  diff)"), "the docs promise `kyb diff` but the CLI has no such verb");
+        assert!(cli.contains("  export)"), "the docs promise `kyb export` but the CLI has no such verb");
     }
 
     #[tokio::test]

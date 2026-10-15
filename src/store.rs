@@ -404,6 +404,31 @@ impl Store {
             .collect())
     }
 
+    /// Keys whose files are in the tree of commit `sha`: what was live there.
+    pub fn keys_at(&self, sha: &str) -> Result<HashSet<String>> {
+        let repo = self.repo()?;
+        let tree = repo.find_commit(git2::Oid::from_str(sha)?)?.tree()?;
+        let mut out = HashSet::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |dir, te| {
+            if te.kind() == Some(git2::ObjectType::Blob) {
+                if let Some(key) = te.name().and_then(|n| key_of_path(&format!("{dir}{n}"))) {
+                    out.insert(key);
+                }
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+        Ok(out)
+    }
+
+    /// Every commit reachable from `sha`, itself included: the history a
+    /// snapshot at `sha` is made of, whatever was committed after it.
+    pub fn ancestry(&self, sha: &str) -> Result<HashSet<String>> {
+        let repo = self.repo()?;
+        let mut walk = repo.revwalk()?;
+        walk.push(git2::Oid::from_str(sha)?)?;
+        walk.map(|oid| Ok(oid?.to_string())).collect()
+    }
+
     /// Full history: every commit × changed .md files → one version per doc.
     /// A version identical in content to the key's previous one (the layout
     /// migration is a pure rename) is skipped — moves are not new knowledge.

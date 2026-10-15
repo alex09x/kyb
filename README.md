@@ -203,6 +203,8 @@ kyb tags                                    # which topics the base covers
 kyb add --key nats-streams --title "..." --tags nats,infra <<< "body"    # upsert by key
 kyb get nats-streams [--at <sha>]           # current or any historical version
 kyb history nats-streams                    # the whole chain of changes
+kyb export --out kyb.jsonl                  # every key as of one commit: active, archived and
+                                            # retracted, one JSON line each, checked complete
 
 kyb incident --template                     # print the report skeleton
 kyb incident --key inc-2026-07-22-orders-api-oom --title "..." --service orders_api \
@@ -402,6 +404,7 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 | `POST` | `/tasks/{key}/transition` | partial update: `{status, assignee?, parent_task?, blocked_reason?}` — `status` is a **live** one (`open\|in_progress\|blocked`); omitted fields keep their stored value, leaving `blocked` clears `blocked_reason`, and a terminal status is refused with a pointer to `/tasks/{key}/resolve` |
 | `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — flips status, records the outcome; a non-`blocked` status clears `blocked_reason`; `done`/`dropped` archive |
 | `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=&priority=&assignee=&parent_task=` → ranked hits with full bodies; an empty `q` lists newest first |
+| `GET` | `/export` | `?at=<rev>&after=<key>&limit=` → JSON lines: a `snapshot` line (the commit, `total`, `counts` per kind and state), one `entry` line per key in key order with `state` `active`\|`archived`\|`retracted` (a removed key as it was just before removal), an `end` line with `next_after` and `complete`. Pages that pass the same `at` read one commit, so writes made meanwhile change nothing; earlier versions stay in `/knowledge/{key}/history`. Needs the read role, like `/search` |
 | `GET` | `/tags` | which topics the base covers, most used first |
 | `DELETE` | `/knowledge/{key}` | knowledge: retract (drops from the default search); incident/task: archive (stays searchable) |
 | `POST` | `/reindex` | full index rebuild from git |

@@ -207,6 +207,8 @@ kyb diff <key> [--from <rev>] [--to <rev>]             # what changed in it, fie
 kyb get nats-streams              # current version (archived entries carry "archived":true)
 kyb get nats-streams --at <sha>   # the version at a specific commit
 kyb history nats-streams          # every version, newest first: sha · time · message · added|modified|deleted
+kyb export --out kyb.jsonl        # the whole base as of one commit, active + archived + retracted,
+                                  # one JSON line per key; exits 1 unless the export is complete
 ```
 
 What moved where: `kyb query "old term" --history` → take the hit's `sha` → `kyb get <key> --at <sha>`.

@@ -187,6 +187,8 @@ kyb — Know Your Business (our infrastructure knowledge base)
   kyb add --key <slug> --title "..." [--tags a,b] [--refs r1,r2]   (body on stdin)
   kyb get <key> [--at <sha>]
   kyb history <key>
+  kyb export [--at <sha>] [--out FILE] [--page N]   (every key as of one commit as JSON lines:
+                                                    active, archived, retracted; checks completeness)
   kyb diff <key> [--from REV] [--to REV]
   kyb rm <key>
   kyb reindex
@@ -521,6 +523,88 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     kyb_curl "$BASE/knowledge/$key/diff?from=$(urlenc "$from")&to=$(urlenc "$to")" | pretty
     ;;
 
+  export)
+    # Every key of the base as of one commit, as JSON lines, read in pages that
+    # all name that commit - so writes made meanwhile change nothing in it. The
+    # check at the end is the point: one key per line, none twice, the per-state
+    # counts the server announced, and a last page that says it is the last.
+    at=""; out=""; page=200
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --at) at="${2:-}"; shift 2 ;;
+        --out) out="${2:-}"; shift 2 ;;
+        --page) page="${2:-}"; shift 2 ;;
+        *) die "export: unknown option $1" ;;
+      esac
+    done
+    case "$page" in ''|*[!0-9]*|0) die "export: --page takes a positive number" ;; esac
+    require_capability export "kyb export" "An older server has no such route and would simply answer 404."
+    pages="$(mktemp -d "${TMPDIR:-/tmp}/kyb-export.XXXXXX")"
+    trap 'rm -rf "$pages"' EXIT
+    after=""; n=0
+    while :; do
+      n=$((n + 1))
+      file="$pages/$(printf '%06d' "$n").jsonl"
+      url="$BASE/export?limit=$page"
+      [ -n "$at" ] && url="$url&at=$(urlenc "$at")"
+      [ -n "$after" ] && url="$url&after=$(urlenc "$after")"
+      kyb_curl "$url" > "$file"
+      # the first page fixes the snapshot; every later one asks for it by sha
+      next="$(python3 - "$file" <<'PY'
+import json, sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+try:
+    head, end = json.loads(lines[0]), json.loads(lines[-1])
+except (IndexError, json.JSONDecodeError):
+    head, end = {}, {}
+if head.get("type") != "snapshot" or end.get("type") != "end":
+    print("kyb: export: the server did not answer with an export page: " + " ".join(lines)[:300], file=sys.stderr)
+    raise SystemExit(1)
+print((head["snapshot"] or "-") + " " + (end["next_after"] or ""))
+PY
+)" || exit 1
+      read -r at after <<< "$next"
+      [ "$at" = "-" ] && at=""
+      [ -n "$after" ] || break
+    done
+    python3 - "$pages" "${out:--}" <<'PY'
+import json, os, sys
+from collections import Counter
+pages, out = sys.argv[1], sys.argv[2]
+heads, ends, entries = [], [], []
+for name in sorted(os.listdir(pages)):
+    for line in open(os.path.join(pages, name), encoding="utf-8"):
+        row = json.loads(line)
+        {"snapshot": heads, "end": ends, "entry": entries}[row["type"]].append(row)
+problems = []
+snaps = {h["snapshot"] for h in heads} | {e["snapshot"] for e in ends}
+if len(snaps) != 1:
+    problems.append(f"pages name {len(snaps)} different snapshots")
+keys = [e["key"] for e in entries]
+if len(set(keys)) != len(keys):
+    problems.append(f"{len(keys) - len(set(keys))} keys repeated")
+if keys != sorted(keys):
+    problems.append("keys are out of order")
+counts = Counter((e["kind"], e["state"]) for e in entries)
+announced = Counter({(k, s): n for k, by in heads[0]["counts"].items() for s, n in by.items()})
+if counts != announced:
+    problems.append(f"counts {dict(counts)} differ from the announced {dict(announced)}")
+if len(entries) != heads[0]["total"]:
+    problems.append(f"{len(entries)} entries, the snapshot has {heads[0]['total']}")
+if not ends[-1]["complete"]:
+    problems.append("the last page does not say it is complete")
+sink = sys.stdout if out == "-" else open(out, "w", encoding="utf-8")
+for e in entries:
+    sink.write(json.dumps(e, ensure_ascii=False) + "\n")
+summary = {
+    "snapshot": heads[0]["snapshot"], "committed_at": heads[0].get("committed_at"),
+    "pages": len(heads), "entries": len(entries), "unique_keys": len(set(keys)),
+    "counts": heads[0]["counts"], "complete": not problems, "problems": problems,
+}
+print(json.dumps(summary, indent=2), file=sys.stderr if out == "-" else sys.stdout)
+raise SystemExit(1 if problems else 0)
+PY
+    ;;
   history)
     key="${1:-}"; [ -n "$key" ] || usage
     kyb_curl "$BASE/knowledge/$key/history" | pretty
