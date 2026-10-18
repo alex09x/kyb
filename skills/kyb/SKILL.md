@@ -174,7 +174,7 @@ kyb query "nats streams"          # current knowledge + archived reports, ranked
 kyb query "config" --tag infra    # tag filter (several tags = AND)
 kyb query "deploy" --recent       # order by commit time instead of relevance
 kyb query "" --limit 50           # empty query = list everything, newest first
-kyb query "old rule" --history    # search ALL superseded versions, deleted included
+kyb query "old rule" --history    # search EVERY version, current and deleted included
 ```
 
 Hits come back with the **full body** plus `sha` (→ `kyb get --at`), `committed_at`,
@@ -186,10 +186,12 @@ kubernetes, `orders api` reaches the key `orders-api-deploy`.
 - **Hybrid**: BM25 (title ×2, tags/keys ×1.5) fused with multilingual vectors — **ask in any
   language, or in words the entry never uses**, and still land on it; exact technical terms
   win on the lexical side. `"semantic":true` in the response means vectors took part
-  (`--recent`, `--history`, empty queries and a model-less server are lexical-only).
+  (`--recent`, `--history`, `--as-of`, `--changed-between`, empty queries and a model-less
+  server are lexical-only: vectors exist for the current version of each key only).
 - **Default scope = the latest version of every key**: live entries plus archived (closed)
   incidents/tasks — "how did we fix this last time" needs no flag. Retracted knowledge is the
-  one thing excluded. **`--history` = superseded versions only**; the two modes never overlap.
+  one thing excluded. **`--history` = every version of every key, the current one included**,
+  one hit per version and no time scoping; the default scope never returns a superseded one.
 - Broken query syntax never fails the request — the parser is lenient.
 
 ---
