@@ -1254,7 +1254,9 @@ mod mcp_tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 8, "{names:?}");
+        assert_eq!(names.len(), 9, "{names:?}");
+        // the deadline listing only reads, so a read-only client keeps it
+        assert!(names.contains(&"kyb_deadlines"), "{names:?}");
         for write in WRITE_TOOLS {
             assert!(!names.contains(&write), "{write} must not be advertised read-only");
         }
