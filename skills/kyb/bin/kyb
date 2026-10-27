@@ -186,7 +186,13 @@ require_deadlines_if_set() {
   require_capability deadlines "the deadline flags" "An older server ignores fields it does not know, so the deadline would be silently dropped."
 }
 
-urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${1:-}"; }
+# A slug needs no escaping, so the common case costs no python start.
+urlenc() {
+  case "${1:-}" in
+    *[!A-Za-z0-9._~-]*) python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1" ;;
+    *) printf '%s\n' "${1:-}" ;;
+  esac
+}
 
 # Who is writing, for the record: the agent, its session and the workspace,
 # read from the environment the agent runs the CLI in. The server writes them
@@ -645,7 +651,7 @@ print(json.dumps({
     payload="$(RESOLUTION="$resolution" python3 -c '
 import json, os, sys
 print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}))' "$status")"
-    kyb_curl -X POST "$BASE/incidents/$key/resolve" -H 'content-type: application/json' -d "$payload" | pretty
+    kyb_curl -X POST "$BASE/incidents/$(urlenc "$key")/resolve" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   task)
     key=""; title=""; status="open"; priority=""; blocked_reason=""
@@ -732,7 +738,7 @@ if os.environ["PARENT_SET"]:
 if os.environ["REASON_SET"]:
     p["blocked_reason"] = os.environ["REASON"]
 print(json.dumps(p))')"
-    kyb_curl -X POST "$BASE/tasks/$key/transition" -H 'content-type: application/json' -d "$payload" | pretty
+    kyb_curl -X POST "$BASE/tasks/$(urlenc "$key")/transition" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   tasks)
     status=""; priority=""; assignee=""; parent=""; followups=""; all=""; limit="50"
@@ -766,7 +772,7 @@ print(json.dumps(p))')"
     payload="$(RESOLUTION="$resolution" python3 -c '
 import json, os, sys
 print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}))' "$status")"
-    kyb_curl -X POST "$BASE/tasks/$key/resolve" -H 'content-type: application/json' -d "$payload" | pretty
+    kyb_curl -X POST "$BASE/tasks/$(urlenc "$key")/resolve" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   get)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true
@@ -780,7 +786,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     deadlines_param
     q=""; [ -n "$at" ] && q="&at=$(urlenc "$at")"
     q="$q$DL"; [ -n "$q" ] && q="?${q#&}"
-    kyb_curl "$BASE/knowledge/$key$q" | show
+    kyb_curl "$BASE/knowledge/$(urlenc "$key")$q" | show
     ;;
   deadlines)
     within=""; overdue=""; hard=""; tag=""; assignee=""; as_json=""
@@ -838,7 +844,7 @@ for bucket in ("overdue", "this_week", "later"):
       esac
     done
     require_capability diff "kyb diff" "An older server has no such route and would simply answer 404."
-    kyb_curl "$BASE/knowledge/$key/diff?from=$(urlenc "$from")&to=$(urlenc "$to")" | pretty
+    kyb_curl "$BASE/knowledge/$(urlenc "$key")/diff?from=$(urlenc "$from")&to=$(urlenc "$to")" | pretty
     ;;
 
   export)
@@ -945,11 +951,11 @@ PY
     ;;
   history)
     key="${1:-}"; [ -n "$key" ] || usage
-    kyb_curl "$BASE/knowledge/$key/history" | pretty
+    kyb_curl "$BASE/knowledge/$(urlenc "$key")/history" | pretty
     ;;
   rm|delete)
     key="${1:-}"; [ -n "$key" ] || usage
-    kyb_curl -X DELETE "$BASE/knowledge/$key" | pretty
+    kyb_curl -X DELETE "$BASE/knowledge/$(urlenc "$key")" | pretty
     ;;
   reindex)
     kyb_curl -X POST "$BASE/reindex" | pretty

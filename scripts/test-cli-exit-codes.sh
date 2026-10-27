@@ -111,4 +111,18 @@ rc=0
 [ -s "$work/out.txt" ] || fail "successful get: expected stdout with JSON, got nothing"
 json_has "$work/out.txt" 'j["key"] == "task-healthy" and j["title"] == "Healthy task"' || fail "successful get: JSON invalid: $(cat "$work/out.txt")"
 
+# 8. A key that is not a slug reaches the server and is refused there -> exit 1, not 3:
+#    unescaped, curl rejects the URL before any request and it looks like an unreachable server
+refused_not_unreachable() {
+  local rc=0
+  "$cli" "$@" > "$work/out.txt" 2> "$work/err.txt" || rc=$?
+  [ "$rc" -eq 1 ] || fail "kyb $*: expected exit 1, got $rc (stderr: $(cat "$work/err.txt"))"
+  [ ! -s "$work/out.txt" ] || fail "kyb $*: expected empty stdout, got: $(cat "$work/out.txt")"
+  ! grep -q "cannot reach" "$work/err.txt" || fail "kyb $*: reported unreachable: $(cat "$work/err.txt")"
+}
+refused_not_unreachable get "Bad Key"
+refused_not_unreachable history "Bad Key"
+refused_not_unreachable diff "Bad Key"
+refused_not_unreachable get "a/b"
+
 echo "all CLI exit code checks passed"
