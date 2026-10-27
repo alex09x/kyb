@@ -89,7 +89,12 @@ if want not in caps:
 PY
 }
 
-pretty() { if command -v jq >/dev/null 2>&1; then jq .; else cat; fi; }
+pretty() {
+  local in
+  in="$(cat)"
+  [ -n "$in" ] || return 0
+  if command -v jq >/dev/null 2>&1; then printf '%s\n' "$in" | jq .; else printf '%s\n' "$in"; fi
+}
 
 # The deadline block that rides on every read answer, as a few lines for a
 # person or an agent to notice. It goes to stderr: stdout stays exactly what the
@@ -127,6 +132,7 @@ if block.get("more"):
 show() {
   local out
   out="$(cat)"
+  [ -n "$out" ] || return 0
   [ -n "$NO_DEADLINES" ] || printf '%s' "$out" | python3 -c "$BANNER_PY" >&2 || true
   printf '%s\n' "$out" | pretty
 }
@@ -267,11 +273,49 @@ request_headers() {
 
 # This is a pure HTTP client for the kyb server — no ssh, no attempts to
 # start or fix anything remotely. If the server doesn't answer, say so and stop.
+# Exit codes: 0 success, 1 server rejected (4xx), 2 server error (5xx), 3 cannot reach server.
+_kyb_curl() {
+  local fail_on_error="$1"
+  shift
+  local out_file err_file rc=0 http_code
+  out_file="$(mktemp -t kyb-out.XXXXXX)"
+  err_file="$(mktemp -t kyb-err.XXXXXX)"
+  http_code="$(curl -sS -m 15 --config <(request_headers) -o "$out_file" -w "%{http_code}" "$@" 2>"$err_file")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    local err
+    err="$(cat "$err_file" 2>/dev/null || true)"
+    rm -f "$out_file" "$err_file"
+    echo "kyb: cannot reach $ADDR: $err" >&2
+    exit 3
+  fi
+  rm -f "$err_file"
+  local body
+  body="$(cat "$out_file" 2>/dev/null || true)"
+  rm -f "$out_file"
+  if [ "$fail_on_error" -eq 1 ]; then
+    if [ "$http_code" -ge 400 ] && [ "$http_code" -le 499 ]; then
+      [ -n "$body" ] && printf '%s\n' "$body" >&2
+      exit 1
+    elif [ "$http_code" -ge 500 ] && [ "$http_code" -le 599 ]; then
+      [ -n "$body" ] && printf '%s\n' "$body" >&2
+      exit 2
+    fi
+  fi
+  [ -n "$body" ] && printf '%s\n' "$body"
+  if [ "$http_code" -ge 400 ] && [ "$http_code" -le 499 ]; then
+    return 1
+  elif [ "$http_code" -ge 500 ] && [ "$http_code" -le 599 ]; then
+    return 2
+  fi
+  return 0
+}
+
 kyb_curl() {
-  local out rc=0
-  out="$(curl -sS -m 15 --config <(request_headers) "$@" 2>&1)" || rc=$?
-  [ "$rc" -eq 0 ] || die "cannot reach $ADDR: $out"
-  printf '%s\n' "$out"
+  _kyb_curl 1 "$@"
+}
+
+kyb_curl_raw() {
+  _kyb_curl 0 "$@"
 }
 
 usage() {
@@ -343,6 +387,12 @@ as a short banner on stderr; --no-deadlines leaves it off.
 
 Closing an incident or a task archives it: the file leaves the canon, the
 report stays searchable (kyb query) and readable (kyb get) forever.
+
+exit codes:
+  0  success
+  1  the server rejected the request (4xx), or malformed command line
+  2  server error (5xx)
+  3  the server could not be reached
 EOF
   exit "$status"
 }
@@ -841,7 +891,9 @@ PY
     token="${token//[[:space:]]/}"
     [ -n "$token" ] || die "no token on stdin: echo it in, or paste it and press Enter"
     KYB_TOKEN="$token"
-    who="$(kyb_curl "$BASE/whoami")"
+    rc=0
+    who="$(kyb_curl_raw "$BASE/whoami")" || rc=$?
+    [ "$rc" -ne 3 ] || exit 3
     case "$who" in
       *'"actor":{'*) ;;
       *'"auth":"off"'*) die "this server does not ask for tokens; nothing was saved" ;;
