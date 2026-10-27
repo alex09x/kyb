@@ -21,6 +21,8 @@ mod mcp;
 mod model;
 mod store;
 mod web;
+#[cfg(test)]
+mod tag_regressions;
 
 use anyhow::Result;
 use axum::extract::rejection::QueryRejection;
@@ -589,7 +591,7 @@ struct IncidentReq {
     #[serde(default)]
     detected_at: String,
     #[serde(default)]
-    tags: Vec<String>,
+    tags: Option<Vec<String>>,
     #[serde(default)]
     refs: Vec<String>,
 }
@@ -639,6 +641,7 @@ fn stamp_timeline(st: &AppState, entry: &mut model::Entry) {
 
 async fn upsert_incident(State(st): St, Json(r): Json<IncidentReq>) -> Reply {
     locked_write(&st, move |st| {
+        let tags = r.tags.unwrap_or_else(|| stored_version(st, &r.key).map(|e| e.tags).unwrap_or_default());
         let mut entry = model::Entry {
             key: r.key,
             title: r.title,
@@ -653,7 +656,7 @@ async fn upsert_incident(State(st): St, Json(r): Json<IncidentReq>) -> Reply {
             affected: r.affected,
             started_at: r.started_at,
             detected_at: r.detected_at,
-            tags: r.tags,
+            tags,
             refs: r.refs,
             body: r.body,
             ..Default::default()
@@ -865,7 +868,7 @@ struct TaskReq {
     #[serde(default)]
     resolution: String,
     #[serde(default)]
-    tags: Vec<String>,
+    tags: Option<Vec<String>>,
     #[serde(default)]
     refs: Vec<String>,
     /// due, hard, remind_days, waits_on, expected: each one named here is set,
@@ -876,7 +879,10 @@ struct TaskReq {
 
 async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
     locked_write(&st, move |st| {
-        let stored = stored_version(st, &r.key).map(|e| e.deadline).unwrap_or_default();
+        // a write that names no tags or no deadline keeps the stored ones
+        let stored = stored_version(st, &r.key);
+        let tags = r.tags.unwrap_or_else(|| stored.as_ref().map(|e| e.tags.clone()).unwrap_or_default());
+        let stored = stored.map(|e| e.deadline).unwrap_or_default();
         let mut entry = model::Entry {
             key: r.key,
             title: r.title,
@@ -889,14 +895,14 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
             deadline: r.deadline.apply(stored),
             knowledge: r.knowledge,
             resolution: r.resolution,
-            tags: r.tags,
+            tags,
             refs: r.refs,
             body: r.body,
             ..Default::default()
         };
         // tasks carry one server stamp: when they were closed
         if entry.is_closed() && entry.resolved_at.trim().is_empty() {
-            if let Ok(Some(old)) = st.store.get(&entry.key) {
+            if let Some(old) = stored_version(st, &entry.key) {
                 entry.resolved_at = old.resolved_at;
             }
             if entry.resolved_at.trim().is_empty() {
@@ -1572,7 +1578,10 @@ async fn search(State(st): St, Q(p): Q<SearchQ>) -> Reply {
         .map(|t| t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
     let q = p.q.as_deref().unwrap_or("");
-    let limit = p.limit.unwrap_or(10).min(100);
+    // Exact tag listings serve the console across all three entry kinds.
+    // Text/semantic searches keep their existing small result budget.
+    let max_limit = if q.trim().is_empty() && !tags.is_empty() { 1000 } else { 100 };
+    let limit = p.limit.unwrap_or(10).min(max_limit);
     // an empty ?sort= from the CLI means "unspecified"
     let sort = p.sort.as_deref().filter(|s| !s.trim().is_empty());
     // relevance is meaningless without a query: an empty q is a listing,

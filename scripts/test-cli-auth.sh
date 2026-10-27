@@ -36,6 +36,9 @@ pid=$!
 for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$port/healthz" && break; sleep 0.1; done
 
 export KYB_ADDR="127.0.0.1:$port" HOME="$tmp/home"
+# the attribution cases below set the environment an agent would; the process tree
+# of whoever runs this test (an agent's own shell, say) must not decide instead
+export KYB_PS_COMMAND=false
 mkdir -p "$HOME"
 # a repository with a subdirectory and a symlink to it, for the workspace checks
 mkdir -p "$tmp/repo/sub" && git -C "$tmp/repo" init -q && ln -s "$tmp/repo/sub" "$tmp/link-to-sub"

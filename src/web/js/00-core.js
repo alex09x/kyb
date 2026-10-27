@@ -1,3 +1,13 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
     // Global Application State
     const App = {
       entries: [],
@@ -197,8 +207,9 @@
 
     // Full Refresh Loop
     async function refreshAll() {
+      const requestedTag = App.tagFilter;
       const [searchData, incData, taskData, tagsData, healthData, actData, auditData, placesData, dlData] = await Promise.all([
-        apiFetch('/search?limit=100'),
+        apiFetch(requestedTag ? `/search?tag=${encodeURIComponent(requestedTag)}&limit=1000` : '/search?limit=100'),
         apiFetch('/incidents?all=1&limit=500'),
         apiFetch('/tasks?all=1&limit=500'),
         apiFetch('/tags'),
@@ -214,7 +225,7 @@
       App.deadlines = new Map(((dlData && dlData.deadlines) || []).map(d => [d.key, d]));
       if (searchData) App.deadlineBlock = searchData.deadlines || null;
 
-      if (!App.isBackendSearchResults && searchData && searchData.hits) App.entries = searchData.hits;
+      if (!App.isBackendSearchResults && requestedTag === App.tagFilter && searchData && searchData.hits) App.entries = searchData.hits;
       if (incData && incData.incidents) App.incidents = incData.incidents;
       if (taskData && taskData.tasks) App.tasks = taskData.tasks;
       if (tagsData && tagsData.tags) App.tags = tagsData.tags;

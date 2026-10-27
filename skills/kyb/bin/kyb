@@ -573,7 +573,7 @@ TPL
       exit 0
     fi
     key=""; title=""; service=""; hosts=""; severity=""; status="open"
-    knowledge=""; resolution=""; detection=""; affected=""; started=""; detected=""; tags=""; refs=""
+    knowledge=""; resolution=""; detection=""; affected=""; started=""; detected=""; tags=""; tags_set=0; refs=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --key) key="$2"; shift 2 ;;
@@ -588,7 +588,7 @@ TPL
         --affected) affected="$2"; shift 2 ;;
         --started) started="$2"; shift 2 ;;
         --detected) detected="$2"; shift 2 ;;
-        --tags) tags="$2"; shift 2 ;;
+        --tags) tags="$2"; tags_set=1; shift 2 ;;
         --refs) refs="$2"; shift 2 ;;
         *) die "incident: unknown flag $1" ;;
       esac
@@ -611,8 +611,8 @@ print(json.dumps({
     "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
     "detection": os.environ["DETECTION"], "affected": affected,
     "started_at": started, "detected_at": detected,
-    "tags": split(tags), "refs": split(refs),
-}))' "$key" "$title" "$service" "$hosts" "$severity" "$status" "$knowledge" "$started" "$detected" "$tags" "$refs")"
+    **({"tags": split(tags)} if sys.argv[-1] == "1" else {}), "refs": split(refs),
+}))' "$key" "$title" "$service" "$hosts" "$severity" "$status" "$knowledge" "$started" "$detected" "$tags" "$refs" "$tags_set")"
     kyb_curl -X POST "$BASE/incidents" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   incidents)
@@ -649,7 +649,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
     ;;
   task)
     key=""; title=""; status="open"; priority=""; blocked_reason=""
-    assignee=""; parent=""; knowledge=""; resolution=""; tags=""; refs=""
+    assignee=""; parent=""; knowledge=""; resolution=""; tags=""; tags_set=0; refs=""
     dl_reset
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -668,7 +668,7 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
         --parent|--parent-task) parent="$2"; shift 2 ;;
         --knowledge) knowledge="$2"; shift 2 ;;
         --resolution) resolution="$2"; shift 2 ;;
-        --tags) tags="$2"; shift 2 ;;
+        --tags) tags="$2"; tags_set=1; shift 2 ;;
         --refs) refs="$2"; shift 2 ;;
         *) die "task: unknown flag $1" ;;
       esac
@@ -686,10 +686,10 @@ p = {
     "priority": priority, "blocked_reason": os.environ["BLOCKED_REASON"],
     "assignee": os.environ["ASSIGNEE"], "parent_task": parent,
     "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
-    "tags": split(tags), "refs": split(refs),
+    **({"tags": split(tags)} if sys.argv[-1] == "1" else {}), "refs": split(refs),
 }
 p.update(json.loads(os.environ["DEADLINE"]))
-print(json.dumps(p))' "$key" "$title" "$status" "$priority" "$parent" "$knowledge" "$tags" "$refs")"
+print(json.dumps(p))' "$key" "$title" "$status" "$priority" "$parent" "$knowledge" "$tags" "$refs" "$tags_set")"
     kyb_curl -X POST "$BASE/tasks" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   task-status)

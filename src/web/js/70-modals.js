@@ -1,3 +1,13 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
     // Modal Helpers
     function openModal(id) {
       // One dialog at a time: a modal opened from inside another replaces it.
@@ -50,7 +60,7 @@
       const titleEl = document.getElementById('newModalTitle');
       const submitEl = document.getElementById('newModalSubmitBtn');
       const hintEl = document.getElementById('newModalHint');
-      if (hintEl) hintEl.textContent = { knowledge: 'Every save is a new version; nothing is overwritten.', incident: 'Hosts and tags can be added after saving. Closing it later archives it.', task: 'Done or dropped tasks are archived and stay searchable.' }[type];
+      if (hintEl) hintEl.textContent = { knowledge: 'Every save is a new version; nothing is overwritten.', incident: 'Hosts can be added after saving. Closing it later archives it.', task: 'Done or dropped tasks are archived and stay searchable.' }[type];
 
       if (type === 'knowledge') {
         titleEl.textContent = 'New note';
@@ -89,6 +99,7 @@
           ${field('Done when', `<textarea class="form-textarea" id="newBody" placeholder="What to do and how to tell it is done."></textarea>`)}
         `;
       }
+      if (type !== 'knowledge') bodyEl.innerHTML += field('Tags', '<input type="text" class="form-input" id="newTags" placeholder="hyperliquid, replay">', 'Comma-separated topics, shared with notes, incidents and tasks.');
     }
 
     // A missing field is marked where it is, not only in a toast.
@@ -142,10 +153,9 @@
         return;
       }
 
+      const tags = (document.getElementById('newTags')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
       let res = null;
       if (App.newModalKind === 'knowledge') {
-        const rawTags = document.getElementById('newTags')?.value || '';
-        const tags = rawTags.split(',').map(s => s.trim()).filter(Boolean);
         res = await apiPost('/knowledge', {
           key,
           title,
@@ -161,6 +171,7 @@
           title,
           service,
           severity,
+          tags,
           body,
           detection
         });
@@ -172,6 +183,7 @@
           title,
           priority,
           assignee,
+          tags,
           body,
           ...deadlinePayload('new')
         });
@@ -249,6 +261,7 @@
         `;
       }
 
+      if (editingEntryKind !== 'knowledge') bodyEl.innerHTML += field('Tags', `<input type="text" class="form-input" id="editTags" value="${escapeHtml((entry.tags || []).join(', '))}">`);
       openModal('editModal');
     }
 
@@ -267,6 +280,7 @@
         return;
       }
 
+      const tags = (document.getElementById('editTags')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
       let res = null;
       if (editingEntryKind === 'incident') {
         const service = document.getElementById('editService')?.value.trim() || 'infrastructure';
@@ -281,6 +295,7 @@
           service,
           severity,
           hosts,
+          tags,
           body,
           ...(detection ? { detection } : {})
         });
@@ -293,12 +308,11 @@
           title,
           priority,
           assignee,
+          tags,
           body,
           ...deadlinePayload('edit')
         });
       } else {
-        const rawTags = document.getElementById('editTags')?.value || '';
-        const tags = rawTags.split(',').map(s => s.trim()).filter(Boolean);
         res = await apiPost('/knowledge', {
           ...editKeep(['refs']),
           key,
