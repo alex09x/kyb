@@ -390,6 +390,12 @@ async fn forward(
     (status, String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// The `key` argument as one escaped path segment. Unescaped, a key that is not
+/// a slug either makes the forwarded uri invalid or reaches another route.
+fn key_segment(args: &Value) -> String {
+    encode(&text_arg(args, "key").unwrap_or_default())
+}
+
 fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.as_bytes() {
@@ -559,7 +565,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             no_deadlines(args, &mut query);
             Call {
                 method: "GET",
-                path: format!("/knowledge/{}", text_arg(args, "key").unwrap_or_default()),
+                path: format!("/knowledge/{}", key_segment(args)),
                 query,
                 body: None,
             }
@@ -571,7 +577,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             push(&mut query, "to", text_arg(args, "to"));
             Call {
                 method: "GET",
-                path: format!("/knowledge/{}/diff", text_arg(args, "key").unwrap_or_default()),
+                path: format!("/knowledge/{}/diff", key_segment(args)),
                 query,
                 body: None,
             }
@@ -580,7 +586,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             require(args, &["key"])?;
             Call {
                 method: "GET",
-                path: format!("/knowledge/{}/history", text_arg(args, "key").unwrap_or_default()),
+                path: format!("/knowledge/{}/history", key_segment(args)),
                 query: Vec::new(),
                 body: None,
             }
@@ -673,10 +679,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             require(args, &["key", "resolution"])?;
             Call {
                 method: "POST",
-                path: format!(
-                    "/incidents/{}/resolve",
-                    text_arg(args, "key").unwrap_or_default()
-                ),
+                path: format!("/incidents/{}/resolve", key_segment(args)),
                 query: Vec::new(),
                 body: Some(json!({
                     "status": text_arg(args, "status").unwrap_or_else(|| "resolved".into()),
@@ -724,10 +727,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             }
             Call {
                 method: "POST",
-                path: format!(
-                    "/tasks/{}/transition",
-                    text_arg(args, "key").unwrap_or_default()
-                ),
+                path: format!("/tasks/{}/transition", key_segment(args)),
                 query: Vec::new(),
                 body: Some(body),
             }
@@ -736,7 +736,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             require(args, &["key", "resolution"])?;
             Call {
                 method: "POST",
-                path: format!("/tasks/{}/resolve", text_arg(args, "key").unwrap_or_default()),
+                path: format!("/tasks/{}/resolve", key_segment(args)),
                 query: Vec::new(),
                 body: Some(json!({
                     "status": text_arg(args, "status").unwrap_or_else(|| "done".into()),
@@ -1432,5 +1432,24 @@ mod mcp_tests {
         rpc(&app, call("kyb_incident", inc(json!({"tags": "infra"})))).await;
         rpc(&app, call("kyb_incident", inc(json!({"body": "rewritten"})))).await;
         assert_eq!(tags("inc-2026-10-27-tagged").await, json!(["infra"]));
+    }
+
+    #[tokio::test]
+    async fn a_key_that_is_not_a_slug_is_refused_not_a_panic() {
+        // the key goes into the forwarded path; unescaped, a space made the uri
+        // invalid and the request builder panicked instead of answering
+        let (app, _d, _i, _a) = test_app();
+        for (tool, args) in [
+            ("kyb_get", json!({"key": "Bad Key"})),
+            ("kyb_diff", json!({"key": "Bad Key"})),
+            ("kyb_history", json!({"key": "Bad Key"})),
+            ("kyb_resolve", json!({"key": "inc bad", "resolution": "r"})),
+            ("kyb_task_status", json!({"key": "a b", "status": "doing"})),
+            ("kyb_done", json!({"key": "task bad", "resolution": "r"})),
+            ("kyb_get", json!({"key": "a/b"})),
+        ] {
+            let resp = rpc(&app, call(tool, args.clone())).await;
+            assert!(errored(&resp), "{tool} {args}: {resp}");
+        }
     }
 }
