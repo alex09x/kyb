@@ -197,41 +197,40 @@ urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.arg
 # are recorded as nested-in. When no agent ancestor is found in the process
 # tree, the environment variables serve as a fallback. KYB_AGENT still overrides
 # all discovery.
-# Which agent a process is: a path inside an agent's app bundle, or the name of
-# the program - or, for an interpreter (node, python, ...), of the script it
-# runs, which is the only case that costs a second ps. Sets AGENT_OF; matches
-# ignore case. No subshells beyond ps itself: this runs for every ancestor on
-# every kyb call, and on a Mac with a thousand processes a whole-table snapshot
-# costs ten times a ps per ancestor.
+# Which agent a process is, judged by its program alone: a path inside an
+# agent's app bundle, or the program's name - or, for an interpreter (node,
+# python, ...), the script it runs, which is the only case that costs a second
+# ps. Shells are not interpreters here: every agent runs its tools as
+# `zsh -c "..."`, and a command line that mentions an agent is not one. Sets
+# AGENT_OF. No subshells beyond ps itself: this runs for every ancestor on every
+# kyb call, and on a Mac with a thousand processes a whole-table snapshot costs
+# ten times a ps per ancestor.
 agent_of() { # agent_of <pid> <comm> <ps_cmd>
-  local pid="$1" comm="$2" ps_cmd="$3" w base first=1
+  local pid="$1" prog="$2" ps_cmd="$3" w
   local -a words
   AGENT_OF=""
   # Claude Code exports CLAUDE_PID as an extra signal (it must be an ancestor to count)
   if [ -n "${CLAUDE_PID:-}" ] && [ "$pid" = "$CLAUDE_PID" ]; then AGENT_OF=claude; return 0; fi
-  words=("$comm")
-  case "${comm##*/}" in
-    node|python|python3|bun|deno|bash|sh|zsh)
-      read -r -a words <<< "$("$ps_cmd" -o args= -p "$pid" 2>/dev/null || true)" ;;
+  case "${prog##*/}" in
+    node|python|python3|bun|deno)
+      prog=""
+      read -r -a words <<< "$("$ps_cmd" -o args= -p "$pid" 2>/dev/null || true)"
+      for w in ${words[@]+"${words[@]:1}"}; do
+        case "$w" in -*) continue ;; esac
+        prog="$w"
+        break
+      done ;;
   esac
-  case "${words[*]:-}" in
-    *[Aa]ntigravity.app/*) AGENT_OF=antigravity; return 0 ;;
-    *[Cc]odex[Cc][Ll][Ii].app/*) AGENT_OF=codex; return 0 ;;
+  case "$prog" in
+    *[Aa]ntigravity.app/*)       AGENT_OF=antigravity ;;
+    *[Cc]odex[Cc][Ll][Ii].app/*) AGENT_OF=codex ;;
+    *)
+      case "${prog##*/}" in
+        claude|claude.js)    AGENT_OF=claude ;;
+        codex|codex.js)      AGENT_OF=codex ;;
+        [Aa]ntigravity*|agy) AGENT_OF=antigravity ;;
+      esac ;;
   esac
-  for w in ${words[@]+"${words[@]}"}; do
-    case "$w" in -*) continue ;; esac
-    base="${w##*/}"
-    if [ "$first" = 1 ]; then
-      first=0
-      case "$base" in node|python|python3|bun|deno|bash|sh|zsh) continue ;; esac
-    fi
-    case "$base" in
-      claude|claude.js) AGENT_OF=claude ;;
-      codex|codex.js)   AGENT_OF=codex ;;
-      [Aa]ntigravity*|agy) AGENT_OF=antigravity ;;
-    esac
-    return 0
-  done
   return 0
 }
 

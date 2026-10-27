@@ -295,6 +295,15 @@ check_attribution \
   CLAUDE_PID=8001 \
   CLAUDE_CODE_SESSION_ID=claude-pid-999
 
+# Case 12: the shell an agent runs its tools in names other agents in its command
+# line; it is not one (review of #37)
+check_attribution \
+  "A shell command line that mentions agents" \
+  "claude" "claude-shell-121" "" \
+  "9101:9102:/bin/zsh:/bin/zsh -c claude --version && kyb add --body /Applications/Antigravity.app/x
+9102:1:/Users/alex/.local/bin/claude:claude" \
+  CLAUDE_CODE_SESSION_ID=claude-shell-121
+
 echo "---"
 if [ "$failures" -ne 0 ]; then
   echo "$failures attribution case(s) failed" >&2
