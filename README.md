@@ -139,8 +139,8 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
   version, visible in `kyb history` and `kyb diff`.
 - **Deadlines surface on their own** — every read answer (`/search`, `/knowledge/{key}`,
   `/tasks`, `/incidents`, and so every CLI and MCP read) carries a `deadlines` block when an open
-  task is late or inside its reminder window: up to five, hard ones first, then by date, with
-  the days left. Nothing due, no block. The CLI prints it as a short banner on stderr;
+  task is late or inside its reminder window: up to five, the late ones first, then hard before
+  soft and by date, with the days left — a distant hard deadline never pushes a late task out. Nothing due, no block. The CLI prints it as a short banner on stderr;
   `--no-deadlines` (`?deadlines=false`) leaves it off. `kyb deadlines` is the full calendar:
   overdue, this week, later. A bare date is judged by the caller's calendar (the CLI sends its
   own date as `X-KYB-Today`); otherwise by the server's `TZ`. KYB reminds, it never schedules:
