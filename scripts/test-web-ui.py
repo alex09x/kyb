@@ -1884,6 +1884,8 @@ def run(base, headed, coverage=None):
           out.prov = [dlNote(it(3, false, {provisional: true})), dlCallout({key: 'k', title: 't'}, it(3, false, {provisional: true})), dlCallout({key: 'k', title: 't'}, it(3, false))];
           out.nochip = dueChip(undefined); out.noribbon = dlTimeline([{key: 'nothing-dated'}]);
           out.unreminded = dlCallout({key: 'k', title: 't'}, it(-1, true, {remind_days: 0}));
+          const saved = App.deadlines; App.deadlines = new Map([['k-due', it(0, false, {key: 'k-due', hard: true})], ['k-late', it(0, true, {key: 'k-late'})]]);
+          out.sameDay = dlSort([{key: 'k-due'}, {key: 'k-late'}]).map(t => t.key); App.deadlines = saved;
           out.hardForm = deadlineFields('probe', {hard: true, remind_days: 0});
           return out; })""")
         check("no block, no strip", st["none"] is True, st)
@@ -1892,6 +1894,7 @@ def run(base, headed, coverage=None):
         check("the words for every distance", st["when"] == [["2d late", "2 days late"], ["late today", "late today"], ["due today", "today"], ["in 1d", "in 1 day"], [ev("dlDate(localToday(30))"), "in 30 days"]], st["when"])
         check("waiting on nothing named still reads, and a near date has no callout", "an event" in st["prov"][0] and "an event" in st["prov"][1] and st["prov"][2] == "", st["prov"])
         check("no deadline, no chip and no ribbon", st["nochip"] == "" and st["noribbon"] == "", st)
+        check("on its own day a late task comes before a hard one merely due today", st["sameDay"] == ["k-late", "k-due"], st["sameDay"])
         check("a deadline with no reminder window says nothing of reminders", "1 day late" in st["unreminded"] and "Reminders" not in st["unreminded"], st["unreminded"])
         check("the form shows a hard deadline as hard, a zero window as zero", 'id="probeHard" checked' in st["hardForm"] and 'id="probeRemind" value="0"' in st["hardForm"], st["hardForm"][:400])
         nod = ev("""async () => { const real = window.apiFetch; window.apiFetch = u => u === '/deadlines' || u.startsWith('/search') ? Promise.resolve(null) : real(u);

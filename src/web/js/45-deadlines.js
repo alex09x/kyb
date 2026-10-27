@@ -71,7 +71,8 @@
 
     // 1c. By due date: what has a date first, soonest first (late ones lead), the rest after.
     function dlSort(list) {
-      const at = t => { const it = dlItem(t.key); return it ? it.days_left : Infinity; };
+      // on its own day a late one ("late today") still comes before one merely due today
+      const at = t => { const it = dlItem(t.key); return it ? it.days_left - Number(!!it.overdue) * 0.5 : Infinity; };
       const hard = t => Number(!!dlItem(t.key)?.hard);
       return list.map((t, i) => [t, i]).sort(([a, i], [b, j]) => at(a) - at(b) || hard(b) - hard(a) || i - j).map(([t]) => t);
     }
