@@ -197,108 +197,70 @@ urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.arg
 # are recorded as nested-in. When no agent ancestor is found in the process
 # tree, the environment variables serve as a fallback. KYB_AGENT still overrides
 # all discovery.
-identify_agent_proc() { # identify_agent_proc <pid> <comm> <ps_cmd>
-  local pid="$1" comm="$2" ps_cmd="$3"
-  local comm_lower comm_base
-
-  # Claude Code exports CLAUDE_PID as an extra signal (must be an ancestor to count)
-  if [ -n "${CLAUDE_PID:-}" ] && [ "$pid" = "$CLAUDE_PID" ]; then
-    printf 'claude'
-    return 0
-  fi
-
-  if [ -n "$comm" ]; then
-    comm_lower="$(printf '%s' "$comm" | tr '[:upper:]' '[:lower:]')"
-    comm_base="${comm_lower##*/}"
-    case "$comm_lower" in
-      *antigravity.app/*) printf 'antigravity'; return 0 ;;
-      *codexcli.app/*)    printf 'codex'; return 0 ;;
-    esac
-    case "$comm_base" in
-      claude|claude.js)               printf 'claude'; return 0 ;;
-      codex|codex.js)                 printf 'codex'; return 0 ;;
-      antigravity|antigravity\ *|agy) printf 'antigravity'; return 0 ;;
-    esac
-  fi
-
-  # Fall back to ps -o args= when comm is generic (e.g. node, python, bash)
-  local args args_lower a0 target target_lower target_base w
-  args="$("$ps_cmd" -o args= -p "$pid" 2>/dev/null || true)"
-  if [ -n "$args" ]; then
-    args_lower="$(printf '%s' "$args" | tr '[:upper:]' '[:lower:]')"
-    case "$args_lower" in
-      *antigravity.app/*) printf 'antigravity'; return 0 ;;
-      *codexcli.app/*)    printf 'codex'; return 0 ;;
-    esac
-    read -r a0 _ <<< "$args"
-    target="$a0"
-    local a0_base="${a0##*/}"
-    a0_base="$(printf '%s' "$a0_base" | tr '[:upper:]' '[:lower:]')"
-    case "$a0_base" in
-      node|python|python3|bun|deno|bash|sh|zsh)
-        target=""
-        for w in $args; do
-          [ "$w" = "$a0" ] && continue
-          case "$w" in
-            -*) continue ;;
-            *) target="$w"; break ;;
-          esac
-        done
-        ;;
-    esac
-    if [ -n "$target" ]; then
-      target_lower="$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')"
-      target_base="${target_lower##*/}"
-      case "$target_lower" in
-        *antigravity.app/*) printf 'antigravity'; return 0 ;;
-        *codexcli.app/*)    printf 'codex'; return 0 ;;
-      esac
-      case "$target_base" in
-        claude|claude.js)               printf 'claude'; return 0 ;;
-        codex|codex.js)                 printf 'codex'; return 0 ;;
-        antigravity|antigravity\ *|agy) printf 'antigravity'; return 0 ;;
-      esac
+# Which agent a process is: a path inside an agent's app bundle, or the name of
+# the program - or, for an interpreter (node, python, ...), of the script it
+# runs, which is the only case that costs a second ps. Sets AGENT_OF; matches
+# ignore case. No subshells beyond ps itself: this runs for every ancestor on
+# every kyb call, and on a Mac with a thousand processes a whole-table snapshot
+# costs ten times a ps per ancestor.
+agent_of() { # agent_of <pid> <comm> <ps_cmd>
+  local pid="$1" comm="$2" ps_cmd="$3" w base first=1
+  local -a words
+  AGENT_OF=""
+  # Claude Code exports CLAUDE_PID as an extra signal (it must be an ancestor to count)
+  if [ -n "${CLAUDE_PID:-}" ] && [ "$pid" = "$CLAUDE_PID" ]; then AGENT_OF=claude; return 0; fi
+  words=("$comm")
+  case "${comm##*/}" in
+    node|python|python3|bun|deno|bash|sh|zsh)
+      read -r -a words <<< "$("$ps_cmd" -o args= -p "$pid" 2>/dev/null || true)" ;;
+  esac
+  case "${words[*]:-}" in
+    *[Aa]ntigravity.app/*) AGENT_OF=antigravity; return 0 ;;
+    *[Cc]odex[Cc][Ll][Ii].app/*) AGENT_OF=codex; return 0 ;;
+  esac
+  for w in ${words[@]+"${words[@]}"}; do
+    case "$w" in -*) continue ;; esac
+    base="${w##*/}"
+    if [ "$first" = 1 ]; then
+      first=0
+      case "$base" in node|python|python3|bun|deno|bash|sh|zsh) continue ;; esac
     fi
-  fi
+    case "$base" in
+      claude|claude.js) AGENT_OF=claude ;;
+      codex|codex.js)   AGENT_OF=codex ;;
+      [Aa]ntigravity*|agy) AGENT_OF=antigravity ;;
+    esac
+    return 0
+  done
   return 0
 }
 
-# Walk up the process tree from the CLI's parent to discover the inner agent
-# (the nearest agent ancestor) and any outer agent it is nested inside.
+# Walk up from the CLI's parent to the nearest agent (the inner one) and the
+# agent it runs inside, if any.
 walk_agent_ancestors() {
   # KYB_PS_COMMAND: test-only hook to substitute ps with a mock command
   local ps_cmd="${KYB_PS_COMMAND:-ps}"
   # KYB_TEST_PPID: test-only hook to seed the initial parent PID
-  local curr_pid="${KYB_TEST_PPID:-$PPID}"
-  local level=0 line next_ppid comm agent
-  local inner="" outer=""
-
-  while [ -n "$curr_pid" ] && [ "$curr_pid" -gt 1 ] 2>/dev/null && [ "$level" -lt 30 ]; do
+  local pid="${KYB_TEST_PPID:-$PPID}" level=0 line ppid comm
+  PROC_INNER_AGENT=""
+  PROC_OUTER_AGENT=""
+  while [ "$level" -lt 30 ] && [ "$pid" -gt 1 ] 2>/dev/null; do
     level=$((level + 1))
-    line="$("$ps_cmd" -o ppid= -o comm= -p "$curr_pid" 2>/dev/null)" || break
-    [ -n "$line" ] || break
-    read -r next_ppid comm <<< "$line"
-    case "$next_ppid" in
-      ''|*[!0-9]*) break ;;
-    esac
-
-    agent="$(identify_agent_proc "$curr_pid" "$comm" "$ps_cmd")"
-    if [ -n "$agent" ]; then
-      if [ -z "$inner" ]; then
-        inner="$agent"
-      elif [ -z "$outer" ] && [ "$agent" != "$inner" ]; then
-        outer="$agent"
+    line="$("$ps_cmd" -o ppid= -o comm= -p "$pid" 2>/dev/null)" || break
+    read -r ppid comm <<< "$line"
+    case "$ppid" in ''|*[!0-9]*) break ;; esac
+    agent_of "$pid" "$comm" "$ps_cmd"
+    if [ -n "$AGENT_OF" ]; then
+      if [ -z "$PROC_INNER_AGENT" ]; then
+        PROC_INNER_AGENT="$AGENT_OF"
+      elif [ "$AGENT_OF" != "$PROC_INNER_AGENT" ]; then
+        PROC_OUTER_AGENT="$AGENT_OF"
         break
       fi
     fi
-
-    [ "$next_ppid" -le 0 ] 2>/dev/null && break
-    [ "$next_ppid" -eq "$curr_pid" ] && break
-    curr_pid="$next_ppid"
+    [ "$ppid" != "$pid" ] || break
+    pid="$ppid"
   done
-
-  PROC_INNER_AGENT="$inner"
-  PROC_OUTER_AGENT="$outer"
 }
 
 by_context() { # sets BY_AGENT, BY_SESSION, and optionally BY_NESTED_IN
