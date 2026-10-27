@@ -391,7 +391,7 @@ kyb deadlines --overdue | --hard | --tag tls | --assignee agent-a | --json
 
 | Field | Meaning |
 |---|---|
-| `--due` | `YYYY-MM-DD`, or a date-time with its zone (`2026-03-14T17:00:00-07:00`). A bare date is due on that day **on the caller's calendar**; a date-time is late once that instant has passed. A time without a zone is rejected. `""` clears it. |
+| `--due` | `YYYY-MM-DD`, or a date-time with its zone (`2026-03-14T17:00:00-07:00`). A bare date is due on that day **on the caller's calendar**; a date-time counts by its own day the same way, and is also late once its instant has passed. A time without a zone is rejected. `""` clears it. |
 | `--hard` / `--no-hard` | a miss has consequences outside the team: an expiry, a contractual or regulatory date, a third party's cut-off. Hard deadlines come first and are surfaced earlier. |
 | `--remind-days N` | how many days ahead it starts being surfaced. Default 14, or 30 for a hard deadline; `""` returns it to the default. |
 | `--waits-on` + `--expected` | the real date depends on an event. `expected` is a provisional date, reminded on (and marked provisional) until you set `--due`. |
@@ -403,8 +403,10 @@ with `""` to clear it. `kyb task-status --due ...` needs no `--status`: the task
 **The block in every answer.** `query`, `get`, `tasks` and `incidents` — over the CLI, HTTP and
 MCP alike — carry a `deadlines` object when an open task is late or inside its reminder window:
 `today`, `count`, `overdue`, `more`, and up to 5 `items` (key, title, due, `days_left` — negative
-is late — `overdue`, `hard`, `provisional`, `waits_on`), hard ones first, then by date; a query
-with `--tag` puts that area's deadlines first. Nothing late or near = no block at all. The CLI
+is late — `overdue`, `hard`, `provisional`, `waits_on`). The late ones always come first (hard
+before soft, the latest first), then what is coming (hard before soft, the nearest first), so the
+cap never hides a late task behind a distant one; a query with `--tag` puts that area first
+within each part. Nothing late or near = no block at all. The CLI
 prints it as a short banner on **stderr**, so stdout stays the server's JSON:
 
 ```
