@@ -94,6 +94,15 @@ instead of a synonym:
 | `<area>-<topic>` | `nats-streams` | cross-cutting rules and gotchas |
 | `<decision>` | `why-tantivy-not-mongo` | a settled decision and its rationale |
 
+Tags apply equally to knowledge, incidents and tasks. On creation, always add the
+canonical project/service topic tag (for example `hyperliquid`) with `--tags`;
+use the same topic tag on related records of every kind. A service name or a
+`--knowledge` link does not automatically add a tag. Use `--knowledge key1,key2`
+and `[[key]]` for specific relationships; tags collect a topic across records.
+For incident/task updates, omitting `--tags` preserves the stored tags; passing
+`--tags ""` explicitly clears them. Other fields still follow the replacement
+contract: fetch the current entry first and preserve its metadata.
+
 Tags carry the scope (`infra`, `nats`, `host-a`) — no projects, no namespaces. Link related
 entries with `[[other-key]]` so the graph stays walkable.
 

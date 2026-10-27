@@ -832,6 +832,11 @@ def run(base, headed, coverage=None):
         ev("location.hash = '#/search'")
         page.wait_for_function("App.tagFilter === null && document.querySelectorAll('#knowledgeList .item-card').length > 1", timeout=5000)
         check("route tag -> plain search drops the tag filter", ev("document.getElementById('globalSearch').value") == "")
+        page.fill("#globalSearch", "#kyb"); page.press("#globalSearch", "Enter")
+        page.wait_for_function("location.hash === '#/search?tag=kyb'", timeout=5000)
+        check("#tag typed and Enter filters by the tag", ev("App.tagFilter") == "kyb")
+        ev("document.activeElement.blur(); location.hash = '#/search'")   # keys pressed later must not land in the search box
+        page.wait_for_function("App.tagFilter === null && document.querySelectorAll('#knowledgeList .item-card').length > 1", timeout=5000)
         ev("location.hash = '#/search?tag=kyb'")
         page.wait_for_function("App.tagFilter === 'kyb'", timeout=5000)
         ev("location.hash = '#/search?q=Mentions'")

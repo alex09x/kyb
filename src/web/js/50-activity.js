@@ -148,6 +148,7 @@
     function setGlobalSearchQuery(q) {
       const searchEl = document.getElementById('globalSearch');
       if (searchEl) {
+        const hadTag = !!App.tagFilter;   // the list then held only that tag's entries
         searchEl.value = q;
         App.searchQuery = q;
         App.tagFilter = null;
@@ -157,6 +158,7 @@
           history.pushState(null, '', targetHash);
         }
         renderKnowledgeList();
+        if (hadTag) return refreshAll();   // returned so a caller can wait for the whole list
       }
     }
 

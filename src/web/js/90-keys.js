@@ -1,3 +1,13 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
     // Keyboard Shortcuts & Events
     window.addEventListener('DOMContentLoaded', () => {
       // Tab navigation
@@ -23,15 +33,23 @@
       searchEl.addEventListener('input', (e) => {
         const v = e.target.value;
         const m = v.match(/^#(\S+)$/);  // "#postgres" filters by tag (any tag the server accepts); anything else is a text search
+        const previousTag = App.tagFilter;
         App.tagFilter = m ? m[1] : null;
         App.searchQuery = m ? '' : v;
         if (App.activeTab !== 'search') switchTab('search', false);
+        if (m || previousTag) {
+          App.isBackendSearchResults = false;
+          refreshAll();
+        }
         renderKnowledgeList();
       });
       searchEl.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
           const q = searchEl.value.trim();
-          if (q) {
+          const tag = q.match(/^#(\S+)$/);
+          if (tag) {
+            filterByTag(tag[1]);
+          } else if (q) {
             const targetHash = `#/search?q=${encodeURIComponent(q)}`;
             if (window.location.hash !== targetHash) {
               history.pushState(null, '', targetHash);
@@ -205,10 +223,13 @@
               }
             });
           } else {
+            // while a tag filtered, the list held only that tag's entries: fetch the whole list again
+            const hadTag = !!App.tagFilter;
             App.tagFilter = null;
             App.isBackendSearchResults = false;
             if (searchEl && searchEl.value.startsWith('#')) searchEl.value = '';
             renderKnowledgeList();
+            if (hadTag) refreshAll();
           }
           document.title = term ? `KYB — Search: ${term}` : 'KYB — Fleet Knowledge';
         } else if (root === 'feed' || root === 'activity') {

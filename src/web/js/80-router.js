@@ -1,3 +1,13 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
     // Navigation & Hash Router
     function switchTab(tabName, updateHash = true) {
       App.activeTab = tabName;
@@ -37,6 +47,7 @@
         history.pushState(null, '', targetHash);
       }
       renderKnowledgeList();
+      refreshAll();
     }
 
     function escapeHtml(str) {
