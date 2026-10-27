@@ -453,6 +453,14 @@ The tool list comes from the server, so it always matches the routes that actual
 upgrading the server is how agents get new tools. `?readonly=1` drops the writing tools.
 `kyb rm` and `kyb reindex` are not on the MCP surface; they stay CLI-only.
 
+### Exit codes
+
+The CLI reports outcomes through deterministic exit codes:
+- `0` — Success.
+- `1` — The server rejected the request (`4xx`), or the command line was malformed.
+- `2` — Server error (`5xx`).
+- `3` — The server could not be reached (connection refused, timeout, DNS failure).
+
 ---
 
 ## 10. Write rules (governance — mandatory)
