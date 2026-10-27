@@ -20,8 +20,8 @@ authors:
     given-names: Alexander
     email: alex@prod.codes
     orcid: "https://orcid.org/0009-0003-3569-6490"
-version: 0.3.1
-date-released: "2026-10-14"
+version: 0.3.2
+date-released: "2026-10-26"
 doi: 10.5281/zenodo.22850723
 identifiers:
   - description: "The concept DOI of the work."
