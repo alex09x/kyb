@@ -151,6 +151,25 @@ fn a_date_time_follows_the_callers_today_like_a_bare_date() {
 }
 
 #[test]
+fn a_today_sent_for_another_time_is_answered_by_the_calendar_alone() {
+    // the instant is long past on the real clock; a caller asking about a day
+    // before it, or about its own day, is not told it is late (review of #34)
+    let past = due("2026-03-10T08:30:00-08:00");
+    let now = "2026-10-27T04:00:00Z";
+    let before = item_of("task-past", &past, &clock(now, "2026-01-01")).unwrap();
+    assert_eq!((before.days_left, before.overdue), (68, false));
+    let on = item_of("task-past", &past, &clock(now, "2026-03-10")).unwrap();
+    assert_eq!((on.days_left, on.overdue), (0, false));
+    let after = item_of("task-past", &past, &clock(now, "2026-03-11")).unwrap();
+    assert_eq!((after.days_left, after.overdue), (-1, true));
+    // the present, on either side of UTC midnight, still hears the clock: Los Angeles
+    // at 18:00 on the 14th is already the 15th in UTC
+    let tokyo = due("2026-03-15T01:00:00+09:00");
+    let la_evening = item_of("task-tokyo", &tokyo, &clock("2026-03-15T01:00:00Z", "2026-03-14")).unwrap();
+    assert!(la_evening.overdue && la_evening.days_left == 0, "{la_evening:?}");
+}
+
+#[test]
 fn a_date_time_across_the_daylight_saving_change_keeps_its_own_day() {
     // 2026-11-01 01:30 happens twice in Los Angeles: once in PDT, once in PST
     let c = clock("2026-10-27T04:00:00Z", "2026-11-02");

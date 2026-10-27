@@ -319,9 +319,15 @@ pub fn item(task: &Task, clock: &Clock) -> Option<Item> {
             // has passed, the deadline is late even on its own day, or on the day
             // before for a caller whose calendar runs behind the deadline's zone,
             // and then no count of days to go is left standing.
+            //
+            // The instant is the real clock, so it speaks only for a today that is
+            // the present somewhere on Earth - every zone's date is within a day of
+            // the UTC one. A today sent for another time, past or future, is a
+            // question about that day, and the calendar alone answers it.
             let day = at.date_naive();
             let days = (day - clock.today).num_days();
-            let overdue = clock.today > day || clock.now > at;
+            let present = (clock.today - clock.now.date_naive()).num_days().abs() <= 1;
+            let overdue = clock.today > day || (present && clock.now > at);
             (if overdue { days.min(0) } else { days }, overdue)
         }
     };
