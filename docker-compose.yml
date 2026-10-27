@@ -18,5 +18,8 @@ services:
       KYB_AUTH_FILE: "${KYB_AUTH_FILE:-/data/auth.json}"
       # "read" lets callers without a token read (a public demo); empty = nobody.
       KYB_ANON: "${KYB_ANON:-}"
+      # Whose calendar decides "today" for a caller that does not send its own
+      # date (the CLI does): an IANA zone such as America/Los_Angeles.
+      TZ: "${TZ:-UTC}"
     volumes:
       - ./data:/data # ./data/kyb-data — git canon, ./data/index — Tantivy, ./data/auth.json — token book

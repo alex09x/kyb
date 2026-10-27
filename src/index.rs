@@ -1,3 +1,14 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
+use crate::deadline::Deadline;
 use crate::model::{Entry, Window, KIND_KNOWLEDGE};
 use crate::store::Store;
 use anyhow::Result;
@@ -56,6 +67,9 @@ pub struct Fields {
     detection: Field,
     /// Stored only (JSON): affected windows ride on the hit, nobody greps them.
     affected: Field,
+    /// Stored only (JSON): a task's deadline rides on the hit, so the deadline
+    /// block of every response is one query over the task heads, not a disk walk.
+    deadline: Field,
     started_at: Field,
     detected_at: Field,
     mitigated_at: Field,
@@ -135,6 +149,9 @@ pub struct Hit {
     pub detection: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub affected: Vec<Window>,
+    /// due, hard, remind_days, waits_on, expected - each only when set.
+    #[serde(flatten)]
+    pub deadline: Deadline,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub started_at: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -207,6 +224,7 @@ fn build_schema() -> Schema {
     sb.add_text_field("resolution", text_opts().set_stored());
     sb.add_text_field("detection", text_opts().set_stored());
     sb.add_text_field("affected", TextOptions::default().set_stored());
+    sb.add_text_field("deadline", TextOptions::default().set_stored());
     sb.add_text_field("started_at", TextOptions::default().set_stored());
     sb.add_text_field("detected_at", TextOptions::default().set_stored());
     sb.add_text_field("mitigated_at", TextOptions::default().set_stored());
@@ -278,6 +296,7 @@ impl SearchIndex {
             resolution: f("resolution"),
             detection: f("detection"),
             affected: f("affected"),
+            deadline: f("deadline"),
             started_at: f("started_at"),
             detected_at: f("detected_at"),
             mitigated_at: f("mitigated_at"),
@@ -362,6 +381,10 @@ impl SearchIndex {
             let json = serde_json::to_string(&e.affected).expect("windows always serialize");
             d.add_text(self.fields.affected, json);
         }
+        if !e.deadline.is_empty() {
+            let json = serde_json::to_string(&e.deadline).expect("a deadline always serializes");
+            d.add_text(self.fields.deadline, json);
+        }
         for (f, v) in [
             (self.fields.started_at, &e.started_at),
             (self.fields.detected_at, &e.detected_at),
@@ -374,7 +397,13 @@ impl SearchIndex {
         }
         // SimpleTokenizer splits on non-alphanumerics, so orders_api and
         // orders-api-architecture both become searchable words here
-        let meta = format!("{} {} {}", e.service, e.hosts.join(" "), e.knowledge.join(" "));
+        let meta = format!(
+            "{} {} {} {}",
+            e.service,
+            e.hosts.join(" "),
+            e.knowledge.join(" "),
+            e.deadline.waits_on
+        );
         if !meta.trim().is_empty() {
             d.add_text(self.fields.meta_text, meta);
         }
@@ -799,6 +828,7 @@ impl SearchIndex {
             resolution: text(self.fields.resolution),
             detection: text(self.fields.detection),
             affected: serde_json::from_str(&text(self.fields.affected)).unwrap_or_default(),
+            deadline: serde_json::from_str(&text(self.fields.deadline)).unwrap_or_default(),
             started_at: text(self.fields.started_at),
             detected_at: text(self.fields.detected_at),
             mitigated_at: text(self.fields.mitigated_at),

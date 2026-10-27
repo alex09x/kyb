@@ -366,9 +366,72 @@ still counted by `kyb health` (`open_tasks` = all three live statuses).
 | `--parent` | optional: the `task-` key this one hangs under; empty = top-level. Must be a valid `task-` key and cannot create a parent cycle (400). A parent that does not exist **yet** is allowed — a child may be filed first — and comes back as `unknown_parent` in the reply. Exact filter: `kyb tasks --parent <key>`. |
 
 Updating is the same `kyb task` with the same key (wholesale replace — resend `--priority`
-and `--tags` or they are wiped); moving a task between live statuses is `kyb task-status`
-(partial, resends nothing). Follow-ups from a resolved incident that deserve their own life →
-file them as tasks linked via `--knowledge`.
+and `--tags` or they are wiped; the deadline fields below are the exception and are kept when
+left out); moving a task between live statuses is `kyb task-status` (partial, resends nothing).
+Follow-ups from a resolved incident that deserve their own life → file them as tasks linked
+via `--knowledge`.
+
+### Deadlines
+
+A date written into a title as prose ("renew before 03/14") can be neither sorted nor noticed.
+Give the task a due date and the server surfaces it on its own — in **every** read answer.
+
+```bash
+kyb task --key task-renew-api-cert --title "Renew the api.example.com certificate" \
+         --due 2026-03-14 --hard [--remind-days 30] <<< "Expires on the 14th."
+kyb task-status task-renew-api-cert --due 2026-03-21      # move it: a new version, `kyb diff` shows it
+kyb task --key task-answer-quote --title "Answer the vendor's quote" \
+         --waits-on "the vendor's quote arrives" --expected 2026-03-20 <<< "Within 10 business days."
+kyb task-status task-answer-quote --due 2026-03-24 --expected ""   # the quote came: the real date
+
+kyb deadlines                      # open tasks with a date: OVERDUE / THIS WEEK / LATER
+kyb deadlines --within 14d         # due within 14 days (late ones always count)
+kyb deadlines --overdue | --hard | --tag tls | --assignee agent-a | --json
+```
+
+| Field | Meaning |
+|---|---|
+| `--due` | `YYYY-MM-DD`, or a date-time with its zone (`2026-03-14T17:00:00-07:00`). A bare date is due on that day **on the caller's calendar**; a date-time is late once that instant has passed. A time without a zone is rejected. `""` clears it. |
+| `--hard` / `--no-hard` | a miss has consequences outside the team: an expiry, a contractual or regulatory date, a third party's cut-off. Hard deadlines come first and are surfaced earlier. |
+| `--remind-days N` | how many days ahead it starts being surfaced. Default 14, or 30 for a hard deadline; `""` returns it to the default. |
+| `--waits-on` + `--expected` | the real date depends on an event. `expected` is a provisional date, reminded on (and marked provisional) until you set `--due`. |
+
+Deadline fields belong to tasks only. **A flag left out keeps what the task already says** —
+on `kyb task` too — so rewriting a task to fix its body never drops its due date; pass the flag
+with `""` to clear it. `kyb task-status --due ...` needs no `--status`: the task keeps its own.
+
+**The block in every answer.** `query`, `get`, `tasks` and `incidents` — over the CLI, HTTP and
+MCP alike — carry a `deadlines` object when an open task is late or inside its reminder window:
+`today`, `count`, `overdue`, `more`, and up to 5 `items` (key, title, due, `days_left` — negative
+is late — `overdue`, `hard`, `provisional`, `waits_on`), hard ones first, then by date; a query
+with `--tag` puts that area's deadlines first. Nothing late or near = no block at all. The CLI
+prints it as a short banner on **stderr**, so stdout stays the server's JSON:
+
+```
+kyb deadlines, today 2026-03-16: 1 overdue, 1 due soon
+  2d late    HARD task-renew-api-cert  Renew the api.example.com certificate  (due 2026-03-14)
+  in 4d      task-answer-quote  Answer the vendor's quote  (expected 2026-03-20, waits on the vendor's quote arrives)
+```
+
+When you see it: act on it, or tell the person you are working for. `--no-deadlines` on any
+read leaves it off (scripts, bulk reads); over HTTP that is `?deadlines=false`, over MCP
+`"deadlines": false`. Closing the task removes it from every deadline answer at once.
+
+**Whose "today".** The CLI sends the date of the machine it runs on (`X-KYB-Today`; `KYB_TODAY`
+overrides it). A caller that sends none — an MCP client, a script — gets the server's date in
+its own time zone (`TZ` in the server's environment).
+
+**Deadlines at session start (optional).** So that they are seen even in a session that never
+queries the base, have the agent's session-start hook print them. Claude Code,
+`~/.claude/settings.json`:
+
+```json
+{"hooks": {"SessionStart": [{"hooks": [{"type": "command",
+  "command": "kyb deadlines --within 14d 2>/dev/null || true"}]}]}}
+```
+
+What a `SessionStart` hook prints is added to the session's context. Other agents: run the same
+command from whatever their start hook or startup script is.
 
 ---
 

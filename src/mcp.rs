@@ -1,3 +1,13 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
 //! MCP served by the knowledge base itself, over HTTP.
 //!
 //! `POST /mcp`, and `claude mcp add --transport http kyb http://<host>:9310/mcp`
@@ -57,7 +67,8 @@ KYB is a shared, versioned knowledge base about this fleet's own infrastructure 
 services, ports, deploys, architecture decisions, incidents and tasks. Query it before \
 reasoning about infrastructure instead of guessing, and write back what you verified. \
 Writing the same key again adds a version rather than overwriting, so a superseded fact \
-stays searchable and an answer from the past is marked as one.";
+stays searchable and an answer from the past is marked as one. A read answer carries a \
+`deadlines` block when a task is late or inside its reminder window: act on it, or say so.";
 
 /// Deliberately not exposed: `rm` and `reindex`. Retracting an entry and
 /// rebuilding the index should not be something an agent reaches for mid-thought,
@@ -445,6 +456,51 @@ fn push(query: &mut Vec<(&'static str, String)>, key: &'static str, value: Optio
     }
 }
 
+/// `deadlines: false` on a read tool leaves the deadline block off its answer.
+fn no_deadlines(args: &Value, query: &mut Vec<(&'static str, String)>) {
+    let off = match args.get("deadlines") {
+        Some(Value::Bool(b)) => !b,
+        Some(Value::String(s)) => matches!(s.to_lowercase().as_str(), "false" | "0" | "no"),
+        _ => false,
+    };
+    if off {
+        query.push(("deadlines", "false".into()));
+    }
+}
+
+/// The deadline fields travel only when the call names them: a field left out
+/// keeps what the task already says, an empty string clears it, and
+/// `remind_days: null` returns it to the server default.
+fn deadline_fields(args: &Value, body: &mut Value) -> Result<(), String> {
+    for field in ["due", "waits_on", "expected"] {
+        match args.get(field) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(s)) => body[field] = json!(s),
+            Some(_) => return Err(format!("`{field}` must be a string")),
+        }
+    }
+    match args.get("hard") {
+        None | Some(Value::Null) => {}
+        Some(Value::Bool(b)) => body["hard"] = json!(b),
+        Some(Value::String(s)) => match s.to_lowercase().as_str() {
+            "true" | "1" | "yes" => body["hard"] = json!(true),
+            "false" | "0" | "no" => body["hard"] = json!(false),
+            _ => return Err("`hard` must be true or false".into()),
+        },
+        Some(_) => return Err("`hard` must be true or false".into()),
+    }
+    match args.get("remind_days") {
+        None => {}
+        Some(Value::Null) => body["remind_days"] = Value::Null,
+        Some(Value::Number(n)) if n.as_u64().is_some() => body["remind_days"] = json!(n),
+        Some(Value::String(s)) if s.trim().parse::<u32>().is_ok() => {
+            body["remind_days"] = json!(s.trim().parse::<u32>().unwrap_or_default())
+        }
+        Some(_) => return Err("`remind_days` must be a whole number of days".into()),
+    }
+    Ok(())
+}
+
 fn plan(name: &str, args: &Value) -> Result<Call, String> {
     let call = match name {
         "kyb_query" => {
@@ -468,12 +524,14 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             if args.get("semantic") == Some(&Value::Bool(false)) {
                 query.push(("semantic", "false".into()));
             }
+            no_deadlines(args, &mut query);
             Call { method: "GET", path: "/search".into(), query, body: None }
         }
         "kyb_get" => {
             require(args, &["key"])?;
             let mut query = Vec::new();
             push(&mut query, "at", text_arg(args, "at"));
+            no_deadlines(args, &mut query);
             Call {
                 method: "GET",
                 path: format!("/knowledge/{}", text_arg(args, "key").unwrap_or_default()),
@@ -517,6 +575,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             if flag_arg(args, "followups").is_some() {
                 query.push(("followups", "open".into()));
             }
+            no_deadlines(args, &mut query);
             Call { method: "GET", path: "/incidents".into(), query, body: None }
         }
         "kyb_tasks" => {
@@ -530,7 +589,17 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             if flag_arg(args, "followups").is_some() {
                 query.push(("followups", "open".into()));
             }
+            no_deadlines(args, &mut query);
             Call { method: "GET", path: "/tasks".into(), query, body: None }
+        }
+        "kyb_deadlines" => {
+            let mut query = Vec::new();
+            push(&mut query, "within", text_arg(args, "within"));
+            push(&mut query, "overdue", flag_arg(args, "overdue"));
+            push(&mut query, "hard", flag_arg(args, "hard"));
+            push(&mut query, "tag", text_arg(args, "tag"));
+            push(&mut query, "assignee", text_arg(args, "assignee"));
+            Call { method: "GET", path: "/deadlines".into(), query, body: None }
         }
         "kyb_add" => {
             require(args, &["key", "title", "body"])?;
@@ -596,32 +665,35 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
         }
         "kyb_task" => {
             require(args, &["key", "title", "body"])?;
-            Call {
-                method: "POST",
-                path: "/tasks".into(),
-                query: Vec::new(),
-                body: Some(json!({
-                    "key": text_arg(args, "key"),
-                    "title": text_arg(args, "title"),
-                    "body": text_arg(args, "body"),
-                    "status": text_arg(args, "status").unwrap_or_else(|| "open".into()),
-                    "priority": text_arg(args, "priority").unwrap_or_default(),
-                    "blocked_reason": text_arg(args, "blocked_reason").unwrap_or_default(),
-                    "assignee": text_arg(args, "assignee").unwrap_or_default(),
-                    "parent_task": text_arg(args, "parent_task").unwrap_or_default(),
-                    "knowledge": list_arg(args, "knowledge"),
-                    "resolution": text_arg(args, "resolution").unwrap_or_default(),
-                    "tags": list_arg(args, "tags"),
-                    "refs": list_arg(args, "refs"),
-                })),
-            }
+            let mut body = json!({
+                "key": text_arg(args, "key"),
+                "title": text_arg(args, "title"),
+                "body": text_arg(args, "body"),
+                "status": text_arg(args, "status").unwrap_or_else(|| "open".into()),
+                "priority": text_arg(args, "priority").unwrap_or_default(),
+                "blocked_reason": text_arg(args, "blocked_reason").unwrap_or_default(),
+                "assignee": text_arg(args, "assignee").unwrap_or_default(),
+                "parent_task": text_arg(args, "parent_task").unwrap_or_default(),
+                "knowledge": list_arg(args, "knowledge"),
+                "resolution": text_arg(args, "resolution").unwrap_or_default(),
+                "tags": list_arg(args, "tags"),
+                "refs": list_arg(args, "refs"),
+            });
+            deadline_fields(args, &mut body)?;
+            Call { method: "POST", path: "/tasks".into(), query: Vec::new(), body: Some(body) }
         }
         "kyb_task_status" => {
-            require(args, &["key", "status"])?;
+            require(args, &["key"])?;
             // Only the fields actually supplied travel: everything omitted keeps
             // what the task already says. An empty-string assignee is a value -
             // it hands the task back - so presence is what counts, not emptiness.
-            let mut body = json!({"status": text_arg(args, "status")});
+            // Without a status the task keeps its own, which is how a deadline
+            // alone is moved.
+            let mut body = json!({});
+            if let Some(status) = text_arg(args, "status") {
+                body["status"] = json!(status);
+            }
+            deadline_fields(args, &mut body)?;
             for field in ["assignee", "parent_task", "blocked_reason"] {
                 if let Some(value) = args.get(field) {
                     if !value.is_null() {
@@ -668,6 +740,12 @@ fn tools(readonly: bool) -> Vec<Value> {
         "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "string"}],
         "description": "a list, or one comma-separated string"
     });
+    let deadlines_t = json!({"type": "boolean", "description": "false leaves the deadline block \
+(late and nearly due tasks) off this answer"});
+    let date_t = |what: &str| {
+        json!({"type": "string", "description": format!("{what}: YYYY-MM-DD, \
+or a date-time with its zone such as 2026-03-14T17:00:00-07:00; an empty string clears it")})
+    };
 
     let all = vec![
         json!({
@@ -695,6 +773,7 @@ rather than what it says now - an RFC3339 timestamp, a YYYY-MM-DD date, or any g
 A bare date means the end of that day."},
                 "changed_between": {"type": "string", "description": "only entries that changed \
 inside this window: two dates or revisions separated by a comma."},
+                "deadlines": deadlines_t,
             }},
         }),
         json!({
@@ -705,6 +784,7 @@ then'.",
             "inputSchema": {"type": "object", "required": ["key"], "properties": {
                 "key": {"type": "string", "description": "the entry's slug"},
                 "at": {"type": "string", "description": "a git revision; absent means current"},
+                "deadlines": deadlines_t,
             }},
         }),
         json!({
@@ -748,6 +828,7 @@ before infrastructure work.",
 follow-ups"},
                 "all": {"type": "boolean", "description": "include closed reports, which are \
 archived but still readable"},
+                "deadlines": deadlines_t,
             }},
         }),
         json!({
@@ -759,6 +840,22 @@ archived but still readable"},
                 "followups": {"type": "boolean", "description": "only tasks with unfinished \
 follow-ups"},
                 "all": {"type": "boolean", "description": "include closed tasks from the archive"},
+                "deadlines": deadlines_t,
+            }},
+        }),
+        json!({
+            "name": "kyb_deadlines",
+            "description": "Open tasks that have a due date, soonest first, each marked overdue, \
+this_week or later, with the days left (negative = late). Hard deadlines - expiries, contract \
+and regulatory dates - are marked; a provisional one runs on its expected date until the real \
+date is known. Closed tasks never appear.",
+            "inputSchema": {"type": "object", "properties": {
+                "within": {"type": "string", "description": "only what is due within N days, \
+e.g. 30 or 30d; late ones always count"},
+                "overdue": {"type": "boolean", "description": "only what is already late"},
+                "hard": {"type": "boolean", "description": "only hard deadlines"},
+                "tag": {"type": "string", "description": "comma-separated; every tag must match"},
+                "assignee": str_t,
             }},
         }),
         json!({
@@ -812,7 +909,8 @@ Closing archives the report: it leaves the working set and stays searchable fore
         json!({
             "name": "kyb_task",
             "description": "Create or update a task or idea. The key must start with task-. \
-Reusing the key updates it in place.",
+Reusing the key updates it in place. A deadline field left out keeps what the task already \
+says, so rewriting a task never drops its due date.",
             "inputSchema": {"type": "object", "required": ["key", "title", "body"], "properties": {
                 "key": {"type": "string", "description": "task-<slug>"},
                 "title": str_t, "body": str_t,
@@ -823,19 +921,35 @@ Reusing the key updates it in place.",
 status blocked"},
                 "assignee": str_t, "parent_task": str_t, "resolution": str_t,
                 "knowledge": list_t, "tags": list_t, "refs": list_t,
+                "due": date_t("when it is due"),
+                "hard": {"type": "boolean", "description": "missing it has real consequences: an \
+expiry, a contractual or regulatory date, a third party's cut-off"},
+                "remind_days": {"type": ["integer", "null"], "description": "how many days ahead \
+to start surfacing it; null returns it to the default (14, or 30 when hard)"},
+                "waits_on": {"type": "string", "description": "the event the real date depends on"},
+                "expected": date_t("a provisional date, reminded on until due is set"),
             }},
         }),
         json!({
             "name": "kyb_task_status",
-            "description": "Move a task between open, in_progress and blocked without resending \
-it. Title, body, tags, priority and links stay as stored. Closing is kyb_done, not this.",
-            "inputSchema": {"type": "object", "required": ["key", "status"], "properties": {
+            "description": "Move a task between open, in_progress and blocked, or move its \
+deadline, without resending it. Title, body, tags, priority and links stay as stored; without \
+a status the task keeps its own. Moving a due date is a new version, so history shows it. \
+Closing is kyb_done, not this.",
+            "inputSchema": {"type": "object", "required": ["key"], "properties": {
                 "key": str_t,
                 "status": {"type": "string", "enum": ["open", "in_progress", "blocked"]},
                 "assignee": {"type": "string", "description": "an empty string hands it back"},
                 "parent_task": str_t,
                 "blocked_reason": {"type": "string", "description": "what it waits on; only with \
 status blocked"},
+                "due": date_t("when it is due"),
+                "hard": {"type": "boolean", "description": "missing it has real consequences: an \
+expiry, a contractual or regulatory date, a third party's cut-off"},
+                "remind_days": {"type": ["integer", "null"], "description": "how many days ahead \
+to start surfacing it; null returns it to the default (14, or 30 when hard)"},
+                "waits_on": {"type": "string", "description": "the event the real date depends on"},
+                "expected": date_t("a provisional date, reminded on until due is set"),
             }},
         }),
         json!({
@@ -959,7 +1073,7 @@ mod mcp_tests {
         let tools = resp["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
-        assert_eq!(names.len(), 14, "got {names:?}");
+        assert_eq!(names.len(), 15, "got {names:?}");
         let unique: HashSet<&&str> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate tool name in {names:?}");
         for tool in tools {
@@ -1201,5 +1315,42 @@ mod mcp_tests {
         let parsed: Value = serde_json::from_str(tool_body(&tags)).unwrap();
         let text = parsed.to_string();
         assert!(text.contains("infra") && text.contains("orders"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn deadlines_reach_an_mcp_client_through_the_same_routes() {
+        let (app, _d, _i, _a) = test_app();
+        // due long ago: late on whatever calendar the test machine keeps
+        let resp = rpc(&app, call("kyb_task", json!({"key": "task-renew-cert",
+            "title": "Renew the certificate", "body": "before it expires",
+            "due": "2000-01-01", "hard": true}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+
+        let resp = rpc(&app, call("kyb_query", json!({"q": "certificate"}))).await;
+        let answer: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(answer["deadlines"]["items"][0]["key"], "task-renew-cert", "{answer}");
+        assert_eq!(answer["deadlines"]["items"][0]["overdue"], true);
+        let resp = rpc(&app, call("kyb_query", json!({"q": "certificate", "deadlines": false}))).await;
+        let answer: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert!(answer.get("deadlines").is_none(), "{answer}");
+
+        // a rewrite that does not mention the deadline keeps it
+        rpc(&app, call("kyb_task", json!({"key": "task-renew-cert",
+            "title": "Renew the certificate", "body": "before it expires, via the CA portal"}))).await;
+        // moving only the date, no status: the task keeps its own
+        let resp = rpc(&app, call("kyb_task_status", json!({"key": "task-renew-cert",
+            "due": "2999-12-31"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+
+        let resp = rpc(&app, call("kyb_deadlines", json!({"hard": true}))).await;
+        let listing: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(listing["count"], 1, "{listing}");
+        assert_eq!(listing["deadlines"][0]["due"], "2999-12-31");
+        assert_eq!(listing["deadlines"][0]["status"], "open");
+        assert_eq!(listing["deadlines"][0]["hard"], true);
+
+        let resp = rpc(&app, call("kyb_task_status", json!({"key": "task-renew-cert",
+            "remind_days": "soon"}))).await;
+        assert!(errored(&resp), "a malformed field is refused before any request is made");
     }
 }

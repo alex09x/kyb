@@ -1,3 +1,14 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
+use crate::deadline::{self, Deadline};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -68,6 +79,16 @@ struct Meta {
     assignee: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     parent_task: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    due: String,
+    #[serde(default, skip_serializing_if = "deadline::is_false")]
+    hard: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remind_days: Option<u32>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    waits_on: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    expected: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     knowledge: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -119,6 +140,9 @@ pub struct Entry {
     /// top-level. A dangling parent is allowed (a child may be filed before its
     /// parent), self-parenting is not.
     pub parent_task: String,
+    /// Task-only, optional: when the task is due, how hard that date is and how
+    /// early to start saying so (see deadline.rs). Empty = no deadline.
+    pub deadline: Deadline,
     /// Keys of the knowledge entries this incident is tied to.
     pub knowledge: Vec<String>,
     /// How the incident ended: what fixed it, or the accepted outcome.
@@ -165,6 +189,13 @@ impl Entry {
             blocked_reason: meta.blocked_reason,
             assignee: meta.assignee,
             parent_task: meta.parent_task,
+            deadline: Deadline {
+                due: meta.due,
+                hard: meta.hard,
+                remind_days: meta.remind_days,
+                waits_on: meta.waits_on,
+                expected: meta.expected,
+            },
             knowledge: meta.knowledge,
             resolution: meta.resolution,
             detection: meta.detection,
@@ -193,6 +224,11 @@ impl Entry {
             blocked_reason: self.blocked_reason.clone(),
             assignee: self.assignee.clone(),
             parent_task: self.parent_task.clone(),
+            due: self.deadline.due.clone(),
+            hard: self.deadline.hard,
+            remind_days: self.deadline.remind_days,
+            waits_on: self.deadline.waits_on.clone(),
+            expected: self.deadline.expected.clone(),
             knowledge: self.knowledge.clone(),
             resolution: self.resolution.clone(),
             detection: self.detection.clone(),
@@ -223,6 +259,7 @@ impl Entry {
             && self.blocked_reason == other.blocked_reason
             && self.assignee == other.assignee
             && self.parent_task == other.parent_task
+            && self.deadline == other.deadline
             && self.knowledge == other.knowledge
             && self.resolution == other.resolution
             && self.detection == other.detection
@@ -403,6 +440,7 @@ impl Entry {
                 bail!("parent_task is a task-only field (kind '{}')", self.kind);
             }
         }
+        self.deadline.validate(&self.kind, self.is_task())?;
         if let Some(hit) = find_secret(&self.body) {
             bail!("body looks like a secret ({hit}…) — store secrets as pointers in refs");
         }
@@ -429,6 +467,7 @@ impl Default for Entry {
             blocked_reason: String::new(),
             assignee: String::new(),
             parent_task: String::new(),
+            deadline: Deadline::default(),
             knowledge: vec![],
             resolution: String::new(),
             detection: String::new(),
@@ -1302,6 +1341,11 @@ pub fn diff_entries(from: &Entry, to: &Entry) -> (Vec<FieldChange>, BodyDiff) {
     scalar("blocked_reason", &from.blocked_reason, &to.blocked_reason);
     scalar("assignee", &from.assignee, &to.assignee);
     scalar("parent_task", &from.parent_task, &to.parent_task);
+    for ((name, a), (_, b)) in
+        from.deadline.diff_fields().into_iter().zip(to.deadline.diff_fields())
+    {
+        scalar(name, &a, &b);
+    }
     scalar("resolution", &from.resolution, &to.resolution);
     scalar("detection", &from.detection, &to.detection);
     scalar("started_at", &from.started_at, &to.started_at);

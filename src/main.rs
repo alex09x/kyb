@@ -1,6 +1,18 @@
+/*
+ * KYB (Know Your Business) — git-backed knowledge base for AI agent fleets
+ * Copyright (c) 2026 Alexander Panasenko
+ *
+ * Contact: alex@prod.codes
+ * Author: https://prod.codes/about/
+ * Project: https://github.com/alex09x/kyb
+ * SPDX-License-Identifier: MIT
+ */
+
 mod audit;
 mod auth;
 mod config;
+mod deadline;
+mod deadline_api;
 mod embed;
 mod export;
 mod index;
@@ -281,6 +293,8 @@ fn build_app(state: Arc<AppState>) -> Router {
 }
 
 fn api_router(state: Arc<AppState>) -> Router {
+    // the read routes answer with the deadline block attached (deadline_api.rs)
+    let deadlines = || middleware::from_fn_with_state(state.clone(), deadline_api::attach);
     Router::new()
         .route("/", get(web::serve_ui))
         .route("/api/audit", get(web::api_audit))
@@ -288,18 +302,19 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/whoami", get(auth::whoami))
         .route("/knowledge", post(upsert))
-        .route("/knowledge/{key}", get(get_one).delete(remove))
+        .route("/knowledge/{key}", get(get_one).layer(deadlines()).delete(remove))
         .route("/knowledge/{key}/history", get(history))
         .route("/knowledge/{key}/diff", get(diff))
         .route("/knowledge/{key}/related", get(related))
         .route("/places", get(places))
         .route("/impact", get(impact))
-        .route("/incidents", post(upsert_incident).get(list_incidents))
+        .route("/incidents", get(list_incidents).layer(deadlines()).post(upsert_incident))
         .route("/incidents/{key}/resolve", post(resolve_incident))
-        .route("/tasks", post(upsert_task).get(list_tasks))
+        .route("/tasks", get(list_tasks).layer(deadlines()).post(upsert_task))
         .route("/tasks/{key}/resolve", post(resolve_task))
         .route("/tasks/{key}/transition", post(transition_task))
-        .route("/search", get(search))
+        .route("/search", get(search).layer(deadlines()))
+        .route("/deadlines", get(deadline_api::list))
         .route("/export", get(export::export))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
@@ -853,10 +868,15 @@ struct TaskReq {
     tags: Vec<String>,
     #[serde(default)]
     refs: Vec<String>,
+    /// due, hard, remind_days, waits_on, expected: each one named here is set,
+    /// each one left out keeps what the task already says.
+    #[serde(flatten)]
+    deadline: deadline::DeadlinePatch,
 }
 
 async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
     locked_write(&st, move |st| {
+        let stored = stored_version(st, &r.key).map(|e| e.deadline).unwrap_or_default();
         let mut entry = model::Entry {
             key: r.key,
             title: r.title,
@@ -866,6 +886,7 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
             blocked_reason: r.blocked_reason,
             assignee: r.assignee.trim().to_string(),
             parent_task: r.parent_task.trim().to_string(),
+            deadline: r.deadline.apply(stored),
             knowledge: r.knowledge,
             resolution: r.resolution,
             tags: r.tags,
@@ -908,17 +929,46 @@ async fn upsert_task(State(st): St, Json(r): Json<TaskReq>) -> Reply {
 /// paraphrasing, or losing) the task being claimed.
 #[derive(Deserialize)]
 struct TransitionReq {
-    status: String,
+    /// Absent = keep the stored status (to move only a deadline, say); it must
+    /// then be a live one.
+    status: Option<String>,
     /// Present = set it ("" hands the task back to nobody); absent = keep stored.
     assignee: Option<String>,
     /// Present = set it ("" detaches the task); absent = keep stored.
     parent_task: Option<String>,
     /// Only meaningful with status=blocked; leaving blocked always clears it.
     blocked_reason: Option<String>,
+    /// Moving a deadline is a transition like any other: a new version, so
+    /// `kyb history` and `kyb diff` show when it moved and who moved it.
+    #[serde(flatten)]
+    deadline: deadline::DeadlinePatch,
 }
 
 /// Closing stays a separate act on purpose: `done`/`dropped` demand an outcome,
 /// which is what POST /tasks/{key}/resolve (`kyb done`) is for.
+/// A status a transition may not move to: closing needs an outcome, and only the
+/// live statuses exist besides.
+fn refuse_transition_status(key: &str, status: &str) -> Option<Reply> {
+    if model::TASK_TERMINAL_STATUSES.contains(&status) {
+        return Some((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!(
+                "'{status}' closes a task and needs an outcome — use `kyb done {key}` (POST /tasks/{key}/resolve) with a resolution; a transition only moves between {}",
+                model::TASK_LIVE_STATUSES.join("|")
+            )})),
+        ));
+    }
+    if !model::TASK_LIVE_STATUSES.contains(&status) {
+        return Some((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!(
+                "status must be one of: {}", model::TASK_LIVE_STATUSES.join("|")
+            )})),
+        ));
+    }
+    None
+}
+
 async fn transition_task(
     State(st): St,
     Path(key): Path<String>,
@@ -927,23 +977,24 @@ async fn transition_task(
     if let Some(resp) = bad_key(&key) {
         return resp;
     }
-    let status = r.status.trim().to_string();
-    if model::TASK_TERMINAL_STATUSES.contains(&status.as_str()) {
+    let status = r.status.as_deref().map(str::trim).map(str::to_string);
+    if status.is_none()
+        && r.deadline.is_empty()
+        && r.assignee.is_none()
+        && r.parent_task.is_none()
+        && r.blocked_reason.is_none()
+    {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!(
-                "'{status}' closes a task and needs an outcome — use `kyb done {key}` (POST /tasks/{key}/resolve) with a resolution; a transition only moves between {}",
-                model::TASK_LIVE_STATUSES.join("|")
-            )})),
+            Json(
+                json!({"error": "nothing to change: pass a status, or the fields to move (assignee, parent_task, blocked_reason, due, hard, remind_days, waits_on, expected)"}),
+            ),
         );
     }
-    if !model::TASK_LIVE_STATUSES.contains(&status.as_str()) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!(
-                "status must be one of: {}", model::TASK_LIVE_STATUSES.join("|")
-            )})),
-        );
+    if let Some(status) = status.as_deref() {
+        if let Some(refused) = refuse_transition_status(&key, status) {
+            return refused;
+        }
     }
     // The stored version is read with the writer lock already held and the
     // commit lands before it is released: two transitions on one key are a
@@ -963,7 +1014,20 @@ async fn transition_task(
                 Json(json!({"error": format!("'{key}' is not a task")})),
             ));
         }
+        let status = match status {
+            Some(s) => s,
+            None if e.is_live_task() => e.status.clone(),
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!(
+                        "'{key}' is {} — pass a status ({}) to reopen it", e.status, model::TASK_LIVE_STATUSES.join("|")
+                    )})),
+                ))
+            }
+        };
         e.status = status;
+        e.deadline = r.deadline.apply(std::mem::take(&mut e.deadline));
         if let Some(assignee) = r.assignee {
             e.assignee = assignee.trim().to_string();
         }
@@ -981,6 +1045,9 @@ async fn transition_task(
         let mut extra = serde_json::Map::new();
         extra.insert("status".into(), json!(e.status));
         extra.insert("assignee".into(), json!(e.assignee));
+        if !e.deadline.is_empty() {
+            extra.insert("deadline".into(), json!(e.deadline));
+        }
         if let Some(parent) = unknown_parent(st, &e) {
             extra.insert("unknown_parent".into(), json!(parent));
         }
@@ -1018,6 +1085,9 @@ struct IncidentsQ {
     /// all=true includes archived (closed) entries; the default shows only
     /// what is live in the canon.
     all: Option<String>,
+    /// deadlines=false leaves the deadline block off; read by deadline_api::attach
+    #[allow(dead_code)]
+    deadlines: Option<bool>,
     limit: Option<usize>,
 }
 
@@ -1123,7 +1193,7 @@ async fn list_tasks(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
     let rows: Vec<Value> = rows
         .iter()
         .map(|(h, archived)| {
-            json!({
+            let mut row = json!({
                 "key": h.key, "title": h.title, "status": h.status,
                 "priority": h.priority, "blocked_reason": h.blocked_reason,
                 "assignee": h.assignee, "parent_task": h.parent_task,
@@ -1132,7 +1202,11 @@ async fn list_tasks(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
                 "open_followups": open_followups_of(&h.body),
                 "tags": h.tags, "updated_at": h.updated_at,
                 "archived": archived,
-            })
+            });
+            if let (Value::Object(row), Value::Object(fields)) = (&mut row, json!(h.deadline)) {
+                row.extend(fields);
+            }
+            row
         })
         .collect();
     (StatusCode::OK, Json(json!({"count": rows.len(), "tasks": rows})))
@@ -1142,6 +1216,9 @@ async fn list_tasks(State(st): St, Q(q): Q<IncidentsQ>) -> Reply {
 #[serde(deny_unknown_fields)]
 struct GetQ {
     at: Option<String>,
+    /// deadlines=false leaves the deadline block off; read by deadline_api::attach
+    #[allow(dead_code)]
+    deadlines: Option<bool>,
 }
 
 /// `as_of` in the three shapes an agent actually has to hand.
@@ -1197,6 +1274,10 @@ fn entry_json(e: &model::Entry, archived: bool) -> Value {
         obj.insert("blocked_reason".into(), json!(e.blocked_reason));
         obj.insert("assignee".into(), json!(e.assignee));
         obj.insert("parent_task".into(), json!(e.parent_task));
+        // only the deadline fields that are set, as on a search hit
+        if let Value::Object(fields) = json!(e.deadline) {
+            obj.extend(fields);
+        }
     }
     if e.is_incident() || e.is_task() {
         obj.insert("status".into(), json!(e.status));
@@ -1476,6 +1557,9 @@ struct SearchQ {
     priority: Option<String>,
     assignee: Option<String>,
     parent_task: Option<String>,
+    /// deadlines=false leaves the deadline block off; read by deadline_api::attach
+    #[allow(dead_code)]
+    deadlines: Option<bool>,
 }
 
 async fn search(State(st): St, Q(p): Q<SearchQ>) -> Reply {
@@ -1778,7 +1862,7 @@ async fn reindex(State(st): St) -> Reply {
 /// So the check has to happen on the client, before the request, against a list
 /// the server publishes. Names match the query parameters exactly; entries are
 /// only ever added, never renamed, because an older CLI matches on the string.
-const CAPABILITIES: [&str; 4] = ["as_of", "changed_between", "diff", "export"];
+const CAPABILITIES: [&str; 5] = ["as_of", "changed_between", "deadlines", "diff", "export"];
 
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
@@ -4040,6 +4124,7 @@ mod published_claims {
         let probes = [
             ("as_of", "/search?q=one&as_of=2999-01-01"),
             ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
+            ("deadlines", "/deadlines"),
             ("diff", "/knowledge/svc/diff"),
             ("export", "/export"),
         ];
@@ -4067,6 +4152,7 @@ mod published_claims {
             claims(doc, "--changed-between");
             claims(doc, "kyb diff");
             claims(doc, "kyb export");
+            claims(doc, "kyb deadlines");
         }
         let cli = published("skills/kyb/bin/kyb");
         for flag in ["--as-of", "--changed-between"] {
@@ -4074,6 +4160,7 @@ mod published_claims {
         }
         assert!(cli.contains("  diff)"), "the docs promise `kyb diff` but the CLI has no such verb");
         assert!(cli.contains("  export)"), "the docs promise `kyb export` but the CLI has no such verb");
+        assert!(cli.contains("  deadlines)"), "the docs promise `kyb deadlines` but the CLI has no such verb");
     }
 
     #[tokio::test]

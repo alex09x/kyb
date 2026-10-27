@@ -43,4 +43,9 @@ docker compose -f "$REPO/docker-compose.yml" config --format json | assert_env K
 KYB_AUTH=required KYB_ANON=read KYB_AUTH_FILE=/data/secrets/book.json \
   docker compose -f "$REPO/docker-compose.yml" config --format json | assert_env KYB_AUTH=required KYB_AUTH_FILE=/data/secrets/book.json KYB_ANON=read
 
+# the server's time zone decides "today" for deadlines when the caller sends none
+(unset TZ; docker compose -f "$REPO/docker-compose.yml" config --format json | assert_env TZ=UTC)
+TZ=America/Los_Angeles \
+  docker compose -f "$REPO/docker-compose.yml" config --format json | assert_env TZ=America/Los_Angeles
+
 echo "Docker Compose bind and auth tests passed"
