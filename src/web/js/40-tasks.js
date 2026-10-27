@@ -4,6 +4,10 @@
     // behind the cursor - a blocked task shows its reason in the row.
     const TASK_LIVE = t => !['done','closed','dropped','resolved'].includes((t.status || 'open').toLowerCase()) && !t.archived;
     const TASK_QUEUES = [
+      { id: 'due', label: 'late or due soon', color: 'var(--red)',
+        why: 'past due, or inside its reminder window',
+        flag: 'kyb deadlines',
+        test: t => TASK_LIVE(t) && dlSurfaced(dlItem(t.key)) },
       { id: 'blocked', label: 'blocked', color: 'var(--amber)',
         why: 'waiting on someone or something named in the reason',
         flag: '--status blocked',
@@ -32,7 +36,7 @@
       list.sort((a, b) => (sr[(a.status||'open').toLowerCase()] ?? 2) - (sr[(b.status||'open').toLowerCase()] ?? 2)
         || (prio[a.priority] ?? 2) - (prio[b.priority] ?? 2)
         || new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
-      return list;
+      return App.taskSort === 'due' ? dlSort(list) : list;
     }
 
     function renderTasks(keepSelection) {
@@ -45,6 +49,7 @@
       const tq = App.taskQueue && TASK_QUEUES.find(x => x.id === App.taskQueue);
       top.innerHTML = `
         <span class="segs">${[['live','live'],['open','open'],['in_progress','in progress'],['blocked','blocked'],['done','closed']].map(([k,l]) => `<button class="chip ${f === k ? 'active' : ''}" onclick="taskSetStatus('${k}')">${l}</button>`).join('')}</span>
+        <span class="segs" id="taskSort">${[['newest','newest'],['due','by due date']].map(([k,l]) => `<button class="chip ${App.taskSort === k ? 'active' : ''}" onclick="taskSetSort('${k}')">${l}</button>`).join('')}</span>
         <span class="bar-r">
           <span class="cnt"><span id="taskCount">${listNow.length} of ${App.tasks.length}${f === 'live' ? ' · live only' : ''}</span> &middot; ${live.length} live: ${by('open')} open, ${by('in_progress')} in progress, ${by('blocked')} blocked${tq ? ` · ${tq.label} · <a href="javascript:void(0)" onclick="taskSelectQueue(App.taskQueue)">clear</a>` : ''}</span>
           <button class="btn sm" data-write onclick="openNewModal('task')">Add task</button>
@@ -66,15 +71,18 @@
       if (!list.length) { rows.innerHTML = `<div class="inc-empty">Nothing matches. <kbd>esc</kbd> clears the queue filter.</div>`; return; }
       App.taskShown = Math.max(App.taskShown || TASK_PAGE, App.taskCursor + 1);
       const shown = list.slice(0, App.taskShown);
-      rows.innerHTML = shown.map((t, idx) => {
+      const byDue = App.taskSort === 'due';
+      rows.innerHTML = (byDue ? dlTimeline(list) : '') + shown.map((t, idx) => {
         const cur = idx === App.taskCursor;
         const st = (t.status || 'open').toLowerCase();
         const done = !TASK_LIVE(t);
         const pr = (t.priority || '').toLowerCase();
         const dot = done ? 'resolved' : pr === 'critical' ? 'critical' : pr === 'high' ? 'high' : '';
         const age = Math.max(0, Math.floor((Date.now() - new Date(t.updated_at || 0).getTime()) / 86400e3));
+        const it = done ? null : dlItem(t.key);
         const note = st === 'blocked' && t.blocked_reason
           ? `<div class="inc-note"><b>Blocked</b> &middot; ${escapeHtml(t.blocked_reason)}${t.parent_task ? ` <span class="parent">&middot; part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span>` : ''}</div>`
+          : it && (it.overdue || it.provisional) ? dlNote(it)
           : done && t.resolution ? `<div class="inc-note res"><b>${st === 'dropped' ? 'Dropped' : 'Done'}</b> &middot; ${escapeHtml(t.resolution)}</div>`
           : t.parent_task ? `<div class="inc-note" style="border-left-color:var(--border)"><span class="parent">part of <a href="#/knowledge/${encodeURIComponent(t.parent_task)}" onclick="handleCardClick(event, ${jsArg(t.parent_task)}, 'knowledge')">${escapeHtml(t.parent_task)}</a></span></div>` : '';
         const acts = cur ? `<div class="acts" onclick="event.stopPropagation()">
@@ -89,10 +97,11 @@
             <button class="btn sm ghost" onclick="openHistoryForEntry(${jsArg(t.key)})">Versions <kbd>h</kbd></button>
             <button class="btn sm ghost" onclick="openDiffForEntry(${jsArg(t.key)})">Diff <kbd>d</kbd></button>
           </div>` : '';
-        return `<div class="inc-r task ${cur ? 'cur' : ''}" onclick="App.taskCursor=${idx}; renderTasks();" ondblclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">
+        return `${byDue ? dlGroupHead(list, idx) : ''}<div class="inc-r task ${cur ? 'cur' : ''}" onclick="App.taskCursor=${idx}; renderTasks();" ondblclick="handleCardClick(event, ${jsArg(t.key)}, 'knowledge')">
             <span class="n">${idx + 1}</span>
             <span class="dot ${dot}"></span>
             <div class="t"><b>${escapeHtml(t.title)}</b><span>${escapeHtml(t.key)}${pr && pr !== 'normal' && pr !== 'medium' ? ' · ' + escapeHtml(pr) : ''}</span></div>
+            <span class="due-c">${dueChip(it)}</span>
             <span class="st ${st}">${st.replace('_', ' ')}</span>
             <span class="who ${t.assignee ? '' : 'none'}">${escapeHtml(t.assignee || 'unassigned')}</span>
             <span class="age">${age}d</span>

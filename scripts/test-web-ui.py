@@ -1278,7 +1278,7 @@ def run(base, headed, coverage=None):
           App.taskCursor = taskFiltered().findIndex(t => t.key === 't-crit'); renderTasks(); out.move = [...document.querySelectorAll('#taskRows .inc-r.cur option')].map(o => o.value + (o.disabled ? '!' : ''));
           App.taskStatusFilter = 'open'; out.open = taskFiltered().map(t => t.key); App.taskStatusFilter = 'live'; return out; })""")
         check("tasks without a status are open; blocked rows carry reason and parent; a critical row is marked", any("Blocked with parent" in r and "vendor" in r and "part of t-crit" in r for r in tk["rows"]) and any("critical" in d for d in tk["dots"]) and set(tk["open"]) == {"t-crit", "t-nostatus"}, tk)
-        check("queue counters: 2 blocked, 1 stalled, 2 unowned", tk["counts"] == ["2", "1", "2"], tk["counts"])
+        check("queue counters: none due, 2 blocked, 1 stalled, 2 unowned", tk["counts"] == ["0", "2", "1", "2"], tk["counts"])
         check("the Move menu disables the task's own status", "open!" in tk["move"], tk["move"])
         ev("renderTasks(true); switchTab('tasks'); taskSetStatus('live'); App.taskCursor = null; App.taskQueue = null; ")
         page.mouse.click(5, 400); page.keyboard.press("j")
@@ -1796,6 +1796,109 @@ def run(base, headed, coverage=None):
         check("a server error with no message is still named", "Server error" in se, se)
         ev(f"location.hash = '#/search'; selectEntry('{N}')")
         page.wait_for_function(f"App.selectedKey === '{N}'", timeout=5000)
+
+        # --- deadlines (design: KYB Deadlines): seeded through the API with dates relative to this
+        # browser's today, then drawn by the strip, the queue, the by-date view, the card and the form
+        DK = f"task-dl-{stamp}"
+        day = lambda n: ev(f"localToday({n})")
+        for k, extra in ((f"{DK}-late-hard", {"due": day(-2), "hard": True, "remind_days": 30}), (f"{DK}-late", {"due": day(-6)}),
+                         (f"{DK}-noremind", {"due": day(-1), "remind_days": 0}), (f"{DK}-soon", {"due": day(3)}), (f"{DK}-soon-hard", {"due": day(3), "hard": True}),
+                         (f"{DK}-prov", {"waits_on": "the vendor's quote", "expected": day(4)}), (f"{DK}-mid", {"due": day(20), "remind_days": 5}),
+                         (f"{DK}-far", {"due": day(60)}), (f"{DK}-closed", {"due": day(-3)})):
+            s, _ = api(base, "POST", "/tasks", {"key": k, "title": "Deadline " + k.rsplit("-", 1)[-1], "body": "b", **extra})
+            check(f"seed deadline task {k.rsplit('-', 1)[-1]}", s == 200, s)
+        api(base, "POST", f"/tasks/{DK}-closed/resolve", {"resolution": "done before the date"})
+        ev("localStorage.removeItem('kyb.deadlines.hidden'); refreshAll()")
+        strip = ev("""(() => { const el = document.getElementById('deadlineStrip'); return {hidden: el.hidden, text: el.textContent.replace(/\\s+/g, ' '),
+          chips: [...el.querySelectorAll('.dl-chip')].map(c => c.textContent.replace(/\\s+/g, ' ').trim()), late: el.querySelectorAll('.dl-chip.late').length}; })()""")
+        check("the strip shows what is late and what is near", not strip["hidden"] and "3 late" in strip["text"] and "3 due soon" in strip["text"] and "+1" in strip["text"], strip)
+        check("the strip leads with the late ones, hard first", strip["late"] == 3 and strip["chips"][0].startswith("HARD2d late"), strip["chips"])
+        check("nothing covers the strip's controls", not ev("__t.covered('#deadlineStrip')"), ev("__t.covered('#deadlineStrip')"))
+        page.click("#deadlineStrip .dl-chip >> nth=0")
+        page.wait_for_function(f"App.selectedKey === '{DK}-late-hard'", timeout=5000)
+        card = ev("document.getElementById('detailView').textContent.replace(/\\s+/g, ' ')")
+        check("a strip item pressed opens its task, late and hard on the card", "due " in card and "2 days late" in card and "Hard deadline: due" in card and "30 days ahead" in card, card[:400])
+        page.click("#deadlineStrip .dl-all")
+        check("all deadlines opens the by-date view of the late and near",
+              ev("[App.activeTab, App.taskQueue, App.taskSort]") == ["tasks", "due", "due"], ev("[App.activeTab, App.taskQueue, App.taskSort]"))
+        view = ev("""(() => ({groups: [...document.querySelectorAll('#taskRows .dl-grp b')].map(b => b.textContent), marks: document.querySelectorAll('#taskRows .dl-m').length,
+          due: [...document.querySelectorAll('#taskRows .inc-r .due-c')].map(c => c.textContent), notes: [...document.querySelectorAll('#taskRows .inc-note')].map(n => n.textContent.replace(/\\s+/g, ' ')),
+          queue: [...document.querySelectorAll('#taskQueue .b:first-child .h > *')].map(x => x.textContent)}))()""")
+        check("the queue counts the late and near", view["queue"] == ["6", "late or due soon"], view["queue"])
+        check("the by-date view groups late and this week, a dot per deadline", view["groups"] == ["Late", "This week"] and view["marks"] == 6, view)
+        check("rows carry their due chip and a note when late or waiting", view["due"][0] == "6d late" and any("Waits on" in n and "the vendor's quote" in n for n in view["notes"]), view)
+        page.click("#taskRows .dl-m >> nth=2")
+        check("a dot pressed puts the cursor on its row", ev("App.taskCursor") == 2, ev("App.taskCursor"))
+        ev("taskSelectQueue('due')")   # the whole list, still by date: later, no date, and what lies beyond the ribbon
+        full = ev("""(() => ({groups: [...document.querySelectorAll('#taskRows .dl-grp b')].map(b => b.textContent), beyond: (document.querySelector('#taskRows .dl-legend .r') || {}).textContent || '',
+          mid: [...document.querySelectorAll('#taskRows .inc-r')].map(r => r.querySelector('.due-c').textContent).filter(Boolean)}))()""")
+        check("by date, the rest follows: later, then no date", full["groups"][:2] == ["Late", "This week"] and "Later" in full["groups"] and full["groups"][-1] == "No date", full["groups"])
+        check("a deadline past the ribbon is counted, one outside its window shows its date", full["beyond"] == "+1 beyond 30 days" and ev(f"dlDate(localToday(20))") in full["mid"], full)
+        ev("taskSetSort('newest')")
+        check("newest again: no ribbon, no groups", not ev("document.querySelector('#taskRows .dl-tl, #taskRows .dl-grp')"))
+
+        # the card: waiting on an event, closed with a date, and the two buttons that take you to the date
+        ev(f"location.hash = '#/knowledge/{DK}-prov'")
+        page.wait_for_function(f"App.selectedKey === '{DK}-prov' && document.querySelector('#detailView .callout')", timeout=5000)
+        prov = ev("document.querySelector('#detailView .callout').textContent.replace(/\\s+/g, ' ')")
+        check("a provisional date says what it waits on", "Waits on" in prov and "the vendor's quote" in prov and "It happened" in prov, prov)
+        page.click("#detailView .callout button:text('It happened')")
+        page.wait_for_function("document.activeElement && document.activeElement.id === 'editDue'", timeout=5000)
+        form = ev("""({event: document.getElementById('editEvent').checked, shown: !document.getElementById('editEventFields').hidden, waits: document.getElementById('editWaits').value})""")
+        check("It happened opens the form at the due date, the event filled in", form == {"event": True, "shown": True, "waits": "the vendor's quote"}, form)
+        ev(f"""async () => {{ __t.set('editDue', '{day(5)}'); document.getElementById('editEvent').click(); __t.set('editRemind', '2'); await submitEditModal(); await __t.wait(300); }}""")
+        s, e = api(base, "GET", f"/knowledge/{DK}-prov")
+        check("the form sets the real date and drops the event", e.get("due") == day(5) and not e.get("expected") and not e.get("waits_on") and e.get("remind_days") == 2, e)
+        ev(f"location.hash = '#/knowledge/{DK}-closed'")
+        page.wait_for_function(f"App.selectedKey === '{DK}-closed'", timeout=5000)
+        check("a closed task names its date plainly", ("due " + ev(f"dlDate('{day(-3)}')")) in ev("document.querySelector('#detailView .dh-words').textContent"))
+        ev(f"location.hash = '#/knowledge/{DK}-late'")
+        page.wait_for_function(f"App.selectedKey === '{DK}-late' && document.querySelector('#detailView .callout.late')", timeout=5000)
+        page.click("#detailView .callout.late button:text('Move date')")
+        page.wait_for_function("document.activeElement && document.activeElement.id === 'editDue'", timeout=5000)
+        ev(f"""async () => {{ __t.set('editDue', ''); document.getElementById('editHard').checked = false; await submitEditModal(); await __t.wait(300); }}""")
+        s, e = api(base, "GET", f"/knowledge/{DK}-late")
+        check("clearing the date in the form clears the deadline", not e.get("due") and "remind_days" not in e, e)
+        ev(f"""async () => {{ openNewModal('task'); await __t.wait(150); __t.set('newTitle', 'Deadline from the form'); __t.set('newKey', '{DK}-new'); __t.set('newBody', 'b');
+          __t.set('newDue', '{day(9)}'); document.getElementById('newHard').checked = true; document.getElementById('newEvent').click(); __t.set('newWaits', 'the go-ahead');
+          __t.set('newExpected', '{day(8)}'); await submitNewModal(); await __t.wait(300); }}""")
+        s, e = api(base, "GET", f"/knowledge/{DK}-new")
+        check("a new task takes its deadline from the form", e.get("due") == day(9) and e.get("hard") is True and e.get("waits_on") == "the go-ahead" and "remind_days" not in e, e)
+        ev(f"moveTaskDate('{N}')")   # a note has no date to move: the form opens without one, and nothing is focused for it
+        page.wait_for_timeout(300)
+        check("Move date on a note opens its plain form", ev("document.getElementById('editDue') === null && document.querySelector('#editModal.open') !== null"))
+        ev("closeModal('editModal')")
+
+        # the strip's own states and the pure helpers, held to their contracts directly
+        st = ev("""__t.swap({deadlineBlock: null}, async () => {
+          const el = document.getElementById('deadlineStrip'), out = {};
+          renderDeadlineStrip(); out.none = el.hidden;
+          const it = (d, over, extra) => Object.assign({key: 'k' + d, title: 'T' + d, due: localToday(d), days_left: d, overdue: over, hard: false, provisional: false, waits_on: '', remind_days: 14}, extra);
+          App.deadlineBlock = {count: 1, overdue: 1, more: 0, items: [it(-1, true)]}; renderDeadlineStrip(); out.lateOnly = el.textContent.replace(/\\s+/g, ' ');
+          App.deadlineBlock = {count: 1, overdue: 0, more: 0, items: [it(2, false)]}; renderDeadlineStrip(); out.soonOnly = el.textContent.replace(/\\s+/g, ' ');
+          const g = Storage.prototype.getItem, sset = Storage.prototype.setItem;
+          Storage.prototype.getItem = () => { throw new Error('no storage'); }; renderDeadlineStrip(); out.unreadable = el.hidden; Storage.prototype.getItem = g;
+          document.querySelector('#deadlineStrip .dl-x').click(); out.hidden = el.hidden; localStorage.removeItem('kyb.deadlines.hidden');
+          Storage.prototype.setItem = () => { throw new Error('no storage'); }; hideDeadlineStrip(); out.unwritable = el.hidden; Storage.prototype.setItem = sset;
+          out.when = [it(-2, true), it(0, true), it(0, false), it(1, false), it(30, false)].map(i => [dlWhen(i), dlWhen(i, true)]);
+          out.prov = [dlNote(it(3, false, {provisional: true})), dlCallout({key: 'k', title: 't'}, it(3, false, {provisional: true})), dlCallout({key: 'k', title: 't'}, it(3, false))];
+          out.nochip = dueChip(undefined); out.noribbon = dlTimeline([{key: 'nothing-dated'}]);
+          out.unreminded = dlCallout({key: 'k', title: 't'}, it(-1, true, {remind_days: 0}));
+          out.hardForm = deadlineFields('probe', {hard: true, remind_days: 0});
+          return out; })""")
+        check("no block, no strip", st["none"] is True, st)
+        check("late only and near only each say just their part", "late" in st["lateOnly"] and "soon" not in st["lateOnly"] and "1 due soon" in st["soonOnly"] and "late" not in st["soonOnly"].split("·")[0], st)
+        check("unreadable storage still draws the strip; × hides it until tomorrow, unwritable storage too", st["unreadable"] is False and st["hidden"] is True and st["unwritable"] is False, st)
+        check("the words for every distance", st["when"] == [["2d late", "2 days late"], ["late today", "late today"], ["due today", "today"], ["in 1d", "in 1 day"], [ev("dlDate(localToday(30))"), "in 30 days"]], st["when"])
+        check("waiting on nothing named still reads, and a near date has no callout", "an event" in st["prov"][0] and "an event" in st["prov"][1] and st["prov"][2] == "", st["prov"])
+        check("no deadline, no chip and no ribbon", st["nochip"] == "" and st["noribbon"] == "", st)
+        check("a deadline with no reminder window says nothing of reminders", "1 day late" in st["unreminded"] and "Reminders" not in st["unreminded"], st["unreminded"])
+        check("the form shows a hard deadline as hard, a zero window as zero", 'id="probeHard" checked' in st["hardForm"] and 'id="probeRemind" value="0"' in st["hardForm"], st["hardForm"][:400])
+        nod = ev("""async () => { const real = window.apiFetch; window.apiFetch = u => u === '/deadlines' || u.startsWith('/search') ? Promise.resolve(null) : real(u);
+          const block = App.deadlineBlock; await refreshAll(); window.apiFetch = real; return [App.deadlines.size, App.deadlineBlock === block]; }""")
+        check("a server without /deadlines: no chips, and a failed search keeps the last block", nod == [0, True], nod)
+        ev("refreshAll()")
+        ev("localStorage.removeItem('kyb.deadlines.hidden'); App.taskQueue = null; App.taskSort = 'newest'; renderTasks()")
 
         check("no script errors in the per-function checks", not errors, "; ".join(errors[:3]))
         pct = report_coverage(cdp.send("Profiler.takePreciseCoverage")["result"], base, coverage) if cdp else None

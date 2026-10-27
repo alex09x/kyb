@@ -16,6 +16,9 @@
       incidentQueue: null,
       taskQueue: null,
       taskStatusFilter: 'live',
+      taskSort: 'newest',   // 'newest' | 'due' (the by-date view)
+      deadlines: new Map(), // task key -> its deadline as GET /deadlines answered
+      deadlineBlock: null,  // the deadlines block of the last read answer (the strip)
       taskCursor: 0,
       taskKeyNav: false,
       incidentCursor: 0,
@@ -100,7 +103,7 @@
     // API Helpers
     async function apiFetch(endpoint) {
       try {
-        const res = await fetch(endpoint, { headers: authHeaders() });
+        const res = await fetch(endpoint, { headers: { ...authHeaders(), 'x-kyb-today': localToday() } });
         if (res.status === 401) askForToken();
         if (!res.ok) return null;
         return await res.json();
@@ -194,7 +197,7 @@
 
     // Full Refresh Loop
     async function refreshAll() {
-      const [searchData, incData, taskData, tagsData, healthData, actData, auditData, placesData] = await Promise.all([
+      const [searchData, incData, taskData, tagsData, healthData, actData, auditData, placesData, dlData] = await Promise.all([
         apiFetch('/search?limit=100'),
         apiFetch('/incidents?all=1&limit=500'),
         apiFetch('/tasks?all=1&limit=500'),
@@ -203,9 +206,13 @@
         apiFetch('/api/activity'),
         // the request log (who searched for what, from where) is the admin's; others are not shown it and do not ask
         App.feedPaused || (App.me && App.me.role !== 'admin') ? Promise.resolve(null) : apiFetch('/api/audit?limit=400'),
-        apiFetch('/places')
+        apiFetch('/places'),
+        apiFetch('/deadlines')
       ]);
       if (placesData && placesData.services) App.places = placesData;
+      // a server without deadlines answers /deadlines with 404: no chips, no strip
+      App.deadlines = new Map(((dlData && dlData.deadlines) || []).map(d => [d.key, d]));
+      if (searchData) App.deadlineBlock = searchData.deadlines || null;
 
       if (!App.isBackendSearchResults && searchData && searchData.hits) App.entries = searchData.hits;
       if (incData && incData.incidents) App.incidents = incData.incidents;
@@ -219,6 +226,7 @@
       updateLastSyncTicker();
 
       renderHeaderStats();
+      renderDeadlineStrip();
       renderKnowledgeList();
       renderIncidents(true);
       renderTasks(true);

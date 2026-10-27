@@ -1,0 +1,68 @@
+    /*
+     * KYB (Know Your Business) — git-backed knowledge base and incident tracker for AI agent fleets
+     * Copyright (c) 2026 Alexander Panasenko
+     *
+     * Contact: alex@prod.codes
+     * Author: https://prod.codes/about/
+     * Project: https://github.com/alex09x/kyb
+     * SPDX-License-Identifier: MIT
+     */
+
+    /* ===== Deadlines (design: KYB Deadlines) ===== */
+    /* the chip: one shape, three tones, the words say the rest */
+    .due { display:inline-flex; align-items:center; gap:6px; font:500 12.5px/1.4 var(--font-mono); white-space:nowrap; color:var(--text-dim); }
+    .due.late { color:var(--red); } .due.soon { color:var(--amber); } .due.later { color:var(--text-muted); }
+    .due .hard { font:600 10.5px/1 var(--font-mono); letter-spacing:.02em; padding:2px 5px; border-radius:4px; border:1px solid currentColor; }
+    .due .tilde { opacity:.7; }
+
+    /* 1a the strip under the header */
+    #deadlineStrip { display:flex; align-items:center; gap:14px; padding:8px 24px; border-bottom:1px solid var(--border); background:var(--card-subtle); font-size:13.5px; overflow:hidden; }
+    #deadlineStrip[hidden] { display:none; }
+    .dl-sum { display:flex; align-items:center; gap:8px; white-space:nowrap; color:var(--text-dim); }
+    .dl-sum b { font-weight:600; color:var(--red); }
+    .dl-sep { color:var(--text-muted); }
+    .dl-dot { width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 0 3px var(--red-dim); }
+    .dl-items { display:flex; gap:6px; min-width:0; overflow:hidden; }
+    .dl-chip { display:flex; align-items:center; gap:8px; padding:4px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); white-space:nowrap; min-width:0; text-decoration:none; }
+    .dl-chip:hover { background:var(--card-hover); }
+    .dl-chip.late { border-color:rgba(224,108,111,.35); }
+    .dl-t { color:var(--text); overflow:hidden; text-overflow:ellipsis; max-width:260px; }
+    .dl-all { margin-left:auto; white-space:nowrap; color:var(--accent); text-decoration:none; }
+    .dl-x { background:none; border:0; color:var(--text-muted); font-size:16px; line-height:1; cursor:pointer; padding:0 2px; }
+    .dl-x:hover { color:var(--text); }
+
+    /* 1b the queue and the due column */
+    #taskQueue { grid-template-columns:repeat(4,1fr); }
+    .inc-r.task { grid-template-columns:22px 18px minmax(0,1fr) 118px 110px 140px 60px; }
+    .inc-note.late { border-left-color:rgba(224,108,111,.55); } .inc-note.late b { color:var(--red); }
+    .inc-note.prov { border-left-color:rgba(217,164,65,.45); }
+
+    /* 1c the by-date view: groups and the ribbon */
+    .dl-grp { display:flex; align-items:baseline; gap:10px; padding:8px 16px 8px 56px; font-size:12.5px; color:var(--text-muted); border-bottom:1px solid var(--card-subtle); background:var(--card-subtle); }
+    .dl-grp b { font-weight:600; font-size:13px; color:var(--text-dim); }
+    .dl-grp.late b { color:var(--red); } .dl-grp.week b { color:var(--amber); }
+    .dl-tl { padding:16px 20px 8px; border-bottom:1px solid var(--border); }
+    .dl-axis { position:relative; height:70px; }
+    .dl-line { position:absolute; left:0; right:0; top:38px; height:1px; background:var(--border); }
+    .dl-past { position:absolute; left:0; top:26px; height:25px; background:var(--red-dim); border-right:1px dashed rgba(224,108,111,.45); }
+    .dl-tick { position:absolute; top:50px; font:11.5px var(--font-mono); color:var(--text-muted); transform:translateX(-50%); white-space:nowrap; }
+    .dl-tick:first-of-type { transform:none; } .dl-tick.end { transform:translateX(-100%); }
+    .dl-today { position:absolute; top:4px; font-size:12px; font-weight:600; color:var(--red); transform:translateX(-50%); white-space:nowrap; }
+    .dl-m { position:absolute; top:32px; width:13px; height:13px; padding:0; border-radius:50%; transform:translateX(-50%); background:var(--bg); border:2px solid var(--text-dim); cursor:pointer; }
+    .dl-m.late { border-color:var(--red); background:var(--red); } .dl-m.soon { border-color:var(--amber); }
+    .dl-m.hard { border-radius:3px; } .dl-m.prov { border-style:dashed; }
+    .dl-m:hover { box-shadow:0 0 0 3px var(--accent-glow); }
+    .dl-legend { display:flex; gap:16px; font-size:12.5px; color:var(--text-muted); }
+    .dl-legend span { display:flex; align-items:center; gap:6px; }
+    .dl-legend i { display:inline-block; width:10px; height:10px; border-radius:50%; border:2px solid var(--text-dim); }
+    .dl-legend i.sq { border-radius:2px; } .dl-legend i.dash { border-style:dashed; }
+    .dl-legend .r { margin-left:auto; }
+
+    /* 2a the card callout when late */
+    .callout.late { border-color:rgba(224,108,111,.4); background:var(--red-dim); } .callout.late b { color:var(--red); }
+
+    /* 2c the form */
+    .dl-form { grid-template-columns:1.3fr .8fr 1fr; }
+    .dl-tog { display:flex; align-items:center; gap:8px; height:38px; font-size:13.5px; color:var(--text-dim); cursor:pointer; }
+    .dl-event { display:flex; align-items:center; gap:8px; margin:2px 0 12px; font-size:13.5px; color:var(--text-dim); cursor:pointer; }
+    .dl-ev[hidden] { display:none; }
