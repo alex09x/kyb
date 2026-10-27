@@ -476,6 +476,16 @@ fn no_deadlines(args: &Value, query: &mut Vec<(&'static str, String)>) {
 /// fill unused optional arguments with null, and a null that cleared would wipe
 /// a deadline on an ordinary rewrite. The HTTP API, whose callers mean what they
 /// send, takes null as a clear.
+/// Tags travel only when the call names them. The server keeps the stored tags of
+/// an incident or a task that a write leaves them out of, so a rewrite over MCP
+/// must not send an empty list it was never given. `null` is "not named", as
+/// everywhere on this surface; `[]` or `""` clears.
+fn named_tags(args: &Value, body: &mut Value) {
+    if args.get("tags").is_some_and(|v| !v.is_null()) {
+        body["tags"] = json!(list_arg(args, "tags"));
+    }
+}
+
 fn deadline_fields(args: &Value, body: &mut Value) -> Result<(), String> {
     for field in ["due", "waits_on", "expected"] {
         match args.get(field) {
@@ -640,28 +650,24 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
                     return Err("`affected` must be a list of {scope, from, to} objects".into())
                 }
             };
-            Call {
-                method: "POST",
-                path: "/incidents".into(),
-                query: Vec::new(),
-                body: Some(json!({
-                    "key": text_arg(args, "key"),
-                    "title": text_arg(args, "title"),
-                    "body": text_arg(args, "body"),
-                    "service": text_arg(args, "service"),
-                    "severity": text_arg(args, "severity"),
-                    "status": text_arg(args, "status").unwrap_or_else(|| "open".into()),
-                    "hosts": list_arg(args, "hosts"),
-                    "knowledge": list_arg(args, "knowledge"),
-                    "resolution": text_arg(args, "resolution").unwrap_or_default(),
-                    "detection": text_arg(args, "detection").unwrap_or_default(),
-                    "affected": affected,
-                    "started_at": text_arg(args, "started_at").unwrap_or_default(),
-                    "detected_at": text_arg(args, "detected_at").unwrap_or_default(),
-                    "tags": list_arg(args, "tags"),
-                    "refs": list_arg(args, "refs"),
-                })),
-            }
+            let mut body = json!({
+                "key": text_arg(args, "key"),
+                "title": text_arg(args, "title"),
+                "body": text_arg(args, "body"),
+                "service": text_arg(args, "service"),
+                "severity": text_arg(args, "severity"),
+                "status": text_arg(args, "status").unwrap_or_else(|| "open".into()),
+                "hosts": list_arg(args, "hosts"),
+                "knowledge": list_arg(args, "knowledge"),
+                "resolution": text_arg(args, "resolution").unwrap_or_default(),
+                "detection": text_arg(args, "detection").unwrap_or_default(),
+                "affected": affected,
+                "started_at": text_arg(args, "started_at").unwrap_or_default(),
+                "detected_at": text_arg(args, "detected_at").unwrap_or_default(),
+                "refs": list_arg(args, "refs"),
+            });
+            named_tags(args, &mut body);
+            Call { method: "POST", path: "/incidents".into(), query: Vec::new(), body: Some(body) }
         }
         "kyb_resolve" => {
             require(args, &["key", "resolution"])?;
@@ -691,9 +697,9 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
                 "parent_task": text_arg(args, "parent_task").unwrap_or_default(),
                 "knowledge": list_arg(args, "knowledge"),
                 "resolution": text_arg(args, "resolution").unwrap_or_default(),
-                "tags": list_arg(args, "tags"),
                 "refs": list_arg(args, "refs"),
             });
+            named_tags(args, &mut body);
             deadline_fields(args, &mut body)?;
             Call { method: "POST", path: "/tasks".into(), query: Vec::new(), body: Some(body) }
         }
@@ -890,7 +896,8 @@ Never secrets in the body; put a pointer in refs instead. Entries are written in
             "name": "kyb_incident",
             "description": "File an incident report. The key must start with inc-. A report that \
 cannot tell the next person whether the thing is still happening is a story rather than a \
-report, so pass `detection`: a command to run plus the result that means healthy.",
+report, so pass `detection`: a command to run plus the result that means healthy. Tags left out \
+of a rewrite keep the stored ones.",
             "inputSchema": {"type": "object",
                 "required": ["key", "title", "service", "severity", "body"], "properties": {
                 "key": {"type": "string", "description": "inc-<date>-<slug>"},
@@ -924,8 +931,8 @@ Closing archives the report: it leaves the working set and stays searchable fore
         json!({
             "name": "kyb_task",
             "description": "Create or update a task or idea. The key must start with task-. \
-Reusing the key updates it in place. A deadline field left out keeps what the task already \
-says, so rewriting a task never drops its due date.",
+Reusing the key updates it in place. Tags and the deadline fields left out keep what the task \
+already says, so rewriting a task never drops its tags or its due date; an empty value clears.",
             "inputSchema": {"type": "object", "required": ["key", "title", "body"], "properties": {
                 "key": {"type": "string", "description": "task-<slug>"},
                 "title": str_t, "body": str_t,
@@ -1390,5 +1397,40 @@ mod mcp_tests {
         let resp = rpc(&app, call("kyb_deadlines", json!({}))).await;
         let listing: Value = serde_json::from_str(tool_body(&resp)).unwrap();
         assert_eq!(listing["deadlines"][0]["remind_days"], 30, "{listing}");
+    }
+
+    #[tokio::test]
+    async fn a_rewrite_over_mcp_keeps_the_tags_it_does_not_name() {
+        let (app, _d, _i, _a) = test_app();
+        let tags = |key: &str| {
+            let key = key.to_string();
+            let app = app.clone();
+            async move {
+                let resp = rpc(&app, call("kyb_get", json!({"key": key}))).await;
+                let e: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+                e["tags"].clone()
+            }
+        };
+        let task = |extra: Value| {
+            let mut a = json!({"key": "task-tagged", "title": "Tagged", "body": "b"});
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            a
+        };
+        rpc(&app, call("kyb_task", task(json!({"tags": ["infra", "tls"]})))).await;
+        rpc(&app, call("kyb_task", task(json!({"body": "rewritten"})))).await;
+        assert_eq!(tags("task-tagged").await, json!(["infra", "tls"]), "a rewrite that names no tags keeps them");
+        rpc(&app, call("kyb_task", task(json!({"tags": null})))).await;
+        assert_eq!(tags("task-tagged").await, json!(["infra", "tls"]), "null is not named");
+        rpc(&app, call("kyb_task", task(json!({"tags": ""})))).await;
+        assert_eq!(tags("task-tagged").await, json!([]), "an empty value clears");
+
+        let inc = |extra: Value| {
+            let mut a = json!({"key": "inc-2026-10-27-tagged", "title": "Tagged", "body": "b", "service": "svc", "severity": "low"});
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            a
+        };
+        rpc(&app, call("kyb_incident", inc(json!({"tags": "infra"})))).await;
+        rpc(&app, call("kyb_incident", inc(json!({"body": "rewritten"})))).await;
+        assert_eq!(tags("inc-2026-10-27-tagged").await, json!(["infra"]));
     }
 }
