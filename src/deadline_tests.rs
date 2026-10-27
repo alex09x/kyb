@@ -96,6 +96,7 @@ fn expected_stands_in_until_the_real_date_is_known() {
     let i = item_of("task-quote", &known, &c).unwrap();
     assert!(!i.provisional, "a real due date wins over the provisional one");
     assert_eq!(i.due, "2026-03-20");
+    assert_eq!(i.waits_on, "", "the event is history once the real date is known");
 
     assert!(item_of("task-none", &Deadline::default(), &c).is_none());
 }
@@ -131,6 +132,22 @@ fn an_instant_is_late_once_it_has_passed_in_any_zone() {
     let i = item_of("task-cutoff", &deadline, &ahead).unwrap();
     assert!(!i.overdue);
     assert_eq!(i.days_left, 0);
+}
+
+#[test]
+fn a_passed_instant_in_a_zone_ahead_is_never_counted_as_days_to_go() {
+    // 01:00 on the 15th in Tokyo is 16:00 on the 14th in UTC: at 18:00 UTC it has
+    // passed, while a caller in UTC or Los Angeles is still on the 14th
+    let deadline = due("2026-03-15T01:00:00+09:00");
+    let c = clock("2026-03-14T18:00:00Z", "2026-03-14");
+    let i = item_of("task-tokyo", &deadline, &c).unwrap();
+    assert!(i.overdue);
+    assert_eq!(i.days_left, 0, "late, so never +1");
+
+    // and it sorts ahead of a deadline that is merely due today
+    let mut items = vec![item_of("task-a-today", &due("2026-03-14"), &c).unwrap(), i];
+    sort(&mut items);
+    assert_eq!(items[0].key, "task-tokyo");
 }
 
 #[test]
@@ -222,6 +239,34 @@ fn a_patch_sets_what_it_names_and_keeps_the_rest() {
     assert_eq!(patch(r#"{"remind_days":5}"#).remind_days, Some(5));
     assert!(!patch(r#"{"hard":false}"#).hard);
     assert_eq!(patch(r#"{"due":""}"#).due, "", "an empty string clears");
+}
+
+#[test]
+fn clearing_the_date_takes_what_described_it_along() {
+    let stored = Deadline {
+        hard: true,
+        remind_days: Some(20),
+        waits_on: "the CA's approval".into(),
+        ..due("2026-03-14")
+    };
+    let patch = |j: &str| serde_json::from_str::<DeadlinePatch>(j).unwrap().apply(stored.clone());
+
+    for clear in [r#"{"due":""}"#, r#"{"due":null}"#] {
+        let d = patch(clear);
+        assert_eq!(d, Deadline::default(), "{clear}");
+        assert!(d.validate("task", true).is_ok(), "{clear}: clearing is a valid write");
+    }
+    // a request that clears the date but sets a companion again is refused for it
+    let d = patch(r#"{"due":"","hard":true}"#);
+    assert!(d.hard);
+    assert!(d.validate("task", true).is_err());
+
+    // null clears every field, not only remind_days
+    assert!(!patch(r#"{"hard":null}"#).hard);
+    assert_eq!(patch(r#"{"waits_on":null}"#).waits_on, "");
+    let provisional = Deadline { waits_on: "quote".into(), expected: "2026-03-20".into(), ..Default::default() };
+    let d = serde_json::from_str::<DeadlinePatch>(r#"{"expected":null}"#).unwrap().apply(provisional);
+    assert_eq!(d, Deadline::default());
 }
 
 #[test]

@@ -1014,16 +1014,20 @@ async fn transition_task(
                 Json(json!({"error": format!("'{key}' is not a task")})),
             ));
         }
+        // without a status a task keeps its own - which only a task still in the
+        // tree has: an archived one comes back only when a status says so
+        let archived = is_archived(st, &key);
         let status = match status {
             Some(s) => s,
-            None if e.is_live_task() => e.status.clone(),
+            None if e.is_live_task() && !archived => e.status.clone(),
             None => {
+                let state = if archived { format!("archived ({})", e.status) } else { e.status.clone() };
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": format!(
-                        "'{key}' is {} — pass a status ({}) to reopen it", e.status, model::TASK_LIVE_STATUSES.join("|")
+                        "'{key}' is {state} — pass a status ({}) to reopen it", model::TASK_LIVE_STATUSES.join("|")
                     )})),
-                ))
+                ));
             }
         };
         e.status = status;

@@ -157,18 +157,21 @@ impl Deadline {
 /// Present in the request = set it (`""`, `false` or `null` clears it); absent =
 /// keep what is stored. A task rewritten to fix a typo in its body must not lose
 /// the deadline nobody mentioned.
+///
+/// Each field is `Some(None)` for an explicit `null`, so `null` clears like the
+/// empty value does instead of reading as "not mentioned".
 #[derive(Debug, Default, Deserialize)]
 pub struct DeadlinePatch {
-    #[serde(default)]
-    pub due: Option<String>,
-    #[serde(default)]
-    pub hard: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub due: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub hard: Option<Option<bool>>,
     #[serde(default, deserialize_with = "present")]
     pub remind_days: Option<Option<u32>>,
-    #[serde(default)]
-    pub waits_on: Option<String>,
-    #[serde(default)]
-    pub expected: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub waits_on: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub expected: Option<Option<String>>,
 }
 
 /// Tells an explicit `null` (Some(None): clear) from an absent field (None: keep).
@@ -191,20 +194,37 @@ impl DeadlinePatch {
     }
 
     pub fn apply(self, mut d: Deadline) -> Deadline {
+        let (names_hard, names_days, names_event) =
+            (self.hard.is_some(), self.remind_days.is_some(), self.waits_on.is_some());
         if let Some(due) = self.due {
-            d.due = due.trim().to_string();
+            d.due = due.unwrap_or_default().trim().to_string();
         }
         if let Some(hard) = self.hard {
-            d.hard = hard;
+            d.hard = hard.unwrap_or(false);
         }
         if let Some(days) = self.remind_days {
             d.remind_days = days;
         }
         if let Some(waits_on) = self.waits_on {
-            d.waits_on = waits_on;
+            d.waits_on = waits_on.unwrap_or_default();
         }
         if let Some(expected) = self.expected {
-            d.expected = expected.trim().to_string();
+            d.expected = expected.unwrap_or_default().trim().to_string();
+        }
+        // A deadline left without a date is gone as a whole: what described it -
+        // how hard it was, how early to remind, the event it waited on - goes too,
+        // unless this very request sets it again (and is then refused for having
+        // no date, which is the honest answer).
+        if d.due.trim().is_empty() && d.expected.trim().is_empty() {
+            if !names_hard {
+                d.hard = false;
+            }
+            if !names_days {
+                d.remind_days = None;
+            }
+            if !names_event {
+                d.waits_on.clear();
+            }
         }
         d
     }
@@ -293,9 +313,12 @@ pub fn item(task: &Task, clock: &Clock) -> Option<Item> {
         When::At(at) => {
             let overdue = clock.now > at;
             let days = (at.date_naive() - clock.today).num_days();
-            // a caller whose calendar runs ahead of the deadline's own zone may
-            // already be on the next day while the instant is still to come
-            (if overdue { days } else { days.max(0) }, overdue)
+            // The instant decides; the calendars only count. A caller whose date
+            // runs ahead of the deadline's own zone may already be on the next day
+            // while the instant is still to come, and one whose date runs behind
+            // may still be on the day before an instant that has passed: neither
+            // is told a count that contradicts `overdue`.
+            (if overdue { days.min(0) } else { days.max(0) }, overdue)
         }
     };
     Some(Item {
@@ -309,7 +332,9 @@ pub fn item(task: &Task, clock: &Clock) -> Option<Item> {
         overdue,
         hard: task.deadline.hard,
         provisional,
-        waits_on: task.deadline.waits_on.clone(),
+        // the event matters while the date hangs on it; once the real date is
+        // known it is history, kept in the record, not repeated in reminders
+        waits_on: if provisional { task.deadline.waits_on.clone() } else { String::new() },
         remind_days: task.deadline.window(),
     })
 }

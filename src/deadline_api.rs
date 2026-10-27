@@ -52,7 +52,8 @@ fn clock(headers: &HeaderMap) -> Result<Clock, Reply> {
 /// Every live task that has a date, as of `clock`. Closed tasks keep their
 /// deadline in the record but are never a reminder: closing one removes it from
 /// every deadline answer at once, because this reads the index the close just
-/// committed.
+/// committed. Neither is a task archived without closing (`kyb rm`): its file has
+/// left the tree, so it is not in `kyb tasks` either.
 fn open_items(st: &AppState, clock: &Clock) -> anyhow::Result<Vec<Item>> {
     // every task head, however many: a capped listing would drop a deadline
     // without saying so
@@ -73,6 +74,8 @@ fn open_items(st: &AppState, clock: &Clock) -> anyhow::Result<Vec<Item>> {
             };
             deadline::item(&task, clock)
         })
+        // a file read per dated task only, after the cheap filters
+        .filter(|i| !crate::is_archived(st, &i.key))
         .collect())
 }
 

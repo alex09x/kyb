@@ -693,7 +693,7 @@ for bucket in ("overdue", "this_week", "later"):
         else:
             when = "due today" if d == 0 else "in %dd" % d
         note = ("expected " if r.get("provisional") else "due ") + r["due"]
-        if r.get("waits_on"):
+        if r.get("provisional") and r.get("waits_on"):
             note += ", waits on " + r["waits_on"]
         if r.get("assignee"):
             note += ", " + r["assignee"]

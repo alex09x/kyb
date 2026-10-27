@@ -180,6 +180,51 @@ async fn a_provisional_date_is_surfaced_and_marked_until_the_real_one_is_set() {
     let item = &v["deadlines"]["items"][0];
     assert!(item.get("provisional").is_none(), "{v}");
     assert_eq!(item["due"], "2026-03-24");
+    assert!(item.get("waits_on").is_none(), "the event no longer rides on the reminder: {v}");
+    let (_, l) = get_on(&app, "2026-03-10", "/deadlines").await;
+    assert!(l["deadlines"][0].get("waits_on").is_none(), "{l}");
+}
+
+#[tokio::test]
+async fn clearing_a_due_date_clears_the_deadline_whole() {
+    let (app, _d, _i) = app_with_tmp();
+    file(&app, "task-renew-cert", json!({"due": "2026-03-14", "hard": true, "remind_days": 21, "waits_on": "the CA"})).await;
+    let (st, v) = call(&app, "POST", "/tasks/task-renew-cert/transition", Some(json!({"due": ""}))).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let (_, e) = call(&app, "GET", "/knowledge/task-renew-cert", None).await;
+    for field in ["due", "hard", "remind_days", "waits_on", "expected"] {
+        assert!(e.get(field).is_none(), "{field} survived the clear: {e}");
+    }
+
+    // null clears over HTTP, on a full rewrite as well as on a transition
+    file(&app, "task-freeze", json!({"due": "2026-03-14", "hard": true})).await;
+    file(&app, "task-freeze", json!({"due": null})).await;
+    let (_, e) = call(&app, "GET", "/knowledge/task-freeze", None).await;
+    assert!(e.get("due").is_none() && e.get("hard").is_none(), "{e}");
+}
+
+#[tokio::test]
+async fn a_task_archived_without_closing_is_no_reminder_and_stays_archived() {
+    let (app, _d, _i) = app_with_tmp();
+    file(&app, "task-renew-cert", json!({"due": "2026-03-08"})).await;
+    let (st, v) = call(&app, "DELETE", "/knowledge/task-renew-cert", None).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+
+    // gone from the tree, so gone from kyb tasks - and from every deadline answer
+    let (_, v) = get_on(&app, "2026-03-10", "/tasks").await;
+    assert_eq!(v["count"], 0, "{v}");
+    assert!(v.get("deadlines").is_none(), "{v}");
+    let (_, v) = get_on(&app, "2026-03-10", "/deadlines").await;
+    assert_eq!(v["count"], 0, "{v}");
+
+    // a date change does not quietly bring it back; a status says it is wanted
+    let (st, v) = call(&app, "POST", "/tasks/task-renew-cert/transition", Some(json!({"due": "2026-04-01"}))).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("archived"), "{v}");
+    let (st, v) = call(&app, "POST", "/tasks/task-renew-cert/transition", Some(json!({"status": "open", "due": "2026-04-01"}))).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let (_, v) = get_on(&app, "2026-03-10", "/deadlines").await;
+    assert_eq!(v["deadlines"][0]["due"], "2026-04-01", "{v}");
 }
 
 #[tokio::test]

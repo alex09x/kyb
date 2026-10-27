@@ -469,8 +469,13 @@ fn no_deadlines(args: &Value, query: &mut Vec<(&'static str, String)>) {
 }
 
 /// The deadline fields travel only when the call names them: a field left out
-/// keeps what the task already says, an empty string clears it, and
-/// `remind_days: null` returns it to the server default.
+/// keeps what the task already says, and an empty string clears it -
+/// `remind_days: ""` returns it to the server default.
+///
+/// `null` is read as "not named", as kyb_task_status already reads it: models
+/// fill unused optional arguments with null, and a null that cleared would wipe
+/// a deadline on an ordinary rewrite. The HTTP API, whose callers mean what they
+/// send, takes null as a clear.
 fn deadline_fields(args: &Value, body: &mut Value) -> Result<(), String> {
     for field in ["due", "waits_on", "expected"] {
         match args.get(field) {
@@ -490,13 +495,23 @@ fn deadline_fields(args: &Value, body: &mut Value) -> Result<(), String> {
         Some(_) => return Err("`hard` must be true or false".into()),
     }
     match args.get("remind_days") {
-        None => {}
-        Some(Value::Null) => body["remind_days"] = Value::Null,
-        Some(Value::Number(n)) if n.as_u64().is_some() => body["remind_days"] = json!(n),
-        Some(Value::String(s)) if s.trim().parse::<u32>().is_ok() => {
-            body["remind_days"] = json!(s.trim().parse::<u32>().unwrap_or_default())
+        None | Some(Value::Null) => {}
+        Some(Value::String(s)) if s.trim().is_empty() => body["remind_days"] = Value::Null,
+        Some(v) => {
+            let days = match v {
+                Value::Number(n) => n.as_u64().and_then(|d| u32::try_from(d).ok()),
+                Value::String(s) => s.trim().parse::<u32>().ok(),
+                _ => None,
+            };
+            match days {
+                Some(d) => body["remind_days"] = json!(d),
+                None => {
+                    return Err(
+                        "`remind_days` must be a whole number of days, or \"\" for the default".into()
+                    )
+                }
+            }
         }
-        Some(_) => return Err("`remind_days` must be a whole number of days".into()),
     }
     Ok(())
 }
@@ -924,8 +939,8 @@ status blocked"},
                 "due": date_t("when it is due"),
                 "hard": {"type": "boolean", "description": "missing it has real consequences: an \
 expiry, a contractual or regulatory date, a third party's cut-off"},
-                "remind_days": {"type": ["integer", "null"], "description": "how many days ahead \
-to start surfacing it; null returns it to the default (14, or 30 when hard)"},
+                "remind_days": {"type": ["integer", "string"], "description": "how many days ahead \
+to start surfacing it; \"\" returns it to the default (14, or 30 when hard)"},
                 "waits_on": {"type": "string", "description": "the event the real date depends on"},
                 "expected": date_t("a provisional date, reminded on until due is set"),
             }},
@@ -946,8 +961,8 @@ status blocked"},
                 "due": date_t("when it is due"),
                 "hard": {"type": "boolean", "description": "missing it has real consequences: an \
 expiry, a contractual or regulatory date, a third party's cut-off"},
-                "remind_days": {"type": ["integer", "null"], "description": "how many days ahead \
-to start surfacing it; null returns it to the default (14, or 30 when hard)"},
+                "remind_days": {"type": ["integer", "string"], "description": "how many days ahead \
+to start surfacing it; \"\" returns it to the default (14, or 30 when hard)"},
                 "waits_on": {"type": "string", "description": "the event the real date depends on"},
                 "expected": date_t("a provisional date, reminded on until due is set"),
             }},
@@ -1354,5 +1369,26 @@ mod mcp_tests {
         let resp = rpc(&app, call("kyb_task_status", json!({"key": "task-renew-cert",
             "remind_days": "soon"}))).await;
         assert!(errored(&resp), "a malformed field is refused before any request is made");
+        let resp = rpc(&app, call("kyb_task_status", json!({"key": "task-renew-cert",
+            "remind_days": 5_000_000_000u64}))).await;
+        assert!(errored(&resp), "a count that does not fit is refused here, not by the route");
+
+        // null is "not named" over MCP: models send it for arguments they do not use
+        let resp = rpc(&app, call("kyb_task", json!({"key": "task-renew-cert",
+            "title": "Renew the certificate", "body": "before it expires",
+            "due": null, "hard": null, "remind_days": null}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let resp = rpc(&app, call("kyb_task_status", json!({"key": "task-renew-cert",
+            "remind_days": 45}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let resp = rpc(&app, call("kyb_deadlines", json!({}))).await;
+        let listing: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(listing["deadlines"][0]["due"], "2999-12-31", "{listing}");
+        assert_eq!(listing["deadlines"][0]["remind_days"], 45);
+        // "" returns the window to the default, 30 for a hard deadline
+        rpc(&app, call("kyb_task_status", json!({"key": "task-renew-cert", "remind_days": ""}))).await;
+        let resp = rpc(&app, call("kyb_deadlines", json!({}))).await;
+        let listing: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(listing["deadlines"][0]["remind_days"], 30, "{listing}");
     }
 }
