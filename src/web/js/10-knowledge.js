@@ -188,6 +188,7 @@
         const isDone = ['done', 'closed', 'dropped', 'resolved'].includes(st) || e.archived;
         const isBlocked = st === 'blocked', isProgress = st === 'in_progress', isOpen = !isDone && !isBlocked && !isProgress;
         const pr = (e.priority || '').toLowerCase();
+        const it = isDone ? null : dlItem(e.key);
         const start = label => `<button class="btn sm primary" data-write onclick="transitionTask(${K}, 'in_progress')">${label}</button>`;
         const block = `<button class="btn sm warning" data-write onclick="promptBlockTask(${K}, ${T})">Block</button>`;
         const done = `<button class="btn sm success" data-write onclick="openResolveTaskModal(${K}, ${T})">Done</button>`;
@@ -200,9 +201,9 @@
           hero: 'task-hero-panel',
           pills: `<span class="pill ${isBlocked ? 'amber' : isProgress ? 'acc' : isDone ? 'ok' : ''}">${st === 'in_progress' ? 'in progress' : escapeHtml(st)}</span>
                   ${pr ? `<span class="pill ${pr === 'critical' ? 'crit' : pr === 'high' ? 'amber' : ''}">${escapeHtml(pr)}</span>` : ''}`,
-          words: `${escapeHtml(e.assignee || 'Unassigned')} · created ${when}${by}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}${versions}`,
+          words: `${escapeHtml(e.assignee || 'Unassigned')} · created ${when}${by}${e.parent_task ? ` · part of <a href="#/knowledge/${encodeURIComponent(e.parent_task)}" onclick="handleCardClick(event, ${jsArg(e.parent_task)}, 'knowledge')">${escapeHtml(e.parent_task)}</a>` : ''}${it ? ` · ${dueChip(it, true)}` : e.due ? ` · due ${dlDate(e.due)}` : ''}${versions}`,
           acts,
-          body: `${e.blocked_reason ? `<div class="callout"><b>Blocked</b><span>${escapeHtml(e.blocked_reason)}</span></div>` : ''}${resolution}${linked}`,
+          body: `${it ? dlCallout(e, it) : ''}${e.blocked_reason ? `<div class="callout"><b>Blocked</b><span>${escapeHtml(e.blocked_reason)}</span></div>` : ''}${resolution}${linked}`,
         };
       }
 

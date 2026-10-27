@@ -16,8 +16,6 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
 // Assembled by build.rs from src/web/{index.html,css/*,js/*}.
@@ -48,25 +46,7 @@ pub struct AuditQ {
 
 pub async fn api_audit(State(st): State<Arc<AppState>>, Query(q): Query<AuditQ>) -> Response {
     let limit = q.limit.unwrap_or(50).min(200);
-    let mut entries = Vec::new();
-
-    if let Ok(file) = File::open(&st.audit_path) {
-        let reader = BufReader::new(file);
-        let mut lines = Vec::new();
-        for line in reader.lines() {
-            match line {
-                Ok(l) => lines.push(l),
-                Err(_) => break,
-            }
-        }
-        // Newest lines first
-        lines.reverse();
-        for line in lines.into_iter().take(limit) {
-            if let Ok(val) = serde_json::from_str::<Value>(&line) {
-                entries.push(val);
-            }
-        }
-    }
+    let entries = std::fs::read_to_string(&st.audit_path).map(|t| audit_entries(&t, limit)).unwrap_or_default();
 
     (
         StatusCode::OK,
@@ -90,9 +70,26 @@ pub async fn api_activity(State(st): State<Arc<AppState>>) -> Response {
         .into_response()
 }
 
+/// The newest `limit` records of the audit log, newest first.
+///
+/// The log is appended to while it is read. A line without its newline is still
+/// being written, so it is left out; and only objects count - a fragment of a
+/// line (`200`, `"status"`) is valid JSON, and a console that took it for a
+/// record broke on it.
+fn audit_entries(text: &str, limit: usize) -> Vec<Value> {
+    let complete = text.rfind('\n').map_or("", |end| &text[..end]);
+    complete
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok().filter(Value::is_object))
+        .take(limit)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use axum::body::Body;
     use axum::http::Request;
     use std::io::Write;
@@ -222,6 +219,16 @@ mod tests {
         let val: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(val["count"], 0);
         assert_eq!(val["entries"], json!([]));
+    }
+
+    #[test]
+    fn audit_skips_fragments_and_the_line_still_being_written() {
+        // what a reader saw while a record was appended piece by piece
+        let text = "{\"path\":\"/a\"}\n200\n\"status\"\n{\"path\":\"/b\"}\n{\"path\":\"/c\",\"st";
+        let got = audit_entries(text, 10);
+        assert_eq!(got, vec![json!({"path": "/b"}), json!({"path": "/a"})], "newest first, objects only");
+        assert_eq!(audit_entries(text, 1), vec![json!({"path": "/b"})]);
+        assert!(audit_entries("{\"path\":\"/only-partial\"}", 10).is_empty(), "no newline yet: still being written");
     }
 
     #[tokio::test]

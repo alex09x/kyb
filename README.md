@@ -387,6 +387,11 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 
 * **Queues, not boards**: incidents and tasks are attention queues — what needs a person now, with
   the reason in the row (blocked and why, open with no detection check, stale for how long).
+* **Deadlines**: a strip under the header on every tab with what is late and nearly due, as the
+  server's `deadlines` block lists it (late first); a "late or due soon" queue and a due column on
+  Tasks; a by-date view with a 30-day ribbon; on a task card, how late it is with Move date and
+  Done, or what a provisional date waits on; the due date, hard, the reminder window and the
+  event in the task form. The console sends its own date as `X-KYB-Today`, like the CLI.
 * **Versions**: an entry's own ledger — every version, newest first, with the whole of what it
   changed and, when the client supplied it, who wrote it (`by`: agent, session, workspace); any
   version readable as it was first written.

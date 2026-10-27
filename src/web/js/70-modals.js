@@ -85,6 +85,7 @@
             ${field('Priority', segmented('newPriority', PRIORITIES, ''))}
             ${field('Who', `<input type="text" class="form-input" id="newAssignee" value="${escapeHtml(meName())}" placeholder="unclaimed">`)}
           </div>
+          ${deadlineFields('new', {})}
           ${field('Done when', `<textarea class="form-textarea" id="newBody" placeholder="What to do and how to tell it is done."></textarea>`)}
         `;
       }
@@ -171,7 +172,8 @@
           title,
           priority,
           assignee,
-          body
+          body,
+          ...deadlinePayload('new')
         });
       }
 
@@ -236,6 +238,7 @@
             ${field('Priority', segmented('editPriority', PRIORITIES, entry.priority || ''))}
             ${field('Who', `<input type="text" class="form-input" id="editAssignee" value="${escapeHtml(entry.assignee || '')}" placeholder="unclaimed">`)}
           </div>
+          ${deadlineFields('edit', entry)}
           ${field('Done when', `<textarea class="form-textarea" id="editBody" style="min-height:140px;">${escapeHtml(entry.body || '')}</textarea>`)}
         `;
       } else {
@@ -290,7 +293,8 @@
           title,
           priority,
           assignee,
-          body
+          body,
+          ...deadlinePayload('edit')
         });
       } else {
         const rawTags = document.getElementById('editTags')?.value || '';

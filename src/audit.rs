@@ -20,9 +20,11 @@ impl Audit {
         Ok(Audit { file: Mutex::new(file) })
     }
 
+    /// One write per record: `writeln!` on a File issues a write per formatted
+    /// piece, and a reader arriving in between saw a record cut into fragments.
     fn append(&self, line: &serde_json::Value) {
         if let Ok(mut f) = self.file.lock() {
-            let _ = writeln!(f, "{line}");
+            let _ = f.write_all(format!("{line}\n").as_bytes());
         }
     }
 }
@@ -42,7 +44,7 @@ pub async fn audit_mw(State(st): State<Arc<AppState>>, req: Request, next: Next)
         || path == "/api/audit"
         || path == "/api/activity"
         || path == "/tags"
-        || ((path == "/incidents" || path == "/tasks") && method == "GET")
+        || ((path == "/incidents" || path == "/tasks" || path == "/deadlines") && method == "GET")
         || (path == "/search" && !query.contains("q="));
 
     if is_polling {
