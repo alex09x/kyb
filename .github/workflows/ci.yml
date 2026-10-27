@@ -40,6 +40,8 @@ jobs:
         run: bash scripts/test-compose-bind.sh
       - name: Verify the CLI preflight fails closed
         run: bash scripts/test-cli-preflight.sh
+      - name: Verify CLI attribution under nested agents
+        run: bash scripts/test-cli-attribution.sh
       - name: Validate static website
         run: bash scripts/test-site.sh
       - name: Check deployment script syntax

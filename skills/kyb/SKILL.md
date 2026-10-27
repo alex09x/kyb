@@ -512,10 +512,12 @@ ran in, as far as the client could tell. `kyb history <key>` shows them as `by`:
 {"sha": "…", "change": "modified", "by": {"agent": "claude", "session": "18970ebf-…", "workspace": "knowyourbusiness/scripts", "via": "cli"}}
 ```
 
-- `via: cli` — the `kyb` command read its environment: the agent from `PROD_PROVIDER`,
-  `CLAUDECODE`, `CODEX_*` or `ANTIGRAVITY_*`; the session from `CLAUDE_CODE_SESSION_ID`,
-  `CODEX_THREAD_ID`, `ANTIGRAVITY_CONVERSATION_ID` or `PROD_PRIMARY_SESSION_KEY`; the workspace
-  from the git repository the command ran in (`<repo>/<path inside it>`), never an absolute path.
+- `via: cli` — the `kyb` command walks up the process tree from its parent to find the
+  nearest agent ancestor (the inner agent) and records that agent and its own session
+  variable. When an agent runs inside another agent's terminal, the inner agent decides attribution,
+  and any outer agent is noted in `X-Kyb-Nested-In`. If no agent ancestor is found, it falls back
+  to environment variables (`CODEX_*`, `ANTIGRAVITY_*`, `CLAUDE_*`, `PROD_PROVIDER`). The workspace
+  comes from the git repository the command ran in (`<repo>/<path inside it>`), never an absolute path.
 - `via: hook` — Claude Code calls the kyb MCP tools over HTTP, so a PreToolUse hook
   (`~/.local/bin/kyb-hook`, registered by the installer) adds the same three to each call. It
   changes only the call's input; whether the call may run stays with your permission policy.
