@@ -264,11 +264,13 @@ async fn the_listing_filters_and_groups() {
 async fn a_tag_scoped_search_shows_that_areas_deadlines_first() {
     let (app, _d, _i) = app_with_tmp();
     file(&app, "task-late", json!({"due": "2026-03-08", "tags": ["billing"]})).await;
+    file(&app, "task-invoice", json!({"due": "2026-03-11", "tags": ["billing"]})).await;
     file(&app, "task-soon", json!({"due": "2026-03-12", "tags": ["infra"]})).await;
+    // the asked-about area first among what is coming; the late one stays on top
     let (_, v) = get_on(&app, "2026-03-10", "/search?q=&tag=infra").await;
-    assert_eq!(keys(&v["deadlines"]), ["task-soon", "task-late"], "{v}");
+    assert_eq!(keys(&v["deadlines"]), ["task-late", "task-soon", "task-invoice"], "{v}");
     let (_, v) = get_on(&app, "2026-03-10", "/search?q=title").await;
-    assert_eq!(keys(&v["deadlines"]), ["task-late", "task-soon"], "{v}");
+    assert_eq!(keys(&v["deadlines"]), ["task-late", "task-invoice", "task-soon"], "{v}");
 }
 
 #[tokio::test]

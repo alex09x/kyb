@@ -19,7 +19,8 @@
 //!
 //! "Today" is a calendar date, and whose calendar decides it. A deadline written
 //! as a bare date is due on that day wherever the caller is; one written with a
-//! time and an offset is an instant, and is late once that instant has passed.
+//! time and an offset counts by its own day the same way, and is also late once
+//! that instant has passed.
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
@@ -311,14 +312,23 @@ pub fn item(task: &Task, clock: &Clock) -> Option<Item> {
     let (days_left, overdue) = match when {
         When::Day(day) => ((day - clock.today).num_days(), clock.today > day),
         When::At(at) => {
-            let overdue = clock.now > at;
-            let days = (at.date_naive() - clock.today).num_days();
-            // The instant decides; the calendars only count. A caller whose date
-            // runs ahead of the deadline's own zone may already be on the next day
-            // while the instant is still to come, and one whose date runs behind
-            // may still be on the day before an instant that has passed: neither
-            // is told a count that contradicts `overdue`.
-            (if overdue { days.min(0) } else { days.max(0) }, overdue)
+            // The calendar first, exactly as for a bare date: the deadline's day
+            // in its own zone against the caller's today, so the two kinds agree
+            // about what day it is - and a today sent ahead (a preview, a test)
+            // sees it late. The instant only adds what a calendar cannot: once it
+            // has passed, the deadline is late even on its own day, or on the day
+            // before for a caller whose calendar runs behind the deadline's zone,
+            // and then no count of days to go is left standing.
+            //
+            // The instant is the real clock, so it speaks only for a today that is
+            // the present somewhere on Earth - every zone's date is within a day of
+            // the UTC one. A today sent for another time, past or future, is a
+            // question about that day, and the calendar alone answers it.
+            let day = at.date_naive();
+            let days = (day - clock.today).num_days();
+            let present = (clock.today - clock.now.date_naive()).num_days().abs() <= 1;
+            let overdue = clock.today > day || (present && clock.now > at);
+            (if overdue { days.min(0) } else { days }, overdue)
         }
     };
     Some(Item {
@@ -339,21 +349,24 @@ pub fn item(task: &Task, clock: &Clock) -> Option<Item> {
     })
 }
 
-/// Hard deadlines first, then by date, the late before the not-yet-late on the
-/// same day, then by key so the order never depends on the index.
+/// What is already late first - hard before soft, the latest first - then what is
+/// coming, hard before soft, the nearest first; by key last, so the order never
+/// depends on the index. A late task is the most urgent line there is: a distant
+/// hard deadline must never push it down, let alone out of a capped block.
 pub fn sort(items: &mut [Item]) {
     items.sort_by(|a, b| {
-        b.hard
-            .cmp(&a.hard)
+        b.overdue
+            .cmp(&a.overdue)
+            .then(b.hard.cmp(&a.hard))
             .then(a.days_left.cmp(&b.days_left))
-            .then(b.overdue.cmp(&a.overdue))
             .then(a.key.cmp(&b.key))
     });
 }
 
 /// The block a read response carries: what is late or inside its window,
-/// capped, with the deadlines of the asked-about area first. None when there is
-/// nothing to say - the block is absent then, not empty.
+/// capped. The late ones come first whatever was asked; inside each part the
+/// deadlines of the asked-about area come first. None when there is nothing to
+/// say - the block is absent then, not empty.
 pub fn block(mut items: Vec<Item>, clock: &Clock, scope: &[String]) -> Option<Value> {
     items.retain(Item::surfaced);
     if items.is_empty() {
@@ -361,11 +374,9 @@ pub fn block(mut items: Vec<Item>, clock: &Clock, scope: &[String]) -> Option<Va
     }
     sort(&mut items);
     if !scope.is_empty() {
-        // stable: the order inside each part stays the one sort() decided
-        let (mut first, rest): (Vec<Item>, Vec<Item>) =
-            items.into_iter().partition(|i| i.in_scope(scope));
-        first.extend(rest);
-        items = first;
+        // stable: the order inside each part stays the one sort() decided, and
+        // the area moves up only among its own kind - never above a late task
+        items.sort_by_key(|i| (!i.overdue, !i.in_scope(scope)));
     }
     let count = items.len();
     let overdue = items.iter().filter(|i| i.overdue).count();

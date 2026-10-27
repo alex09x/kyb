@@ -126,12 +126,63 @@ fn an_instant_is_late_once_it_has_passed_in_any_zone() {
     let i = item_of("task-cutoff", &deadline, &after).unwrap();
     assert!(i.overdue, "the instant passed, whatever the caller's date says");
 
-    // a caller already on the 15th, while the instant is still ahead, is told
-    // "today", never a negative count for something not yet late
+    // a caller already on the 15th reads it by the calendar, like a bare date of
+    // the 14th: a day late, even while the instant is still ahead in Los Angeles
     let ahead = clock("2026-03-14T23:30:00Z", "2026-03-15");
     let i = item_of("task-cutoff", &deadline, &ahead).unwrap();
-    assert!(!i.overdue);
-    assert_eq!(i.days_left, 0);
+    assert!(i.overdue);
+    assert_eq!(i.days_left, -1);
+}
+
+#[test]
+fn a_date_time_follows_the_callers_today_like_a_bare_date() {
+    // GitHub issue 31: the real clock is weeks before the deadline, the caller's
+    // today (X-KYB-Today) is after it
+    let timed = due("2026-11-10T08:30:00-08:00");
+    let bare = due("2026-11-10");
+    let on = |today: &str| clock("2026-10-27T04:00:00Z", today);
+    for (today, days, late) in [("2026-11-09", 1, false), ("2026-11-10", 0, false), ("2026-11-11", -1, true), ("2026-11-15", -5, true)] {
+        let t = item_of("task-timed", &timed, &on(today)).unwrap();
+        let b = item_of("task-bare", &bare, &on(today)).unwrap();
+        assert_eq!((t.days_left, t.overdue), (days, late), "date-time on {today}");
+        assert_eq!(t.days_left, b.days_left, "the two kinds agree on {today}");
+        assert_eq!(t.bucket(), if late { "overdue" } else { "this_week" }, "{today}");
+    }
+}
+
+#[test]
+fn a_today_sent_for_another_time_is_answered_by_the_calendar_alone() {
+    // the instant is long past on the real clock; a caller asking about a day
+    // before it, or about its own day, is not told it is late (review of #34)
+    let past = due("2026-03-10T08:30:00-08:00");
+    let now = "2026-10-27T04:00:00Z";
+    let before = item_of("task-past", &past, &clock(now, "2026-01-01")).unwrap();
+    assert_eq!((before.days_left, before.overdue), (68, false));
+    let on = item_of("task-past", &past, &clock(now, "2026-03-10")).unwrap();
+    assert_eq!((on.days_left, on.overdue), (0, false));
+    let after = item_of("task-past", &past, &clock(now, "2026-03-11")).unwrap();
+    assert_eq!((after.days_left, after.overdue), (-1, true));
+    // the present, on either side of UTC midnight, still hears the clock: Los Angeles
+    // at 18:00 on the 14th is already the 15th in UTC
+    let tokyo = due("2026-03-15T01:00:00+09:00");
+    let la_evening = item_of("task-tokyo", &tokyo, &clock("2026-03-15T01:00:00Z", "2026-03-14")).unwrap();
+    assert!(la_evening.overdue && la_evening.days_left == 0, "{la_evening:?}");
+}
+
+#[test]
+fn a_date_time_across_the_daylight_saving_change_keeps_its_own_day() {
+    // 2026-11-01 01:30 happens twice in Los Angeles: once in PDT, once in PST
+    let c = clock("2026-10-27T04:00:00Z", "2026-11-02");
+    for written in ["2026-11-01T01:30:00-07:00", "2026-11-01T01:30:00-08:00"] {
+        let i = item_of("task-dst", &due(written), &c).unwrap();
+        assert_eq!((i.days_left, i.overdue), (-1, true), "{written}");
+    }
+    let before = clock("2026-10-27T04:00:00Z", "2026-10-31");
+    assert_eq!(item_of("task-dst", &due("2026-11-01T01:30:00-08:00"), &before).unwrap().days_left, 1);
+    // spring forward: 2026-03-08 02:30 does not exist locally, but an offset makes
+    // it a real instant, and its day is still the 8th
+    let spring = clock("2026-03-01T00:00:00Z", "2026-03-09");
+    assert_eq!(item_of("task-dst", &due("2026-03-08T03:30:00-07:00"), &spring).unwrap().days_left, -1);
 }
 
 #[test]
@@ -180,21 +231,45 @@ fn the_block_is_capped_ordered_and_absent_when_there_is_nothing() {
     assert_eq!(b["overdue"], 1);
     assert_eq!(b["more"], 2);
     let keys: Vec<&str> = b["items"].as_array().unwrap().iter().map(|i| i["key"].as_str().unwrap()).collect();
-    assert_eq!(keys, ["task-hard", "task-2", "task-1", "task-0", "task-5"], "hard first, then by date");
+    assert_eq!(keys, ["task-2", "task-hard", "task-1", "task-0", "task-5"], "late first, then hard, then by date");
+}
+
+#[test]
+fn a_late_task_is_never_pushed_out_of_the_block_by_distant_hard_ones() {
+    // GitHub issue 32: hard deadlines weeks away outnumber the cap
+    let c = clock("2026-10-26T12:00:00Z", "2026-10-26");
+    let mut items: Vec<Item> = (0..6)
+        .map(|i| {
+            let hard = Deadline { hard: true, ..due(&format!("2026-11-{:02}", 10 + i)) };
+            item_of(&format!("task-hard-{i}"), &hard, &c).unwrap()
+        })
+        .collect();
+    items.push(item_of("task-rotate-keys", &due("2026-10-20"), &c).unwrap());
+    let hard_late = Deadline { hard: true, ..due("2026-10-25") };
+    items.push(item_of("task-renew-cert", &hard_late, &c).unwrap());
+
+    let b = block(items, &c, &[]).unwrap();
+    let keys: Vec<&str> = b["items"].as_array().unwrap().iter().map(|i| i["key"].as_str().unwrap()).collect();
+    assert_eq!(&keys[..2], ["task-renew-cert", "task-rotate-keys"], "late first, hard before soft: {keys:?}");
+    assert_eq!(keys[2], "task-hard-0", "then what is coming, nearest first");
+    assert_eq!(b["more"], 3);
 }
 
 #[test]
 fn a_scoped_question_shows_its_own_area_first() {
     let c = clock("2026-03-10T12:00:00Z", "2026-03-10");
     let items = vec![
-        tagged("task-billing", &due("2026-03-08"), &["billing"], &c),
+        tagged("task-billing-late", &due("2026-03-08"), &["billing"], &c),
+        tagged("task-billing", &due("2026-03-11"), &["billing"], &c),
         tagged("task-cert", &due("2026-03-12"), &["infra", "tls"], &c),
     ];
-    let b = block(items.clone(), &c, &["TLS".into()]).unwrap();
-    assert_eq!(b["items"][0]["key"], "task-cert");
-    assert_eq!(b["items"][1]["key"], "task-billing", "the rest still follows, nothing is hidden");
-    let b = block(items, &c, &[]).unwrap();
-    assert_eq!(b["items"][0]["key"], "task-billing");
+    let order = |scope: &[String]| -> Vec<String> {
+        let b = block(items.clone(), &c, scope).unwrap();
+        b["items"].as_array().unwrap().iter().map(|i| i["key"].as_str().unwrap().to_string()).collect()
+    };
+    // the area moves up among what is coming; a late task stays above it all
+    assert_eq!(order(&["TLS".into()]), ["task-billing-late", "task-cert", "task-billing"]);
+    assert_eq!(order(&[]), ["task-billing-late", "task-billing", "task-cert"]);
 }
 
 #[test]
