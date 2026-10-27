@@ -23,7 +23,7 @@ RUN cargo build --release --locked
 # glibc >= 2.38 (__isoc23_* symbols), which bookworm's 2.36 does not have.
 FROM debian:trixie-slim
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends zlib1g libgomp1 \
+    && apt-get install -y --no-install-recommends zlib1g libgomp1 tzdata \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /src/target/release/kyb-server /usr/local/bin/kyb-server
 COPY --from=model /model /model

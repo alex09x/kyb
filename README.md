@@ -128,9 +128,23 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
   *yet* is allowed — a child can be filed before its parent — and is reported back as
   `unknown_parent`.
 - **Partial transitions** — `POST /tasks/{key}/transition` (`kyb task-status`) moves a task
-  between the live statuses and optionally changes its owner or parent **without resending
-  title, body, tags, priority or links**. Leaving `blocked` clears the reason; the terminal
-  statuses are refused with a pointer to `kyb done`, because closing demands an outcome.
+  between the live statuses and optionally changes its owner, parent or deadline **without
+  resending title, body, tags, priority or links**. Leaving `blocked` clears the reason; the
+  terminal statuses are refused with a pointer to `kyb done`, because closing demands an outcome.
+- **Deadlines** — optional `due` (`YYYY-MM-DD`, or a date-time with its zone), `hard` (a miss
+  has consequences outside the team: an expiry, a contract or a regulator), `remind_days` (how
+  early to start surfacing it; default 14, or 30 when hard), and for a date that depends on an
+  event, `waits_on` with a provisional `expected` date. A deadline field left out of a write
+  keeps its stored value, so rewriting a task never drops its due date; moving one is a new
+  version, visible in `kyb history` and `kyb diff`.
+- **Deadlines surface on their own** — every read answer (`/search`, `/knowledge/{key}`,
+  `/tasks`, `/incidents`, and so every CLI and MCP read) carries a `deadlines` block when an open
+  task is late or inside its reminder window: up to five, hard ones first, then by date, with
+  the days left. Nothing due, no block. The CLI prints it as a short banner on stderr;
+  `--no-deadlines` (`?deadlines=false`) leaves it off. `kyb deadlines` is the full calendar:
+  overdue, this week, later. A bare date is judged by the caller's calendar (the CLI sends its
+  own date as `X-KYB-Today`); otherwise by the server's `TZ`. KYB reminds, it never schedules:
+  no notifications, no recurrence. The agent skill has a session-start hook recipe.
 
 Closing archives the task; `kyb tasks` and the search keep the full record. Every write is a
 commit, so `kyb history <key>` + `kyb get <key> --at <sha>` reconstruct who held a task, in
@@ -177,6 +191,7 @@ KYB_PUBLISH_ADDR=10.0.0.10 docker compose up -d
 | `KYB_PUBLISH_ADDR` | `127.0.0.1` | Docker Compose host interface; set one exact private IP for remote clients |
 | `KYB_MODEL` | *(unset)* | dir with `model.onnx` + `tokenizer.json`; absent = lexical-only |
 | `KYB_AUDIT` | `audit.jsonl` | JSONL request log |
+| `TZ` | `UTC` (Docker Compose) | the server's time zone, e.g. `America/Los_Angeles`: whose "today" the deadline block uses for a caller that sends no `X-KYB-Today` (the CLI always sends its own) |
 
 </details>
 
@@ -222,6 +237,12 @@ kyb task-status task-raise-log-retention --status in_progress --assignee agent-a
 kyb task-status task-swap-disk --status blocked --blocked-reason "waiting on the disk"
 kyb tasks [--status X] [--priority P] [--assignee A] [--parent K] [--open-followups] [--all]
 kyb done task-raise-log-retention <<< "what came of it"         # or --status dropped + why
+
+kyb task --key task-renew-api-cert --title "..." --due 2026-03-14 --hard [--remind-days 30] <<< "body"
+kyb task --key task-answer-quote --title "..." --waits-on "the quote" --expected 2026-03-20 <<< "body"
+kyb task-status task-renew-api-cert --due 2026-03-21    # move a deadline: a version, shown by kyb diff
+kyb deadlines [--within 14d] [--overdue] [--hard] [--tag a,b] [--assignee A] [--json]
+# every read above prints overdue and nearly due tasks as a banner on stderr; --no-deadlines omits it
 ```
 
 ---
@@ -399,9 +420,10 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 | `POST` | `/incidents` | upsert a report; reply carries `unknown_knowledge` for dangling links and `hints` for missing structure. `status:resolved` requires `resolution` and archives |
 | `GET` | `/incidents` | `?status=&service=&followups=open&all=true&limit=` — live reports by default, open first, freshest on top; `all=true`, an explicit `status=` or `followups=open` include archived ones |
 | `POST` | `/incidents/{key}/resolve` | `{resolution, status?=resolved}` — flips status, records the outcome, stamps the timeline, archives on close |
-| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, priority?, blocked_reason?, assignee?, parent_task?, knowledge?, resolution?, tags?, refs?}`; `status` is `open\|in_progress\|blocked\|done\|dropped`, `priority` is `""\|low\|medium\|high\|critical`, `blocked_reason` requires `status:blocked` (400 otherwise), `parent_task` must be `""` or another `task-` key and cannot create a cycle; the terminal statuses require `resolution` and archive |
+| `POST` | `/tasks` | upsert a task: `{key, title, body, status?, priority?, blocked_reason?, assignee?, parent_task?, knowledge?, resolution?, tags?, refs?, due?, hard?, remind_days?, waits_on?, expected?}` (a deadline field left out keeps its stored value; `""`, `false` or `null` clears it); `status` is `open\|in_progress\|blocked\|done\|dropped`, `priority` is `""\|low\|medium\|high\|critical`, `blocked_reason` requires `status:blocked` (400 otherwise), `parent_task` must be `""` or another `task-` key and cannot create a cycle; the terminal statuses require `resolution` and archive |
 | `GET` | `/tasks` | `?status=&priority=&assignee=&parent_task=&followups=open&all=true&limit=` — live tasks (`open`, `in_progress`, `blocked`) by default, freshest on top; same archive rules as `/incidents` |
-| `POST` | `/tasks/{key}/transition` | partial update: `{status, assignee?, parent_task?, blocked_reason?}` — `status` is a **live** one (`open\|in_progress\|blocked`); omitted fields keep their stored value, leaving `blocked` clears `blocked_reason`, and a terminal status is refused with a pointer to `/tasks/{key}/resolve` |
+| `POST` | `/tasks/{key}/transition` | partial update: `{status?, assignee?, parent_task?, blocked_reason?, due?, hard?, remind_days?, waits_on?, expected?}` — `status` is a **live** one (`open\|in_progress\|blocked`), and without it the task keeps its own; omitted fields keep their stored value, leaving `blocked` clears `blocked_reason`, and a terminal status is refused with a pointer to `/tasks/{key}/resolve` |
+| `GET` | `/deadlines` | `?within=<days>&overdue=true&hard=true&tag=&assignee=` → `{today, count, deadlines:[{key, title, status, due, days_left, overdue, hard?, provisional?, waits_on?, bucket}]}` — every live task with a date, soonest first, `bucket` `overdue\|this_week\|later`. "Today" is the `X-KYB-Today: YYYY-MM-DD` header, or the server's date in its `TZ` |
 | `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — flips status, records the outcome; a non-`blocked` status clears `blocked_reason`; `done`/`dropped` archive |
 | `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=&priority=&assignee=&parent_task=` → ranked hits with full bodies; an empty `q` lists newest first |
 | `GET` | `/export` | `?at=<rev>&after=<key>&limit=` → JSON lines: a `snapshot` line (the commit, `total`, `counts` per kind and state), one `entry` line per key in key order with `state` `active`\|`archived`\|`retracted` (a removed key as it was just before removal), an `end` line with `next_after` and `complete`. Pages that pass the same `at` read one commit, so writes made meanwhile change nothing; earlier versions stay in `/knowledge/{key}/history`. Needs the read role, like `/search` |
@@ -409,6 +431,11 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 | `DELETE` | `/knowledge/{key}` | knowledge: retract (drops from the default search); incident/task: archive (stays searchable) |
 | `POST` | `/reindex` | full index rebuild from git |
 | `GET` | `/healthz` | `{ok, entries, open_incidents, open_tasks, index_docs, last_commit}` — `open_tasks` counts every live status (`open`, `in_progress`, `blocked`) |
+
+`GET /search`, `/knowledge/{key}`, `/tasks` and `/incidents` add a `deadlines` object to a
+successful answer when an open task is late or inside its reminder window
+(`{today, count, overdue, more, items:[...]}`, at most five items); `?deadlines=false` leaves
+it off.
 
 Every request except `/healthz` is appended to a JSONL audit log: timestamp, client ip,
 method, path, query, status, duration.

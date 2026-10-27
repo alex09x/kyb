@@ -108,10 +108,14 @@ refuses "wedged server (timeout)"  4 query x --as-of 2026-08-01
 refuses "released 0.2.1 server"    5 query x --as-of 2026-08-01
 refuses "released 0.2.1, window"   5 query x --changed-between 2026-08-01,2026-08-02
 refuses "released 0.2.1, diff"     5 diff some-key
+refuses "released 0.2.1, deadlines" 5 deadlines
+refuses "released 0.2.1, --due"    5 task --key task-x --title x --due 2026-01-01
+refuses "released 0.2.1, move due" 5 task-status task-x --due 2026-01-01
+refuses "released 0.2.1, --no-deadlines" 5 tasks --no-deadlines
 
 echo "---"
 if [ "$failures" -ne 0 ]; then
   echo "$failures preflight case(s) did not fail closed"
   exit 1
 fi
-echo "CLI preflight fails closed in all 8 cases"
+echo "CLI preflight fails closed in all 12 cases"

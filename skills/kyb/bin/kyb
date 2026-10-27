@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Alexander Panasenko
+# Contact: alex@prod.codes
+# Author: https://prod.codes/about/
+# Project: https://github.com/alex09x/kyb
+# SPDX-License-Identifier: MIT
 # kyb — CLI for Know Your Business: our shared infrastructure knowledge base.
 # The service runs in docker on the shared server; every agent and machine sees the same data.
 # A shell trace would print the access token (it is expanded where it is read and
@@ -86,6 +91,95 @@ PY
 
 pretty() { if command -v jq >/dev/null 2>&1; then jq .; else cat; fi; }
 
+# The deadline block that rides on every read answer, as a few lines for a
+# person or an agent to notice. It goes to stderr: stdout stays exactly what the
+# server sent, so a script that parses it sees no difference.
+BANNER_PY='
+import json, sys
+try:
+    block = json.load(sys.stdin).get("deadlines")
+except Exception:
+    raise SystemExit(0)
+if not isinstance(block, dict) or not block.get("count"):
+    raise SystemExit(0)
+
+def when(i):
+    d = i["days_left"]
+    if i["overdue"]:
+        return "%dd late" % -d if d < 0 else "late today"
+    return "due today" if d == 0 else "in %dd" % d
+
+late = block.get("overdue", 0)
+soon = block["count"] - late
+said = [s for s in ("%d overdue" % late if late else "", "%d due soon" % soon if soon else "") if s]
+print("kyb deadlines, today %s: %s" % (block.get("today"), ", ".join(said)))
+for i in block.get("items", []):
+    note = "due " + i["due"]
+    if i.get("provisional"):
+        note = "expected " + i["due"] + (", waits on " + i["waits_on"] if i.get("waits_on") else "")
+    line = "  %-10s %s%s  %s  (%s)" % (when(i), "HARD " if i.get("hard") else "", i["key"], i["title"], note)
+    print(line if len(line) <= 160 else line[:159] + "\u2026")
+if block.get("more"):
+    print("  +%d more: kyb deadlines" % block["more"])
+'
+
+# A read answer: the JSON to stdout, its deadline block as a banner to stderr.
+show() {
+  local out
+  out="$(cat)"
+  [ -n "$NO_DEADLINES" ] || printf '%s' "$out" | python3 -c "$BANNER_PY" >&2 || true
+  printf '%s\n' "$out" | pretty
+}
+
+# With --no-deadlines the server is asked to leave the block off (DL is the
+# query parameter to append). Asking an older server would be refused outright:
+# it knows no such parameter - and sends no block either.
+deadlines_param() {
+  DL=""
+  [ -n "$NO_DEADLINES" ] || return 0
+  require_capability deadlines "--no-deadlines" "That server sends no deadline block at all, so the flag is not needed there; drop it."
+  DL="&deadlines=false"
+}
+
+# The deadline flags of `task` and `task-status`, as a JSON object of only the
+# flags that were passed: a flag left out keeps what the task already says.
+# Reads the dl_* variables the two commands' flag loops set.
+deadline_json() {
+  DL_DUE="$dl_due" DL_DUE_SET="$dl_due_set" DL_HARD="$dl_hard" \
+  DL_REMIND="$dl_remind" DL_REMIND_SET="$dl_remind_set" \
+  DL_WAITS="$dl_waits" DL_WAITS_SET="$dl_waits_set" \
+  DL_EXPECTED="$dl_expected" DL_EXPECTED_SET="$dl_expected_set" python3 -c '
+import json, os, sys
+e, p = os.environ, {}
+if e["DL_DUE_SET"]:
+    p["due"] = e["DL_DUE"]
+if e["DL_HARD"]:
+    p["hard"] = e["DL_HARD"] == "true"
+if e["DL_REMIND_SET"]:
+    days = e["DL_REMIND"].strip()
+    if days == "":
+        p["remind_days"] = None
+    elif days.isdigit():
+        p["remind_days"] = int(days)
+    else:
+        sys.exit("kyb: --remind-days takes a whole number of days (\"\" returns it to the default)")
+if e["DL_WAITS_SET"]:
+    p["waits_on"] = e["DL_WAITS"]
+if e["DL_EXPECTED_SET"]:
+    p["expected"] = e["DL_EXPECTED"]
+print(json.dumps(p))'
+}
+dl_reset() {
+  dl_due=""; dl_due_set=""; dl_hard=""; dl_remind=""; dl_remind_set=""
+  dl_waits=""; dl_waits_set=""; dl_expected=""; dl_expected_set=""
+}
+# An older server ignores fields it does not know: the deadline would be
+# dropped without a word. So a deadline flag is only sent to one that has them.
+require_deadlines_if_set() {
+  [ -n "$dl_due_set$dl_hard$dl_remind_set$dl_waits_set$dl_expected_set" ] || return 0
+  require_capability deadlines "the deadline flags" "An older server ignores fields it does not know, so the deadline would be silently dropped."
+}
+
 urlenc() { python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${1:-}"; }
 
 # Who is writing, for the record: the agent, its session and the workspace,
@@ -165,6 +259,10 @@ request_headers() {
   cfg_header x-kyb-session "$BY_SESSION"
   cfg_header x-kyb-workspace "$(by_workspace)"
   cfg_header x-kyb-via cli
+  # "today" for the deadline block is the caller's calendar day, not the
+  # server's: a task due on the 14th is not late at 19:00 on the 14th here,
+  # whatever date the server's clock has reached
+  cfg_header x-kyb-today "${KYB_TODAY:-$(date +%F)}"
 }
 
 # This is a pure HTTP client for the kyb server — no ssh, no attempts to
@@ -186,6 +284,8 @@ kyb — Know Your Business (our infrastructure knowledge base)
   kyb tags                                          (which topics the base covers)
   kyb add --key <slug> --title "..." [--tags a,b] [--refs r1,r2]   (body on stdin)
   kyb get <key> [--at <sha>]
+  kyb deadlines [--within 30d] [--overdue] [--hard] [--tag a,b] [--assignee A] [--json]
+                                                    (open tasks with a due date: overdue / this week / later)
   kyb history <key>
   kyb export [--at <sha>] [--out FILE] [--page N]   (every key as of one commit as JSON lines:
                                                     active, archived, retracted; checks completeness)
@@ -215,10 +315,12 @@ tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
   kyb task --key task-<slug> --title "..." [--status open|in_progress|blocked|done|dropped]
            [--priority low|medium|high|critical] [--blocked-reason "what it waits on"]
            [--assignee <label>] [--parent task-<slug>]
-           [--knowledge key1,key2] [--resolution "..."] [--tags a,b] [--refs r1,r2]   (body on stdin)
+           [--knowledge key1,key2] [--resolution "..."] [--tags a,b] [--refs r1,r2]
+           [--due DATE] [--hard] [--remind-days N] [--waits-on "event"] [--expected DATE]   (body on stdin)
            (--blocked-reason only with --status blocked; done/dropped close and archive)
-  kyb task-status <key> --status open|in_progress|blocked
+  kyb task-status <key> [--status open|in_progress|blocked]
            [--assignee <label>] [--parent task-<slug>] [--blocked-reason "what it waits on"]
+           [--due DATE] [--hard|--no-hard] [--remind-days N] [--waits-on "event"] [--expected DATE]
            (partial update: title, body, tags, priority and links stay as stored —
             nothing to resend. Leaving blocked clears the reason; --assignee "" hands
             the task back. Closing is `kyb done`, not this.)
@@ -229,11 +331,29 @@ tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
   kyb done <key> [--status dropped] [--resolution "what came of it"]
            (no --resolution: the closing comment is read from stdin)
 
+deadlines on tasks (task and task-status take the same flags):
+  --due YYYY-MM-DD|<date-time with zone>   when it is due ("" clears it)
+  --hard | --no-hard                       a miss has real consequences (expiry, contract, regulator)
+  --remind-days N                          surface it N days ahead (default 14, hard 30; "" = default)
+  --waits-on "event" --expected DATE       the date depends on an event: remind on the expected one
+  A flag left out keeps what the task already says. Moving a due date is a new version.
+
+Every read (query, get, tasks, incidents) prints the overdue and nearly due tasks
+as a short banner on stderr; --no-deadlines leaves it off.
+
 Closing an incident or a task archives it: the file leaves the canon, the
 report stays searchable (kyb query) and readable (kyb get) forever.
 EOF
   exit "$status"
 }
+
+# --no-deadlines works on every command, wherever it is written
+NO_DEADLINES=""
+argv=()
+for a in "$@"; do
+  if [ "$a" = "--no-deadlines" ]; then NO_DEADLINES=1; else argv+=("$a"); fi
+done
+set -- ${argv[@]+"${argv[@]}"}
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift || true
 
@@ -264,7 +384,8 @@ case "$cmd" in
     done
     [ -z "$as_of" ]  || require_capability as_of "--as-of" "An older server ignores a parameter it does not know and answers as if it were absent, so you would get CURRENT data as the answer to a question about the past."
     [ -z "$changed" ] || require_capability changed_between "--changed-between" "An older server ignores a parameter it does not know and answers as if it were absent, so you would get CURRENT data as the answer to a question about the past."
-    kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&as_of=$(urlenc "$as_of")&changed_between=$(urlenc "$changed")&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")" | pretty
+    deadlines_param
+    kyb_curl "$BASE/search?q=$(urlenc "$text")&tag=$(urlenc "$tag")&history=$history&as_of=$(urlenc "$as_of")&changed_between=$(urlenc "$changed")&limit=$limit&sort=$sort&kind=$(urlenc "$kind")&status=$(urlenc "$status")&service=$(urlenc "$service")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")$DL" | show
     ;;
   tags)
     kyb_curl "$BASE/tags" | pretty
@@ -380,7 +501,8 @@ print(json.dumps({
         *) die "incidents: unknown flag $1" ;;
       esac
     done
-    kyb_curl "$BASE/incidents?status=$(urlenc "$status")&service=$(urlenc "$service")&followups=$followups&all=$all&limit=$limit" | pretty
+    deadlines_param
+    kyb_curl "$BASE/incidents?status=$(urlenc "$status")&service=$(urlenc "$service")&followups=$followups&all=$all&limit=$limit$DL" | show
     ;;
   resolve)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true
@@ -402,8 +524,15 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
   task)
     key=""; title=""; status="open"; priority=""; blocked_reason=""
     assignee=""; parent=""; knowledge=""; resolution=""; tags=""; refs=""
+    dl_reset
     while [ $# -gt 0 ]; do
       case "$1" in
+        --due) dl_due="$2"; dl_due_set=1; shift 2 ;;
+        --hard) dl_hard="true"; shift ;;
+        --no-hard) dl_hard="false"; shift ;;
+        --remind-days) dl_remind="$2"; dl_remind_set=1; shift 2 ;;
+        --waits-on) dl_waits="$2"; dl_waits_set=1; shift 2 ;;
+        --expected) dl_expected="$2"; dl_expected_set=1; shift 2 ;;
         --key) key="$2"; shift 2 ;;
         --title) title="$2"; shift 2 ;;
         --status) status="$2"; shift 2 ;;
@@ -419,26 +548,37 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
       esac
     done
     [ -n "$key" ] && [ -n "$title" ] || die "task: --key and --title are required (body comes from stdin)"
+    deadline="$(deadline_json)"
+    require_deadlines_if_set
     body="$(cat)"
-    payload="$(BODY="$body" RESOLUTION="$resolution" BLOCKED_REASON="$blocked_reason" ASSIGNEE="$assignee" python3 -c '
+    payload="$(BODY="$body" RESOLUTION="$resolution" BLOCKED_REASON="$blocked_reason" ASSIGNEE="$assignee" DEADLINE="$deadline" python3 -c '
 import json, os, sys
 key, title, status, priority, parent, knowledge, tags, refs = sys.argv[1:9]
 split = lambda s: [x.strip() for x in s.split(",") if x.strip()]
-print(json.dumps({
+p = {
     "key": key, "title": title, "body": os.environ["BODY"], "status": status,
     "priority": priority, "blocked_reason": os.environ["BLOCKED_REASON"],
     "assignee": os.environ["ASSIGNEE"], "parent_task": parent,
     "knowledge": split(knowledge), "resolution": os.environ["RESOLUTION"],
     "tags": split(tags), "refs": split(refs),
-}))' "$key" "$title" "$status" "$priority" "$parent" "$knowledge" "$tags" "$refs")"
+}
+p.update(json.loads(os.environ["DEADLINE"]))
+print(json.dumps(p))' "$key" "$title" "$status" "$priority" "$parent" "$knowledge" "$tags" "$refs")"
     kyb_curl -X POST "$BASE/tasks" -H 'content-type: application/json' -d "$payload" | pretty
     ;;
   task-status)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true
     status=""; assignee=""; parent=""; blocked_reason=""
     assignee_set=""; parent_set=""; reason_set=""
+    dl_reset
     while [ $# -gt 0 ]; do
       case "$1" in
+        --due) dl_due="$2"; dl_due_set=1; shift 2 ;;
+        --hard) dl_hard="true"; shift ;;
+        --no-hard) dl_hard="false"; shift ;;
+        --remind-days) dl_remind="$2"; dl_remind_set=1; shift 2 ;;
+        --waits-on) dl_waits="$2"; dl_waits_set=1; shift 2 ;;
+        --expected) dl_expected="$2"; dl_expected_set=1; shift 2 ;;
         --status) status="$2"; shift 2 ;;
         --assignee) assignee="$2"; assignee_set="1"; shift 2 ;;
         --parent|--parent-task) parent="$2"; parent_set="1"; shift 2 ;;
@@ -446,14 +586,19 @@ print(json.dumps({
         *) die "task-status: unknown flag $1" ;;
       esac
     done
-    [ -n "$status" ] || die "task-status: --status open|in_progress|blocked is required (close with: kyb done $key)"
+    deadline="$(deadline_json)"
+    [ -n "$status$assignee_set$parent_set$reason_set" ] || [ "$deadline" != "{}" ] \
+      || die "task-status: pass --status open|in_progress|blocked, or what to move (--due, --assignee, ...); close with: kyb done $key"
+    require_deadlines_if_set
     # only the flags actually passed go into the payload: everything else the
-    # task already says — title, body, tags, priority, links — stays as stored
+    # task already says — title, body, tags, priority, links, status — stays as stored
     payload="$(STATUS="$status" ASSIGNEE="$assignee" ASSIGNEE_SET="$assignee_set" \
-      PARENT="$parent" PARENT_SET="$parent_set" \
+      PARENT="$parent" PARENT_SET="$parent_set" DEADLINE="$deadline" \
       REASON="$blocked_reason" REASON_SET="$reason_set" python3 -c '
 import json, os
-p = {"status": os.environ["STATUS"]}
+p = json.loads(os.environ["DEADLINE"])
+if os.environ["STATUS"]:
+    p["status"] = os.environ["STATUS"]
 if os.environ["ASSIGNEE_SET"]:
     p["assignee"] = os.environ["ASSIGNEE"]
 if os.environ["PARENT_SET"]:
@@ -477,7 +622,8 @@ print(json.dumps(p))')"
         *) die "tasks: unknown flag $1" ;;
       esac
     done
-    kyb_curl "$BASE/tasks?status=$(urlenc "$status")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")&followups=$followups&all=$all&limit=$limit" | pretty
+    deadlines_param
+    kyb_curl "$BASE/tasks?status=$(urlenc "$status")&priority=$(urlenc "$priority")&assignee=$(urlenc "$assignee")&parent_task=$(urlenc "$parent")&followups=$followups&all=$all&limit=$limit$DL" | show
     ;;
   done)
     key="${1:-}"; [ -n "$key" ] || usage; shift || true
@@ -505,8 +651,54 @@ print(json.dumps({"status": sys.argv[1], "resolution": os.environ["RESOLUTION"]}
         *) die "get: unknown flag $1" ;;
       esac
     done
-    q=""; [ -n "$at" ] && q="?at=$(urlenc "$at")"
-    kyb_curl "$BASE/knowledge/$key$q" | pretty
+    deadlines_param
+    q=""; [ -n "$at" ] && q="&at=$(urlenc "$at")"
+    q="$q$DL"; [ -n "$q" ] && q="?${q#&}"
+    kyb_curl "$BASE/knowledge/$key$q" | show
+    ;;
+  deadlines)
+    within=""; overdue=""; hard=""; tag=""; assignee=""; as_json=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --within) within="$2"; shift 2 ;;
+        --overdue) overdue="true"; shift ;;
+        --hard) hard="true"; shift ;;
+        --tag|--tags) tag="$2"; shift 2 ;;
+        --assignee) assignee="$2"; shift 2 ;;
+        --json) as_json=1; shift ;;
+        *) die "deadlines: unknown flag $1" ;;
+      esac
+    done
+    require_capability deadlines "kyb deadlines" "An older server has no such route and would simply answer 404."
+    out="$(kyb_curl "$BASE/deadlines?within=$(urlenc "$within")&overdue=$overdue&hard=$hard&tag=$(urlenc "$tag")&assignee=$(urlenc "$assignee")")"
+    if [ -n "$as_json" ]; then printf '%s\n' "$out" | pretty; exit 0; fi
+    printf '%s' "$out" | python3 -c '
+import json, sys
+answer = json.load(sys.stdin)
+if "deadlines" not in answer:
+    print(json.dumps(answer, indent=2), file=sys.stderr)
+    raise SystemExit(1)
+rows = answer["deadlines"]
+print("deadlines, today %s: %d open task%s with a date" % (answer["today"], len(rows), "" if len(rows) == 1 else "s"))
+titles = {"overdue": "OVERDUE", "this_week": "THIS WEEK (next 7 days)", "later": "LATER"}
+for bucket in ("overdue", "this_week", "later"):
+    group = [r for r in rows if r["bucket"] == bucket]
+    if not group:
+        continue
+    print(titles[bucket])
+    for r in group:
+        d = r["days_left"]
+        if r["overdue"]:
+            when = "%dd late" % -d if d < 0 else "late today"
+        else:
+            when = "due today" if d == 0 else "in %dd" % d
+        note = ("expected " if r.get("provisional") else "due ") + r["due"]
+        if r.get("provisional") and r.get("waits_on"):
+            note += ", waits on " + r["waits_on"]
+        if r.get("assignee"):
+            note += ", " + r["assignee"]
+        print("  %-10s %s%s  %s  (%s)" % (when, "HARD " if r.get("hard") else "", r["key"], r["title"], note))
+'
     ;;
   diff)
     key="${1:-}"; shift || true
