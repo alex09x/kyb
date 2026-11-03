@@ -508,6 +508,8 @@ For academic or archival reference, cite the published v0.3.3 release:
 
 - Alexander Panasenko. *KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents* (v0.3.3). Zenodo. https://doi.org/10.5281/zenodo.23683977 ([concept DOI: 10.5281/zenodo.22850723](https://doi.org/10.5281/zenodo.22850723))
 
+Slides: [*KYB: Shared Operational Memory for AI Agents*](https://zenodo.org/records/23911562) (12 slides, PDF, Zenodo).
+
 ---
 
 ## License
