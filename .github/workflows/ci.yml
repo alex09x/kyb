@@ -94,48 +94,62 @@ jobs:
       - name: The embedding pipeline still produces the recorded vector
         run: mitts test --locked golden_vector --nocapture
 
-  # The installer from this checkout, run for real on clean runners: Docker on Linux
-  # (amd64 and arm64), Homebrew on macOS. On Linux it first installs the previous
-  # release, so the rerun is a real upgrade; the tap holds only the latest formula, so
-  # on macOS the rerun is the upgrade path at the same version. Either way the entry
-  # written in between must survive.
+  # The installer from this checkout, run for real on clean runners:
+  #   Linux amd64 and arm64 -> Docker; macOS -> Homebrew; macOS forced native -> the
+  #   release archive under launchd. Agent homes for Claude Code, Codex and Antigravity
+  #   exist first, so the skill must land in all three. Docker and native first install
+  #   the previous release, so the rerun is a real upgrade; the tap holds only the
+  #   latest formula, so on brew the rerun is the upgrade path at the same version.
+  #   The entry written in between must survive, and the skill must still be there once.
   installer-smoke:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        include:
+          - { os: ubuntu-latest, first: previous, mode: auto, rerun: docker }
+          - { os: ubuntu-24.04-arm, first: previous, mode: auto, rerun: docker }
+          - { os: macos-latest, first: latest, mode: auto, rerun: brew }
+          - { os: macos-latest, first: previous, mode: native, rerun: native }
+    name: installer-smoke (${{ matrix.os }}, ${{ matrix.rerun }})
     runs-on: ${{ matrix.os }}
     env:
       KYB_SITE: file://${{ github.workspace }}/docs
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install (Linux, the previous release; macOS, the latest)
+      - name: Agents present on the machine
+        run: |
+          mkdir -p ~/.claude ~/.codex ~/.gemini/config
+          touch ~/.claude/CLAUDE.md ~/.codex/AGENTS.md ~/.gemini/GEMINI.md
+      - name: Install (${{ matrix.first }} release, mode ${{ matrix.mode }})
         run: |
           set -euo pipefail
-          latest=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 2 --json tagName -q '.[0].tagName')
-          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 2 --json tagName -q '.[1].tagName')
+          releases() { gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 2 --json tagName -q ".[$1].tagName"; }
+          latest=$(releases 0); previous=$(releases 1)
           echo "LATEST=$latest" >> "$GITHUB_ENV"
-          if [ "$RUNNER_OS" = Linux ]; then
-            KYB_VERSION="$previous" bash docs/install.sh
-            curl -fsS 127.0.0.1:9310/healthz | grep -q "\"version\":\"${previous#v}\""
+          if [ "${{ matrix.first }}" = previous ]; then first=$previous; else first=$latest; fi
+          if [ "${{ matrix.first }}" = previous ]; then
+            KYB_MODE=${{ matrix.mode }} KYB_VERSION="$first" bash docs/install.sh
           else
-            bash docs/install.sh
+            KYB_MODE=${{ matrix.mode }} bash docs/install.sh
           fi
+          curl -fsS 127.0.0.1:9310/healthz | grep -q "\"version\":\"${first#v}\""
+      - name: The skill is installed for every agent
+        run: bash scripts/check-installed-skills.sh 127.0.0.1
       - name: The installed CLI writes and finds an entry
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          kyb health >/dev/null
           printf 'installer smoke\n' | kyb add --key installer-smoke --title "Installer smoke"
           kyb query "installer smoke" | grep -q '"installer-smoke"'
-      - name: Running it again upgrades to the latest release and keeps the data
+      - name: Running it again upgrades to the latest release and keeps everything
         run: |
           set -euo pipefail
           bash docs/install.sh | tee rerun.log
-          grep -Eq 'server=(docker|brew)' rerun.log
+          grep -q "server=${{ matrix.rerun }}" rerun.log
           curl -fsS 127.0.0.1:9310/healthz | grep -q "\"version\":\"${LATEST#v}\""
           "$HOME/.local/bin/kyb" query "installer smoke" | grep -q '"installer-smoke"'
+          bash scripts/check-installed-skills.sh 127.0.0.1
 
   e2e-macos:
     runs-on: macos-latest

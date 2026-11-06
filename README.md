@@ -158,6 +158,15 @@ which status, at any point in time.
 curl -fsSL https://kybmemory.com/install.sh | bash
 ```
 
+Or let an agent do it. Paste this into Claude Code, Codex or Antigravity:
+
+```text
+Install KYB on this machine: read https://kybmemory.com/install.md and follow it step by step. Show me the plan before you install, and report what you verified.
+```
+
+It walks the agent through [install.md](docs/install.md): show the plan, install, check the
+server, the skill and a write, then report.
+
 [`install.sh`](docs/install.sh) looks at the machine and picks how to run the server. Then it
 installs the `kyb` CLI (`~/.local/bin/kyb`) and the agent skill for Claude Code, Codex and
 Antigravity, pointed at that server. Run it again to upgrade. `KYB_DRY_RUN=1` prints the plan and
@@ -166,13 +175,15 @@ changes nothing.
 | Machine | Server | Also installed |
 |---|---|---|
 | macOS, Apple Silicon, Homebrew | `brew install alex09x/apps/kyb` + `brew services` (launchd) | CLI, skill |
-| Linux (amd64, arm64), or a Mac with Docker | `ghcr.io/alex09x/kyb` via Docker Compose in `~/kyb`, data in `~/kyb/data` | CLI, skill |
+| macOS, Apple Silicon, no Homebrew | the release archive, SHA-256 checked against GitHub's digest; a launchd agent `com.kybmemory.kyb-server`, data in `~/kyb/data` | CLI, skill |
+| Linux (amd64, arm64), or an Intel Mac with Docker | `ghcr.io/alex09x/kyb` via Docker Compose in `~/kyb`, data in `~/kyb/data` | CLI, skill |
 | A server already answers on `:9310` | left as it is | CLI, skill |
 | Any machine, server elsewhere: `KYB_MODE=client KYB_SERVER=<host>` | none | CLI, skill |
 
 The settings are environment variables passed to `bash`: `KYB_MODE`, `KYB_SERVER`, `KYB_VERSION`,
 `KYB_DIR` and `KYB_PORT`, documented at the top of the script. On Linux the installer needs
-Docker Engine with the Compose plugin, usable by your user. Rootless Docker is detected and handled.
+Docker Engine with the Compose plugin, usable by your user. Rootless Docker is detected and handled. `KYB_MODE=native` uses the archive on a Mac that has Homebrew too.
+CI runs every path for real on clean runners. It checks that the skill landed for Claude Code, Codex and Antigravity, and that a rerun upgrades from the previous release.
 
 ### By hand
 
