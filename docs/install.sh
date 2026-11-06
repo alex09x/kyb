@@ -141,7 +141,8 @@ install_brew() {
 set_env() {
   local file="$1" key="$2" value="$3" tmp
   tmp="$(mktemp)"
-  [ -f "$file" ] && grep -v "^$key=" "$file" > "$tmp" || true
+  : > "$tmp"
+  if [ -f "$file" ]; then grep -v "^$key=" "$file" > "$tmp" || true; fi
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
   mv "$tmp" "$file"
 }
