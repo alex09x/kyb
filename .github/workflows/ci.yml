@@ -94,21 +94,34 @@ jobs:
       - name: The embedding pipeline still produces the recorded vector
         run: mitts test --locked golden_vector --nocapture
 
-  # The installer from this checkout, run for real on clean runners: Docker on Linux,
-  # Homebrew on macOS. It installs the latest published release, then the installed
-  # CLI must write an entry and find it again.
+  # The installer from this checkout, run for real on clean runners: Docker on Linux
+  # (amd64 and arm64), Homebrew on macOS. On Linux it first installs the previous
+  # release, so the rerun is a real upgrade; the tap holds only the latest formula, so
+  # on macOS the rerun is the upgrade path at the same version. Either way the entry
+  # written in between must survive.
   installer-smoke:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      KYB_SITE: file://${{ github.workspace }}/docs
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install with docs/install.sh
-        env:
-          KYB_SITE: file://${{ github.workspace }}/docs
-        run: bash docs/install.sh
+      - name: Install (Linux, the previous release; macOS, the latest)
+        run: |
+          set -euo pipefail
+          latest=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 2 --json tagName -q '.[0].tagName')
+          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 2 --json tagName -q '.[1].tagName')
+          echo "LATEST=$latest" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = Linux ]; then
+            KYB_VERSION="$previous" bash docs/install.sh
+            curl -fsS 127.0.0.1:9310/healthz | grep -q "\"version\":\"${previous#v}\""
+          else
+            bash docs/install.sh
+          fi
       - name: The installed CLI writes and finds an entry
         run: |
           set -euo pipefail
@@ -116,13 +129,12 @@ jobs:
           kyb health >/dev/null
           printf 'installer smoke\n' | kyb add --key installer-smoke --title "Installer smoke"
           kyb query "installer smoke" | grep -q '"installer-smoke"'
-      - name: Running it again upgrades in place and keeps the data
-        env:
-          KYB_SITE: file://${{ github.workspace }}/docs
+      - name: Running it again upgrades to the latest release and keeps the data
         run: |
           set -euo pipefail
           bash docs/install.sh | tee rerun.log
           grep -Eq 'server=(docker|brew)' rerun.log
+          curl -fsS 127.0.0.1:9310/healthz | grep -q "\"version\":\"${LATEST#v}\""
           "$HOME/.local/bin/kyb" query "installer smoke" | grep -q '"installer-smoke"'
 
   e2e-macos:
