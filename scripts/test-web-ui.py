@@ -92,7 +92,7 @@ def start_sandbox(tmp, extra_env=None):
                 binary = str(cand)
                 break
     if not binary:
-        sys.exit("no kyb-server binary: set KYB_SERVER_BIN or cargo build")
+        sys.exit("no kyb-server binary: set KYB_SERVER_BIN or mitts build --release")
     ui = tmp / "index.html"
     ui.write_text(assemble(), encoding="utf-8")
     port = free_port()

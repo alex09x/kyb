@@ -31,4 +31,4 @@ echo "  • Address:       http://$KYB_ADDR"
 echo "============================================================"
 
 cd "$REPO"
-exec cargo run --bin kyb-server
+exec mitts run --bin kyb-server

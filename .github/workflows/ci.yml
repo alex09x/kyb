@@ -94,6 +94,37 @@ jobs:
       - name: The embedding pipeline still produces the recorded vector
         run: mitts test --locked golden_vector --nocapture
 
+  # The installer from this checkout, run for real on clean runners: Docker on Linux,
+  # Homebrew on macOS. It installs the latest published release, then the installed
+  # CLI must write an entry and find it again.
+  installer-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install with docs/install.sh
+        env:
+          KYB_SITE: file://${{ github.workspace }}/docs
+        run: bash docs/install.sh
+      - name: The installed CLI writes and finds an entry
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          kyb health >/dev/null
+          printf 'installer smoke\n' | kyb add --key installer-smoke --title "Installer smoke"
+          kyb query "installer smoke" | grep -q '"installer-smoke"'
+      - name: Running it again upgrades in place and keeps the data
+        env:
+          KYB_SITE: file://${{ github.workspace }}/docs
+        run: |
+          set -euo pipefail
+          bash docs/install.sh | tee rerun.log
+          grep -Eq 'server=(docker|brew)' rerun.log
+          "$HOME/.local/bin/kyb" query "installer smoke" | grep -q '"installer-smoke"'
+
   e2e-macos:
     runs-on: macos-latest
     env:

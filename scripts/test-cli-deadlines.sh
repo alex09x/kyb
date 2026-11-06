@@ -11,7 +11,7 @@
 #
 # "Today" is pinned with KYB_TODAY, the date the CLI sends as X-KYB-Today.
 #
-#   cargo build --release --bin kyb-server && scripts/test-cli-deadlines.sh
+#   mitts build --release --bin kyb-server && scripts/test-cli-deadlines.sh
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
