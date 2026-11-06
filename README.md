@@ -155,14 +155,43 @@ which status, at any point in time.
 ## Quick start
 
 ```bash
-# install the server binary from crates.io
-cargo install knowyourbusiness --locked
-
-# run natively — reindexes from git on start, listens on 127.0.0.1:9310
-kyb-server
+curl -fsSL https://kybmemory.com/install.sh | bash
 ```
 
-> **Note:** `cargo install knowyourbusiness --locked` installs the `kyb-server` binary. The separate `kyb` client CLI (`skills/kyb/bin/kyb` via `bash skills/install.sh`) and model setup for hybrid search remain separate steps (see [CLI](#cli), [The agent skill](#the-agent-skill), and [Search quality](#search-quality)).
+[`install.sh`](docs/install.sh) looks at the machine and picks how to run the server. Then it
+installs the `kyb` CLI (`~/.local/bin/kyb`) and the agent skill for Claude Code, Codex and
+Antigravity, pointed at that server. Run it again to upgrade. `KYB_DRY_RUN=1` prints the plan and
+changes nothing.
+
+| Machine | Server | Also installed |
+|---|---|---|
+| macOS, Apple Silicon, Homebrew | `brew install alex09x/apps/kyb` + `brew services` (launchd) | CLI, skill |
+| Linux (amd64, arm64), or a Mac with Docker | `ghcr.io/alex09x/kyb` via Docker Compose in `~/kyb`, data in `~/kyb/data` | CLI, skill |
+| A server already answers on `:9310` | left as it is | CLI, skill |
+| Any machine, server elsewhere: `KYB_MODE=client KYB_SERVER=<host>` | none | CLI, skill |
+
+The settings are environment variables passed to `bash`: `KYB_MODE`, `KYB_SERVER`, `KYB_VERSION`,
+`KYB_DIR` and `KYB_PORT`, documented at the top of the script. On Linux the installer needs
+Docker Engine with the Compose plugin, usable by your user. Rootless Docker is detected and handled.
+
+### By hand
+
+```bash
+# macOS, Apple Silicon
+brew install alex09x/apps/kyb && brew services start kyb
+
+# Docker: the server only, with the embedding model baked in (linux/amd64, linux/arm64)
+mkdir kyb && cd kyb && curl -fsSLO https://kybmemory.com/docker-compose.yml
+KYB_VERSION=v0.3.3 KYB_UID=$(id -u) KYB_GID=$(id -g) docker compose up -d
+
+# crates.io: the kyb-server binary only, lexical search until KYB_MODEL is set
+cargo install knowyourbusiness --locked && kyb-server
+```
+
+The [compose file](docs/docker-compose.yml) lists its settings. `cargo install` gives no `kyb` CLI
+and no skill; add them with the installer in client mode or `bash skills/install.sh` from a
+checkout (see [CLI](#cli), [The agent skill](#the-agent-skill) and
+[Search quality](#search-quality)).
 
 ### From repository checkout
 
