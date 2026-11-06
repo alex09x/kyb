@@ -48,12 +48,13 @@ docker_down="$work/docker-down"
 stub "$docker_down" docker 'case "$1" in info) exit 1;; *) exit 0;; esac'
 both="$work/both"; stub "$both" brew 'exit 0'; stub "$both" docker 'exit 0'
 answering="$work/answering"; stub "$answering" curl 'exit 0'
+brew_none="$work/brew-none"; stub "$brew_none" brew 'case "$1" in list) exit 1;; *) exit 0;; esac'
 
 case_ "Apple Silicon with Homebrew uses brew" 0 "server=brew" \
   "$brew_only" KYB_OS=Darwin KYB_ARCH=arm64
 case_ "Apple Silicon prefers brew over Docker" 0 "server=brew" \
   "$both" KYB_OS=Darwin KYB_ARCH=arm64
-case_ "Apple Silicon without brew falls back to Docker" 0 "server=docker version=v0.3.3" \
+case_ "Apple Silicon without brew installs the release natively" 0 "server=native version=v0.3.3" \
   "$docker_ok" KYB_OS=Darwin KYB_ARCH=arm64
 case_ "Intel Mac with Docker uses Docker" 0 "server=docker" \
   "$docker_ok" KYB_OS=Darwin KYB_ARCH=x86_64
@@ -67,14 +68,20 @@ case_ "Docker this user cannot reach is a clear error" 1 "not usable here" \
   "$docker_down" KYB_OS=Linux KYB_ARCH=x86_64
 case_ "Linux without Docker says to install Docker" 1 "Install Docker Engine" \
   "$none" KYB_OS=Linux KYB_ARCH=x86_64
-case_ "Apple Silicon with neither says brew or Docker" 1 "no Homebrew and no Docker" \
+case_ "Apple Silicon with neither brew nor Docker still installs natively" 0 "server=native" \
   "$none" KYB_OS=Darwin KYB_ARCH=arm64
+case_ "Intel Mac without Docker says to install Docker Desktop" 1 "Install Docker Desktop" \
+  "$none" KYB_OS=Darwin KYB_ARCH=x86_64
+mkdir -p "$work/agents"; : > "$work/agents/kyb.plist"
+case_ "a native install from this script is upgraded, even with brew present" 0 "server=native" \
+  "$answering:$brew_none" KYB_OS=Darwin KYB_ARCH=arm64 KYB_PLIST="$work/agents/kyb.plist"
+case_ "native can be forced over brew" 0 "server=native" \
+  "$brew_only" KYB_OS=Darwin KYB_ARCH=arm64 KYB_MODE=native
 case_ "a server already answering is left alone" 0 "server=existing" \
   "$answering:$docker_ok" KYB_OS=Linux KYB_ARCH=x86_64
 mkdir -p "$work/prev"; : > "$work/prev/docker-compose.yml"
 case_ "a running Docker install from this script is upgraded" 0 "server=docker" \
   "$answering:$docker_ok" KYB_OS=Linux KYB_ARCH=x86_64 KYB_DIR="$work/prev"
-brew_none="$work/brew-none"; stub "$brew_none" brew 'case "$1" in list) exit 1;; *) exit 0;; esac'
 case_ "a running server not from brew on a Mac with brew is left alone" 0 "server=existing" \
   "$answering:$brew_none" KYB_OS=Darwin KYB_ARCH=arm64
 case_ "an installed server points the CLI at this machine" 0 "cli->127.0.0.1" \
