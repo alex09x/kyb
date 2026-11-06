@@ -22,3 +22,7 @@
 /docker-compose.yml
   Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=300
+
+/install.md
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300

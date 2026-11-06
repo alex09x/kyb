@@ -158,6 +158,15 @@ which status, at any point in time.
 curl -fsSL https://kybmemory.com/install.sh | bash
 ```
 
+Or let an agent do it. Paste this into Claude Code, Codex or Antigravity:
+
+```text
+Install KYB on this machine: read https://kybmemory.com/install.md and follow it step by step. Show me the plan before you install, and report what you verified.
+```
+
+It walks the agent through [install.md](docs/install.md): show the plan, install, check the
+server, the skill and a write, then report.
+
 [`install.sh`](docs/install.sh) looks at the machine and picks how to run the server. Then it
 installs the `kyb` CLI (`~/.local/bin/kyb`) and the agent skill for Claude Code, Codex and
 Antigravity, pointed at that server. Run it again to upgrade. `KYB_DRY_RUN=1` prints the plan and
