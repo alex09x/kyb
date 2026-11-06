@@ -1,0 +1,42 @@
+# KYB (Know Your Business) — a self-hosted server, ready to run.
+#
+#   mkdir kyb && cd kyb
+#   curl -fsSLO https://kybmemory.com/docker-compose.yml
+#   docker compose up -d
+#   curl -s http://127.0.0.1:9310/healthz
+#
+# Or let https://kybmemory.com/install.sh do this, and install the kyb CLI and
+# the agent skill as well.
+#
+# Everything the server keeps lives in ./data next to this file: the git canon
+# (./data/kyb-data), the search index (./data/index), the token book
+# (./data/auth.json) and the request log. Back up ./data, nothing else.
+#
+# Settings come from the environment or from a .env file beside this file:
+#   KYB_VERSION       image tag, e.g. v0.3.3 (default: latest)
+#   KYB_UID, KYB_GID  the host user that owns ./data (default 1000:1000; set them
+#                     to `id -u` and `id -g`, or the canon ends up unreadable).
+#                     Rootless Docker: 0 and 0, which is the host user there.
+#   KYB_PUBLISH_ADDR  host interface to listen on (default 127.0.0.1, this
+#                     machine only); one exact private IP for remote clients
+#   KYB_PORT          host port (default 9310)
+#   KYB_AUTH          off | compat | required — turn tokens on before exposing it
+#   KYB_ANON          "read" lets callers without a token read
+#   TZ                whose "today" decides deadlines, e.g. America/Los_Angeles
+#
+# The image is multi-arch (linux/amd64, linux/arm64) and carries the embedding
+# model, so hybrid search works with no network access.
+services:
+  kyb:
+    image: ghcr.io/alex09x/kyb:${KYB_VERSION:-latest}
+    restart: unless-stopped
+    user: "${KYB_UID:-1000}:${KYB_GID:-1000}"
+    ports:
+      - "${KYB_PUBLISH_ADDR:-127.0.0.1}:${KYB_PORT:-9310}:9310"
+    environment:
+      KYB_AUTH: "${KYB_AUTH:-off}"
+      KYB_AUTH_FILE: /data/auth.json
+      KYB_ANON: "${KYB_ANON:-}"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - ./data:/data

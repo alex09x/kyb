@@ -48,6 +48,8 @@ jobs:
         run: node scripts/test-web-tags.cjs
       - name: Validate static website
         run: bash scripts/test-site.sh
+      - name: Check the installer (kybmemory.com/install.sh)
+        run: shellcheck docs/install.sh scripts/test-install.sh && bash scripts/test-install.sh
       - name: Check deployment script syntax
         run: bash -n scripts/deploy.sh
       - uses: dtolnay/rust-toolchain@stable
