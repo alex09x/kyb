@@ -81,8 +81,14 @@ done
 
 inject() { # inject <file> <manual-path>
   local file="$1" manual="$2"
-  [ -f "$file" ] || return 0
-  [ -f "$file.bak-kyb" ] || cp "$file" "$file.bak-kyb"
+  # the agent is not installed here; a fresh agent has no instructions file yet, so it gets one
+  [ -d "$(dirname "$file")" ] || return 0
+  if [ -f "$file" ]; then
+    # back up the user's own file, before the first kyb section goes in
+    if [ ! -f "$file.bak-kyb" ] && ! grep -q '<!-- kyb:begin -->' "$file"; then cp "$file" "$file.bak-kyb"; fi
+  else
+    : > "$file"
+  fi
   python3 - "$file" "$manual" <<'PY'
 import sys, re, pathlib
 path, manual = sys.argv[1], sys.argv[2]
@@ -118,7 +124,10 @@ agent on every machine, and it is reached through the `kyb` CLI.
 p = pathlib.Path(path)
 text = p.read_text()
 pattern = re.compile(re.escape(begin) + r".*?" + re.escape(end), re.S)
-text = pattern.sub(section, text) if pattern.search(text) else text.rstrip() + "\n\n" + section + "\n"
+if pattern.search(text):
+    text = pattern.sub(section, text)
+else:
+    text = (text.rstrip() + "\n\n" if text.strip() else "") + section + "\n"
 p.write_text(text)
 PY
   echo "✓ POINTER  $file"

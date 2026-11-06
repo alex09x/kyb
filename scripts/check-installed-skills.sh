@@ -34,7 +34,7 @@ agents=0
 if [ -d "$HOME/.claude" ]; then
   agents=$((agents + 1))
   check_file "$HOME/.claude/skills/kyb/SKILL.md"
-  [ -f "$HOME/.claude/CLAUDE.md" ] && check_section "$HOME/.claude/CLAUDE.md"
+  check_section "$HOME/.claude/CLAUDE.md"
   if python3 - "$HOME/.claude/settings.json" "$HOME/.local/bin/kyb-hook" <<'PY'
 import json, sys
 settings = json.load(open(sys.argv[1]))
@@ -48,12 +48,12 @@ fi
 if [ -d "$HOME/.codex" ]; then
   agents=$((agents + 1))
   check_file "$HOME/.codex/skills/kyb/SKILL.md"
-  [ -f "$HOME/.codex/AGENTS.md" ] && check_section "$HOME/.codex/AGENTS.md"
+  check_section "$HOME/.codex/AGENTS.md"
 fi
 if [ -d "$HOME/.gemini/config" ]; then
   agents=$((agents + 1))
   check_file "$HOME/.gemini/config/skills/kyb/SKILL.md"
-  [ -f "$HOME/.gemini/GEMINI.md" ] && check_section "$HOME/.gemini/GEMINI.md"
+  check_section "$HOME/.gemini/GEMINI.md"
 fi
 [ "$agents" -gt 0 ] || bad "no agent home (~/.claude, ~/.codex, ~/.gemini/config) to check"
 

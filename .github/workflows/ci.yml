@@ -120,6 +120,8 @@ jobs:
       - name: Agents present on the machine
         run: |
           mkdir -p ~/.claude ~/.codex ~/.gemini/config
+          # releases up to v0.3.3 add the kyb section only to an existing file; drop this
+          # touch once the oldest release smoke-tested here creates the file itself
           touch ~/.claude/CLAUDE.md ~/.codex/AGENTS.md ~/.gemini/GEMINI.md
       - name: Install (${{ matrix.first }} release, mode ${{ matrix.mode }})
         run: |

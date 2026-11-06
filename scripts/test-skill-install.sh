@@ -70,6 +70,19 @@ assert "permissionDecision" not in o, "the hook must not decide permissions: " +
 PY
 [ -z "$(printf '%s' '{"tool_name":"Bash","tool_input":{}}' | python3 "$valid_home/.local/bin/kyb-hook")" ] || { echo "the hook touched a foreign tool" >&2; exit 1; }
 
+# a fresh machine: agents installed but no instruction files yet. Each present agent gets
+# its file with one kyb section (twice-run safe, no backup of a file that did not exist);
+# an absent agent gets nothing.
+fresh_home="$TEST_ROOT/fresh-home"
+mkdir -p "$fresh_home/.claude" "$fresh_home/.codex"
+for _ in 1 2; do HOME="$fresh_home" KYB_INSTALL_BINARY="$stub" bash "$REPO/skills/install.sh" >/dev/null; done
+for f in "$fresh_home/.claude/CLAUDE.md" "$fresh_home/.codex/AGENTS.md"; do
+  [ "$(grep -c '<!-- kyb:begin -->' "$f")" = 1 ] || { echo "$f: want one kyb section" >&2; exit 1; }
+  [ "$(head -1 "$f")" = '<!-- kyb:begin -->' ] || { echo "$f: section not at the top of a new file" >&2; exit 1; }
+  [ ! -e "$f.bak-kyb" ] || { echo "$f: backup of a file that did not exist" >&2; exit 1; }
+done
+[ ! -e "$fresh_home/.gemini" ] || { echo "created ~/.gemini for an agent that is not installed" >&2; exit 1; }
+
 cp -R "$REPO/skills" "$TEST_ROOT/invalid-skills"
 python3 - "$TEST_ROOT/invalid-skills/kyb/SKILL.md" <<'PY'
 from pathlib import Path
