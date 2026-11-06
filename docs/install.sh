@@ -169,7 +169,6 @@ for a in json.load(sys.stdin).get("assets", []):
   src="$tmp/kyb-$version-aarch64-apple-darwin"
   install -d "$HOME/.local/bin" "$KYB_DIR/data" "$(dirname "$KYB_PLIST")"
   install -m 755 "$src/bin/kyb-server" "$HOME/.local/bin/kyb-server"
-  install -m 755 "$src/bin/kyb" "$HOME/.local/bin/kyb"
   cat > "$KYB_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -203,7 +202,7 @@ PLIST
   fi
   ok "kyb-server $version running under launchd ($KYB_LABEL); data in $KYB_DIR/data"
   say "CLI and agent skill ($version, from the same archive)"
-  KYB_SERVER="127.0.0.1" KYB_INSTALL_BINARY="$HOME/.local/bin/kyb" bash "$src/skills/install.sh" \
+  KYB_SERVER="127.0.0.1" KYB_INSTALL_BINARY="$src/bin/kyb" bash "$src/skills/install.sh" \
     || { rm -rf "$tmp"; die "skills/install.sh failed"; }
   rm -rf "$tmp"
 }
