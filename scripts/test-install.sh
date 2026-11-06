@@ -15,8 +15,15 @@ fail=0
 # stub <dir> <name> <script body>
 stub() { mkdir -p "$1"; printf '#!/bin/sh\n%s\n' "$3" > "$1/$2"; chmod +x "$1/$2"; }
 
-# Real curl is needed only for the health probe, which these cases must not
-# reach: by default it is a stub that fails, as if no server listened.
+# The PATH of every case holds only these tools, linked from the real system,
+# so a brew or docker installed on the machine running the test is never seen.
+tools="$work/tools"; mkdir -p "$tools"
+for t in bash sh env uname sed grep head cat id mktemp mv seq sleep tr awk tar; do
+  real="$(command -v "$t")" || { echo "FAIL the test needs $t"; exit 1; }
+  ln -s "$real" "$tools/$t"
+done
+# curl is needed only for the health probe, which these cases must not reach:
+# by default it is a stub that fails, as if no server listened.
 base="$work/base"
 stub "$base" curl 'exit 7'
 
@@ -24,7 +31,7 @@ stub "$base" curl 'exit 7'
 case_() {
   local name="$1" want_rc="$2" want="$3" dir="$4"; shift 4
   local out rc=0
-  out="$(env -i HOME="$work/home" PATH="$dir:$base:/usr/bin:/bin" KYB_VERSION=v0.3.3 \
+  out="$(env -i HOME="$work/home" PATH="$dir:$base:$tools" KYB_VERSION=v0.3.3 \
          KYB_DRY_RUN=1 "$@" bash "$installer" 2>&1)" || rc=$?
   if [ "$rc" = "$want_rc" ] && printf '%s' "$out" | grep -qF -- "$want"; then
     echo "ok   $name"
