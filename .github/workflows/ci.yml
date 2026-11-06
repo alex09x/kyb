@@ -53,7 +53,13 @@ jobs:
       - name: Check deployment script syntax
         run: bash -n scripts/deploy.sh
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --locked
+      # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
+      # Cargo CLI. No build cache is restored: every run compiles from scratch.
+      - uses: alex09x/mitts@v0.3.28
+        with:
+          version: v0.3.28
+          cache: 'false'
+      - run: mitts test --locked -c
 
   # The golden-vector test skips when no model is present, which would make it a
   # gate that never fires. This job gives it one - cached, so the 120 MB download
@@ -63,6 +69,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
+      # Cargo CLI. No build cache is restored: every run compiles from scratch.
+      - uses: alex09x/mitts@v0.3.28
+        with:
+          version: v0.3.28
+          cache: 'false'
       - name: Cache the embedding model
         id: model-cache
         uses: actions/cache@v4
@@ -80,7 +92,7 @@ jobs:
           curl -fsSL -o model/tokenizer.json \
             "https://huggingface.co/${repo}/resolve/main/tokenizer.json"
       - name: The embedding pipeline still produces the recorded vector
-        run: cargo test --locked golden_vector -- --nocapture
+        run: mitts test --locked golden_vector --nocapture
 
   e2e-macos:
     runs-on: macos-latest
@@ -89,8 +101,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
+      # Cargo CLI. No build cache is restored: every run compiles from scratch.
+      - uses: alex09x/mitts@v0.3.28
+        with:
+          version: v0.3.28
+          cache: 'false'
       - name: Build macOS binary
-        run: cargo build --release
+        run: mitts build --release --locked
       - name: Verify Homebrew formula
         run: |
           if [ -f Formula/kyb.rb ]; then
@@ -157,6 +175,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
+      # Cargo CLI. No build cache is restored: every run compiles from scratch.
+      - uses: alex09x/mitts@v0.3.28
+        with:
+          version: v0.3.28
+          cache: 'false'
 
       - name: Assert Apple Silicon runner
         run: |
@@ -168,7 +192,7 @@ jobs:
           [ "$arch" = "arm64" ] || { echo "expected an arm64 runner, got $arch"; exit 1; }
 
       - name: Build release binaries
-        run: cargo build --release --locked
+        run: mitts build --release --locked
 
       - name: Assert binary architecture
         run: |
