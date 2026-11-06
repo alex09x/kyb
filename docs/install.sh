@@ -114,8 +114,10 @@ on Linux add yourself to the docker group (sudo usermod -aG docker \$USER, then 
 resolve_version() {
   local v="${KYB_VERSION:-}"
   if [ -z "$v" ]; then
-    v="$(curl -fsSL "https://api.github.com/repos/$KYB_REPO/releases/latest" \
-          | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)" \
+    # The /releases/latest page redirects to the tag; unlike the API it has no
+    # per-address rate limit, which machines behind one NAT (or CI runners) hit.
+    v="$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$KYB_REPO/releases/latest" \
+          | sed -n 's|.*/releases/tag/\([^/?#]*\).*|\1|p')" \
       || die "could not ask GitHub for the latest release; set KYB_VERSION=vX.Y.Z"
     [ -n "$v" ] || die "could not read the latest release; set KYB_VERSION=vX.Y.Z"
   fi
@@ -153,12 +155,12 @@ install_native() {
   fi
   say "server: release archive $asset under launchd"
   tmp="$(mktemp -d)"
-  want="$(curl -fsSL "https://api.github.com/repos/$KYB_REPO/releases/tags/$version" | ASSET="$asset" python3 -c '
+  want="$(github_api "repos/$KYB_REPO/releases/tags/$version" | ASSET="$asset" python3 -c '
 import json, os, sys
 for a in json.load(sys.stdin).get("assets", []):
     if a.get("name") == os.environ["ASSET"] and str(a.get("digest", "")).startswith("sha256:"):
         print(a["digest"].split(":", 1)[1])
-')" || { rm -rf "$tmp"; die "could not read the $version release from GitHub"; }
+')" || { rm -rf "$tmp"; die "could not read the $version release from the GitHub API (rate limited? set GITHUB_TOKEN, or retry later)"; }
   [ -n "$want" ] || { rm -rf "$tmp"; die "the $version release has no $asset with a SHA-256 digest"; }
   curl -fsSL -o "$tmp/$asset" "https://github.com/$KYB_REPO/releases/download/$version/$asset" \
     || { rm -rf "$tmp"; die "could not download $asset"; }
@@ -205,6 +207,17 @@ PLIST
   KYB_SERVER="127.0.0.1" KYB_INSTALL_BINARY="$src/bin/kyb" bash "$src/skills/install.sh" \
     || { rm -rf "$tmp"; die "skills/install.sh failed"; }
   rm -rf "$tmp"
+}
+
+# GitHub API, with a token when the environment has one (GH_TOKEN or GITHUB_TOKEN):
+# without it GitHub allows 60 requests an hour per address.
+github_api() {
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  if [ -n "$token" ]; then
+    curl -fsSL -H "Authorization: Bearer $token" "https://api.github.com/$1"
+  else
+    curl -fsSL "https://api.github.com/$1"
+  fi
 }
 
 # Sets KEY=VALUE in an env file, keeping every other line as the user left it.
