@@ -196,8 +196,9 @@ checkout (see [CLI](#cli), [The agent skill](#the-agent-skill) and
 ### From repository checkout
 
 ```bash
-# build and run from source
-cargo run --release
+# build and run from source with Mitts (https://github.com/alex09x/mitts)
+curl -fsSL https://mittsbuild.com/install.sh | sh
+mitts run --release --bin kyb-server
 
 # docker — data (git canon + index) lives in ./data
 docker compose up -d
@@ -512,10 +513,12 @@ Rust: **axum** + **tantivy 0.22** + **git2** + **ort** (ONNX Runtime). A single 
 (Tantivy allows one `IndexWriter` and git commits are sequential anyway); reads are lock-free.
 
 ```bash
-cargo test        # 421 cases
+mitts test -c     # 463 cases, each in its own process
 ```
 
-CI builds the image and smoke-tests that the container starts and answers `/healthz`.
+Builds and tests go through [Mitts](https://github.com/alex09x/mitts), in CI and in the Docker image;
+the Cargo CLI is not used. CI builds the image and smoke-tests that the container starts and answers
+`/healthz`, and runs the installer for real on clean Ubuntu (Docker) and macOS (Homebrew) runners.
 
 ---
 

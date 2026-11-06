@@ -11,12 +11,16 @@ RUN mkdir -p /model \
        "https://huggingface.co/${MODEL_REPO}/resolve/main/tokenizer.json"
 
 # --- build ---
+# Built with Mitts (https://github.com/alex09x/mitts), not the Cargo CLI; Cargo only
+# installs Mitts itself, at a pinned version.
 FROM rust:1-trixie AS builder
+ARG MITTS_VERSION=0.3.28
+RUN cargo install mitts --locked --version "${MITTS_VERSION}"
 WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs ./
 # build.rs assembles the web UI from src/web at compile time; without it there is no OUT_DIR
 COPY src ./src
-RUN cargo build --release --locked
+RUN mitts build --release --locked --bin kyb-server
 
 # --- runtime ---
 # trixie, not bookworm: the prebuilt ONNX Runtime that `ort` downloads needs

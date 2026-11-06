@@ -3,7 +3,7 @@
 # snapshot stitched without gaps or repeats, and an export pinned to an older
 # commit unchanged by the writes made after it.
 #
-#   cargo build --release --bin kyb-server && scripts/test-cli-export.sh
+#   mitts build --release --bin kyb-server && scripts/test-cli-export.sh
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
