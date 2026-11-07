@@ -38,8 +38,10 @@ none. (`skills/install.sh` already injects this into every agent's global instru
 
 Whenever you touch one of our services, servers or deploys — a base nobody feeds is worthless.
 
-**Start from the brief** (`kyb brief`; Claude Code gets it at session start): open incidents,
-work in progress and recently retracted decisions, before you plan anything.
+**Run `kyb brief` first — this is important, do not skip it.** Before you plan any work on our
+infrastructure, one call (`kyb brief`, MCP `kyb_brief`) shows the open incidents, the work in
+progress or blocked, the deadlines and the decisions retracted recently. It is context for the
+task you were given, **not a to-do list**: never start work from it on your own.
 
 **Ask first.** Try a couple of phrasings and the tag; one query is not a search:
 ```bash
@@ -473,16 +475,14 @@ RECENTLY CHANGED (1)
 `--tag` (every tag must match) and `--service` narrow every section; only incidents have a
 service field, so on the other kinds `--service X` matches the tag `X`.
 
-**At session start you get it without asking.** `skills/install.sh` registers a Claude Code
-`SessionStart` hook, `~/.local/bin/kyb-brief-hook`, that runs `kyb brief` with a 3-second limit
-and adds its output to the session's context. It fails silent: a server that is down, slow or
-too old to have a brief gives no output, never a slower start. `KYB_BRIEF=0` switches it off,
-`KYB_BRIEF_ARGS="--tag edge"` narrows it, and `install.sh --no-brief` does not register it.
-Codex and Antigravity have no such hook: **run `kyb brief` yourself at the start of a session.**
+**Call it yourself, every time you start work on our infrastructure** — nothing runs it for
+you, and nothing should: a sub-agent spawned for one narrow job does not need the whole base in
+its context. Call it once at the start of the work, not on every turn.
 
-When you read it: treat a retracted entry as a rejected decision, not as an idea to bring back;
-check an open incident before you touch the service it names; and do not start work that is
-already in progress or blocked under someone else.
+When you read it: it is background for **your** task. Act on an item only when the task you
+were given concerns it; never pick work up from the brief on your own. Treat a retracted entry as
+a rejected decision, not as an idea to bring back; check an open incident before you touch the
+service it names; and do not start work that is already in progress or blocked under someone else.
 
 ---
 

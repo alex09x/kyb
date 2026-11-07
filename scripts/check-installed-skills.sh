@@ -24,12 +24,7 @@ check_section() {
   fi
 }
 
-# the session brief came after v0.3.3: required once the installed CLI knows `kyb brief`
-brief=0
-grep -q 'kyb brief' "$HOME/.local/bin/kyb" 2>/dev/null && brief=1
-bins="kyb kyb-hook"
-[ "$brief" = 1 ] && bins="$bins kyb-brief-hook"
-for bin in $bins; do
+for bin in kyb kyb-hook; do
   if [ -x "$HOME/.local/bin/$bin" ]; then pass "$HOME/.local/bin/$bin"; else bad "$HOME/.local/bin/$bin missing"; fi
 done
 host="$(cat "$HOME/.config/kyb/host" 2>/dev/null || true)"
@@ -49,15 +44,6 @@ mine = [g for g in groups if g.get("matcher") == "mcp__kyb__.*"
 sys.exit(0 if len(mine) == 1 else 1)
 PY
   then pass "Claude Code hook registered once"; else bad "Claude Code hook not registered (or twice)"; fi
-  if [ "$brief" = 0 ]; then
-    :
-  elif python3 - "$HOME/.claude/settings.json" "$HOME/.local/bin/kyb-brief-hook" <<'PY'
-import json, sys
-groups = json.load(open(sys.argv[1])).get("hooks", {}).get("SessionStart", [])
-mine = [c for g in groups for c in g.get("hooks", []) if c.get("command") == sys.argv[2]]
-sys.exit(0 if len(mine) == 1 else 1)
-PY
-  then pass "Claude Code session brief registered once"; else bad "Claude Code session brief not registered (or twice)"; fi
 fi
 if [ -d "$HOME/.codex" ]; then
   agents=$((agents + 1))

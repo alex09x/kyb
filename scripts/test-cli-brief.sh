@@ -6,15 +6,13 @@
 # SPDX-License-Identifier: MIT
 # `kyb brief` through the CLI against a real server holding a large base: every
 # section capped with "+N more", the whole brief under 40 lines, --json equal to
-# GET /brief, filters, a retraction, and the SessionStart hook - its context while
-# the server answers, silence once it is gone.
+# GET /brief, filters, a retraction, and a closed incident gone at once.
 #
 #   mitts build --release --bin kyb-server && scripts/test-cli-brief.sh
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cli="$repo_root/skills/kyb/bin/kyb"
-hook="$repo_root/skills/kyb/bin/kyb-brief-hook"
 server="${KYB_SERVER:-$repo_root/target/release/kyb-server}"
 port="${KYB_BRIEF_PORT:-9394}"
 work="$(mktemp -d -t kyb-brief-test.XXXXXX)"
@@ -84,24 +82,9 @@ grep -qF "OPEN INCIDENTS (1)" "$work/svc.txt" || fail "--service: $(cat "$work/s
 "$cli" brief --since 0x 2> "$work/err.txt" && fail "a malformed --since was accepted"
 grep -q "since" "$work/err.txt" || fail "--since: the refusal does not say why: $(cat "$work/err.txt")"
 
-# the SessionStart hook with the real CLI: the brief as context
-mkdir -p "$work/bin"
-cp "$hook" "$cli" "$work/bin/"
-echo '{"hook_event_name":"SessionStart","source":"startup"}' | python3 "$work/bin/kyb-brief-hook" > "$work/hook.json"
-python3 - "$work/hook.json" <<'PY' || fail "hook output: $(cat "$work/hook.json")"
-import json, sys
-o = json.load(open(sys.argv[1]))["hookSpecificOutput"]
-assert o["hookEventName"] == "SessionStart" and "OPEN INCIDENTS (12)" in o["additionalContext"], o
-PY
-
 # a closed incident leaves at once
 "$cli" resolve inc-2026-03-01-svc03 --resolution "restarted" >/dev/null
 "$cli" brief --service svc03 > "$work/svc.txt"
 ! grep -q "OPEN INCIDENTS" "$work/svc.txt" || fail "a resolved incident is still in the brief"
-
-# the server gone: the hook says nothing and exits 0
-stop_server
-out="$(echo '{}' | python3 "$work/bin/kyb-brief-hook")" || fail "the hook failed with the server down"
-[ -z "$out" ] || fail "the hook printed with the server down: $out"
 
 echo "kyb brief CLI tests passed"

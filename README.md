@@ -145,14 +145,12 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
   overdue, this week, later. A bare date is judged by the caller's calendar (the CLI sends its
   own date as `X-KYB-Today`); otherwise by the server's `TZ`. KYB reminds, it never schedules:
   no notifications, no recurrence.
-- **A brief at session start** — `kyb brief` (`GET /brief`, MCP `kyb_brief`) is what is live
+- **A brief before the work** — `kyb brief` (`GET /brief`, MCP `kyb_brief`) is what is live
   in the base, as pointers only: deadlines, open incidents by severity, active work (in progress,
   blocked, urgent), and knowledge retracted or changed in the last 7 days, with who wrote it. Each
-  section is capped with "+N more", so it fits in about 40 lines. The installer registers a
-  Claude Code `SessionStart` hook that puts it into every new session's context, with a 3-second
-  limit and silence when the server is down; an agent learns about an open incident or a
-  retracted decision without having to know to ask. `KYB_BRIEF=0` or `install.sh --no-brief`
-  turns it off; other agents run `kyb brief` themselves.
+  section is capped with "+N more", so it fits in about 40 lines. The skill and the MCP tool tell
+  an agent to call it before infrastructure work, as context for its task and never as a to-do
+  list. Nothing calls it automatically, so sub-agents do not each load it into their context.
 
 Closing archives the task; `kyb tasks` and the search keep the full record. Every write is a
 commit, so `kyb history <key>` + `kyb get <key> --at <sha>` reconstruct who held a task, in
