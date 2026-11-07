@@ -64,7 +64,10 @@ const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS: &str = "\
 KYB is a shared, versioned knowledge base about this fleet's own infrastructure - hosts, \
-services, ports, deploys, architecture decisions, incidents and tasks. Query it before \
+services, ports, deploys, architecture decisions, incidents and tasks. IMPORTANT: call \
+kyb_brief once before you start work on the infrastructure - it lists open incidents, work in \
+progress, deadlines and recently retracted decisions. It is context for your task, never a to-do \
+list. Query it before \
 reasoning about infrastructure instead of guessing, and write back what you verified. \
 Writing the same key again adds a version rather than overwriting, so a superseded fact \
 stays searchable and an answer from the past is marked as one. A read answer carries a \
@@ -892,8 +895,10 @@ e.g. 30 or 30d; late ones always count"},
             "description": "What is live in the base right now, as pointers: deadlines, open \
 incidents (highest severity first), active work (in progress, blocked, urgent open tasks), \
 knowledge retracted recently and knowledge changed recently. Each row is a key, a title and one \
-fact; read the details with kyb_get. Call it at the start of a session: treat retracted entries \
-as rejected decisions, and check open incidents before touching their services.",
+fact; read the details with kyb_get. IMPORTANT: call this once before you start any work on the \
+infrastructure - do not skip it. It is context for the task you were given, not a to-do list: \
+never start work from it on your own. Treat retracted entries as rejected decisions, and check \
+open incidents before touching their services.",
             "inputSchema": {"type": "object", "properties": {
                 "tag": {"type": "string", "description": "comma-separated; every tag must match"},
                 "service": {"type": "string", "description": "an incident's service, or a tag on \

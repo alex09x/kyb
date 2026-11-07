@@ -9,20 +9,7 @@
 # The pointer goes into the always-loaded global instructions: a skill the agent
 # never opens is a skill it never uses. Sections are delimited by kyb:begin/kyb:end
 # markers, so re-running updates them in place instead of appending copies.
-#
-#   skills/install.sh [--no-brief]
-#     --no-brief (or KYB_BRIEF=0): no SessionStart brief hook for Claude Code; one
-#     registered by an earlier install is taken out
 set -euo pipefail
-
-brief=1
-[ "${KYB_BRIEF:-1}" = 0 ] && brief=0
-for arg in "$@"; do
-  case "$arg" in
-    --no-brief) brief=0 ;;
-    *) echo "install.sh: unknown argument $arg" >&2; exit 2 ;;
-  esac
-done
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill_file="$SRC/kyb/SKILL.md"
@@ -45,51 +32,31 @@ echo "✓ CLI      ~/.local/bin/kyb"
 hook_bin="$SRC/kyb/bin/kyb-hook"
 install -m 755 "$hook_bin" "$HOME/.local/bin/kyb-hook"
 echo "✓ HOOK     ~/.local/bin/kyb-hook"
-# The brief: at session start, `kyb brief` goes into the session's context, so an
-# agent learns about open incidents and retracted decisions without asking.
-install -m 755 "$SRC/kyb/bin/kyb-brief-hook" "$HOME/.local/bin/kyb-brief-hook"
-echo "✓ HOOK     ~/.local/bin/kyb-brief-hook"
 claude_settings="$HOME/.claude/settings.json"
 if [ -d "$HOME/.claude" ]; then
-  python3 - "$claude_settings" "$HOME/.local/bin/kyb-hook" "$HOME/.local/bin/kyb-brief-hook" "$brief" <<'PY'
+  python3 - "$claude_settings" "$HOME/.local/bin/kyb-hook" <<'PY'
 import json, pathlib, sys
-path, hook, brief_hook, brief = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4] == "1"
+path, hook = pathlib.Path(sys.argv[1]), sys.argv[2]
 try:
     settings = json.loads(path.read_text()) if path.exists() else {}
 except ValueError:
     raise SystemExit(f"kyb: {path} is not valid JSON; the hook was not registered")
 hooks = settings.setdefault("hooks", {})
-
-def register(event, command, group):
-    """Ours is exactly the handler whose command is this hook's path. It is taken
-    out of wherever it sits (a group keeps its other handlers; a group left empty
-    goes), then, when `group` is given, added once in its own group. Nothing else
-    in the file is touched."""
-    groups = hooks.setdefault(event, [])
-    for g in groups:
-        g["hooks"] = [c for c in g.get("hooks", []) if c.get("command") != command]
-    groups[:] = [g for g in groups if g.get("hooks")]
-    if group:
-        groups.append(group)
-    if not groups:
-        del hooks[event]
-
-register("PreToolUse", hook, {"matcher": "mcp__kyb__.*", "hooks": [
-    {"type": "command", "command": hook, "timeout": 5, "statusMessage": "kyb attribution"}]})
-# no matcher: every session start - new, resumed, cleared and after a compaction
-register("SessionStart", brief_hook, brief and {"hooks": [
-    {"type": "command", "command": brief_hook, "timeout": 5}]})
+pre = hooks.setdefault("PreToolUse", [])
+handler = {"type": "command", "command": hook, "timeout": 5, "statusMessage": "kyb attribution"}
+# Ours is exactly the handler whose command is this hook's path. It is taken out of
+# wherever it sits (a group keeps its other handlers; a group left empty goes), then
+# added once in its own group. Nothing else in the file is touched.
+for group in pre:
+    group["hooks"] = [c for c in group.get("hooks", []) if c.get("command") != hook]
+pre[:] = [g for g in pre if g.get("hooks")]
+pre.append({"matcher": "mcp__kyb__.*", "hooks": [handler]})
 path.parent.mkdir(parents=True, exist_ok=True)
 tmp = path.with_name(path.name + ".kyb-tmp")
 tmp.write_text(json.dumps(settings, indent=2) + "\n")
 tmp.replace(path)
 PY
   echo "✓ HOOKREG  $claude_settings (PreToolUse mcp__kyb__.*)"
-  if [ "$brief" = 1 ]; then
-    echo "✓ HOOKREG  $claude_settings (SessionStart: kyb brief)"
-  else
-    echo "- HOOKREG  no SessionStart brief (--no-brief)"
-  fi
 fi
 
 # The server address is deployment-specific and never lives in this repo:
@@ -134,9 +101,11 @@ runs on them, how services are wired and who calls whom, deploys, ports, configs
 decisions we made and why. It is stored in git with full version history, it is shared by every
 agent on every machine, and it is reached through the `kyb` CLI.
 
-- **Start from the brief.** Claude Code receives a KYB brief at session start; any other agent runs
-  `kyb brief` first. Treat recently retracted entries as rejected decisions, and check open
-  incidents before touching the services they name.
+- **`kyb brief` before infrastructure work — important, do not skip it.** One call shows what
+  is live: open incidents, work in progress or blocked, deadlines, and decisions retracted
+  recently. It is context for the task you were given, not a to-do list: never start work from
+  it on your own. Treat a retracted entry as a rejected decision, and check an open incident
+  before touching the service it names.
 - **Query it before reasoning about our infrastructure.** Do not guess about our hosts, ports,
   services or deploys — `kyb query "..."` first. One phrasing is not a search; try a couple.
 - **Write back what you learn.** Found nothing, or only a thin entry while you now understand

@@ -70,68 +70,6 @@ assert "permissionDecision" not in o, "the hook must not decide permissions: " +
 PY
 [ -z "$(printf '%s' '{"tool_name":"Bash","tool_input":{}}' | python3 "$valid_home/.local/bin/kyb-hook")" ] || { echo "the hook touched a foreign tool" >&2; exit 1; }
 
-# the SessionStart brief hook: registered once however often the installer runs,
-# beside somebody else's SessionStart hook; --no-brief takes ours out and leaves theirs
-brief_hook="$valid_home/.local/bin/kyb-brief-hook"
-[ -x "$brief_hook" ] || { echo "kyb-brief-hook was not installed" >&2; exit 1; }
-python3 - "$valid_home/.claude/settings.json" <<'PY'
-import json, sys
-p = sys.argv[1]; s = json.load(open(p))
-starts = s["hooks"]["SessionStart"]
-assert [c["command"] for g in starts for c in g["hooks"]] == [s["hooks"]["SessionStart"][0]["hooks"][0]["command"]], starts
-assert starts[0]["hooks"][0]["command"].endswith("/.local/bin/kyb-brief-hook"), starts
-s["hooks"]["SessionStart"].insert(0, {"hooks": [{"type": "command", "command": "/usr/bin/true"}]})
-json.dump(s, open(p, "w"))
-PY
-HOME="$valid_home" KYB_INSTALL_BINARY="$stub" bash "$REPO/skills/install.sh" >/dev/null
-python3 - "$valid_home/.claude/settings.json" <<'PY'
-import json, sys
-starts = json.load(open(sys.argv[1]))["hooks"]["SessionStart"]
-commands = [c["command"] for g in starts for c in g["hooks"]]
-assert commands[0] == "/usr/bin/true" and len(commands) == 2 and commands[1].endswith("/kyb-brief-hook"), commands
-PY
-HOME="$valid_home" KYB_INSTALL_BINARY="$stub" bash "$REPO/skills/install.sh" --no-brief >/dev/null
-python3 - "$valid_home/.claude/settings.json" <<'PY'
-import json, sys
-starts = json.load(open(sys.argv[1]))["hooks"]["SessionStart"]
-assert [c["command"] for g in starts for c in g["hooks"]] == ["/usr/bin/true"], starts
-PY
-nobrief_home="$TEST_ROOT/nobrief-home"
-mkdir -p "$nobrief_home/.claude"
-HOME="$nobrief_home" KYB_BRIEF=0 KYB_INSTALL_BINARY="$stub" bash "$REPO/skills/install.sh" >/dev/null
-python3 - "$nobrief_home/.claude/settings.json" <<'PY'
-import json, sys
-assert "SessionStart" not in json.load(open(sys.argv[1]))["hooks"]
-PY
-if HOME="$nobrief_home" KYB_INSTALL_BINARY="$stub" bash "$REPO/skills/install.sh" --bogus >/dev/null 2>&1; then
-  echo "an unknown installer argument was accepted" >&2; exit 1
-fi
-
-# the hook itself: the brief as SessionStart context, and silence whenever it cannot have one
-hook_dir="$TEST_ROOT/hook-bin"
-mkdir -p "$hook_dir"
-cp "$REPO/skills/kyb/bin/kyb-brief-hook" "$hook_dir/"
-fake_cli() { printf '%s\n' '#!/usr/bin/env bash' "$1" > "$hook_dir/kyb"; chmod 755 "$hook_dir/kyb"; }
-run_hook() { printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | "$@" python3 "$hook_dir/kyb-brief-hook"; }
-fake_cli 'echo "KYB brief, today 2026-03-10 ($*)"; echo "OPEN INCIDENTS (1)"'
-out="$(run_hook env KYB_BRIEF_ARGS="--tag edge")"
-python3 - "$out" <<'PY'
-import json, sys
-o = json.loads(sys.argv[1])["hookSpecificOutput"]
-assert o["hookEventName"] == "SessionStart", o
-assert o["additionalContext"] == "KYB brief, today 2026-03-10 (brief --tag edge)\nOPEN INCIDENTS (1)", o
-PY
-[ -z "$(run_hook env KYB_BRIEF=0)" ] || { echo "KYB_BRIEF=0 did not silence the hook" >&2; exit 1; }
-fake_cli 'echo "kyb: cannot reach 127.0.0.1:9310" >&2; exit 3'
-[ -z "$(run_hook env)" ] || { echo "the hook spoke while the server was down" >&2; exit 1; }
-fake_cli 'echo "partial"; sleep 30 & wait'
-started=$(date +%s)
-out="$(run_hook env KYB_BRIEF_TIMEOUT=1)" || { echo "the hook failed on a timeout" >&2; exit 1; }
-[ -z "$out" ] || { echo "the hook printed on a timeout: $out" >&2; exit 1; }
-[ $(( $(date +%s) - started )) -lt 5 ] || { echo "the hook waited past its timeout" >&2; exit 1; }
-fake_cli 'exit 0'
-[ -z "$(run_hook env)" ] || { echo "the hook printed an empty brief" >&2; exit 1; }
-
 # a fresh machine: agents installed but no instruction files yet. Each present agent gets
 # its file with one kyb section (twice-run safe, no backup of a file that did not exist);
 # an absent agent gets nothing.
