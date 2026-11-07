@@ -4139,6 +4139,7 @@ mod published_claims {
 
         let probes = [
             ("as_of", "/search?q=one&as_of=2999-01-01"),
+            ("brief", "/brief"),
             ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
             ("deadlines", "/deadlines"),
             ("diff", "/knowledge/svc/diff"),
