@@ -632,6 +632,14 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             push(&mut query, "assignee", text_arg(args, "assignee"));
             Call { method: "GET", path: "/deadlines".into(), query, body: None }
         }
+        "kyb_brief" => {
+            let mut query = Vec::new();
+            push(&mut query, "tag", text_arg(args, "tag"));
+            push(&mut query, "service", text_arg(args, "service"));
+            push(&mut query, "since", text_arg(args, "since"));
+            push(&mut query, "limit", text_arg(args, "limit"));
+            Call { method: "GET", path: "/brief".into(), query, body: None }
+        }
         "kyb_add" => {
             require(args, &["key", "title", "body"])?;
             Call {
@@ -880,6 +888,23 @@ e.g. 30 or 30d; late ones always count"},
             }},
         }),
         json!({
+            "name": "kyb_brief",
+            "description": "What is live in the base right now, as pointers: deadlines, open \
+incidents (highest severity first), active work (in progress, blocked, urgent open tasks), \
+knowledge retracted recently and knowledge changed recently. Each row is a key, a title and one \
+fact; read the details with kyb_get. Call it at the start of a session: treat retracted entries \
+as rejected decisions, and check open incidents before touching their services.",
+            "inputSchema": {"type": "object", "properties": {
+                "tag": {"type": "string", "description": "comma-separated; every tag must match"},
+                "service": {"type": "string", "description": "an incident's service, or a tag on \
+the other kinds"},
+                "since": {"type": "string", "description": "how far back 'recently' reaches: 7d \
+(default), 24h, a YYYY-MM-DD date or an RFC3339 time"},
+                "limit": {"type": "integer", "description": "rows per section, replacing the \
+default caps (1-50)"},
+            }},
+        }),
+        json!({
             "name": "kyb_add",
             "description": "Write or update one entry. Same call for both: reusing a key does not \
 overwrite, it adds a version, and the old text stays searchable under history. Only verified \
@@ -1095,7 +1120,7 @@ mod mcp_tests {
         let tools = resp["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
-        assert_eq!(names.len(), 15, "got {names:?}");
+        assert_eq!(names.len(), 16, "got {names:?}");
         let unique: HashSet<&&str> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate tool name in {names:?}");
         for tool in tools {
@@ -1276,9 +1301,9 @@ mod mcp_tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 9, "{names:?}");
-        // the deadline listing only reads, so a read-only client keeps it
-        assert!(names.contains(&"kyb_deadlines"), "{names:?}");
+        assert_eq!(names.len(), 10, "{names:?}");
+        // the deadline listing and the brief only read, so a read-only client keeps them
+        assert!(names.contains(&"kyb_deadlines") && names.contains(&"kyb_brief"), "{names:?}");
         for write in WRITE_TOOLS {
             assert!(!names.contains(&write), "{write} must not be advertised read-only");
         }
@@ -1339,6 +1364,23 @@ mod mcp_tests {
         let parsed: Value = serde_json::from_str(tool_body(&tags)).unwrap();
         let text = parsed.to_string();
         assert!(text.contains("infra") && text.contains("orders"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn the_brief_reaches_an_mcp_client_through_the_same_route() {
+        let (app, _d, _i, _a) = test_app();
+        let resp = rpc(&app, call("kyb_task", json!({"key": "task-doing", "title": "Doing it",
+            "body": "x", "status": "in_progress"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let resp = rpc(&app, call("kyb_brief", json!({"limit": 3}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let brief: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(brief["work"]["items"][0]["key"], "task-doing", "{brief}");
+        for section in ["deadlines", "incidents", "work", "retracted", "changed"] {
+            assert!(brief[section]["items"].is_array(), "{section}: {brief}");
+        }
+        let resp = rpc(&app, call("kyb_brief", json!({"since": "next week"}))).await;
+        assert!(errored(&resp), "the route's refusal reaches the client");
     }
 
     #[tokio::test]
