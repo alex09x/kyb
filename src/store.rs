@@ -91,6 +91,11 @@ impl HistoryIndex {
     pub fn keys(&self) -> impl Iterator<Item = &String> {
         self.by_key.keys()
     }
+
+    /// Each key's newest version, in no particular order.
+    pub fn latest(&self) -> impl Iterator<Item = (&String, &VersionInfo)> {
+        self.by_key.iter().filter_map(|(k, v)| v.first().map(|newest| (k, newest)))
+    }
 }
 
 /// The key a repository path belongs to: `<kind>/<key>.md` in the current

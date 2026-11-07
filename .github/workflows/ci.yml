@@ -202,6 +202,8 @@ jobs:
         run: KYB_SERVER_BIN=./target/release/kyb-server bash scripts/test-cli-auth.sh
       - name: Exercise deadlines through the CLI
         run: KYB_SERVER=./target/release/kyb-server bash scripts/test-cli-deadlines.sh
+      - name: Exercise the session brief and its hook through the CLI
+        run: KYB_SERVER=./target/release/kyb-server bash scripts/test-cli-brief.sh
       - name: Exercise CLI exit codes
         run: KYB_SERVER=./target/release/kyb-server bash scripts/test-cli-exit-codes.sh
 

@@ -412,6 +412,9 @@ kyb — Know Your Business (our infrastructure knowledge base)
   kyb get <key> [--at <sha>]
   kyb deadlines [--within 30d] [--overdue] [--hard] [--tag a,b] [--assignee A] [--json]
                                                     (open tasks with a due date: overdue / this week / later)
+  kyb brief [--tag a,b] [--service X] [--since 7d] [--limit N] [--json]
+                                                    (session start: deadlines, open incidents, active work,
+                                                    recently retracted and changed knowledge, as pointers)
   kyb history <key>
   kyb export [--at <sha>] [--out FILE] [--page N]   (every key as of one commit as JSON lines:
                                                     active, archived, retracted; checks completeness)
@@ -830,6 +833,91 @@ for bucket in ("overdue", "this_week", "later"):
         if r.get("assignee"):
             note += ", " + r["assignee"]
         print("  %-10s %s%s  %s  (%s)" % (when, "HARD " if r.get("hard") else "", r["key"], r["title"], note))
+'
+    ;;
+  brief)
+    tag=""; service=""; since=""; limit=""; as_json=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --tag|--tags) tag="$2"; shift 2 ;;
+        --service) service="$2"; shift 2 ;;
+        --since) since="$2"; shift 2 ;;
+        --limit) limit="$2"; shift 2 ;;
+        --json) as_json=1; shift ;;
+        *) die "brief: unknown flag $1" ;;
+      esac
+    done
+    require_capability brief "kyb brief" "An older server has no such route and would simply answer 404."
+    out="$(kyb_curl "$BASE/brief?tag=$(urlenc "$tag")&service=$(urlenc "$service")&since=$(urlenc "$since")&limit=$(urlenc "$limit")")"
+    if [ -n "$as_json" ]; then printf '%s\n' "$out" | pretty; exit 0; fi
+    printf '%s' "$out" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+if "work" not in b:
+    print(json.dumps(b, indent=2), file=sys.stderr)
+    raise SystemExit(1)
+
+def short(text, width=80):
+    text = " ".join(str(text).split())
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+def who(row):
+    by = row.get("by") or {}
+    if by.get("agent"):
+        return by["agent"] + (" in " + by["workspace"] if by.get("workspace") else "")
+    return row.get("author") or ""
+
+def more(section, hint):
+    if section["more"]:
+        print("  +%d more%s" % (section["more"], hint))
+
+since = b["since"][:10]
+d, inc, work, gone, changed = b["deadlines"], b["incidents"], b["work"], b["retracted"], b["changed"]
+if not any(s["count"] for s in (d, inc, work, gone, changed)):
+    print("KYB brief: nothing due, open or in progress, and nothing changed since %s." % since)
+    raise SystemExit(0)
+print("KYB brief, today %s, changes since %s. Pointers only: kyb get <key> for details." % (b["today"], since))
+if d["count"]:
+    soon = d["count"] - d["overdue"]
+    said = ([("%d overdue" % d["overdue"])] if d["overdue"] else []) + ([("%d due soon" % soon)] if soon else [])
+    print("DEADLINES: " + ", ".join(said))
+    for r in d["items"]:
+        n = r["days_left"]
+        when = ("%dd late" % -n if n < 0 else "late today") if r["overdue"] else ("due today" if n == 0 else "in %dd" % n)
+        print("  %-10s %s%s  %s (%s %s)" % (when, "HARD " if r.get("hard") else "", r["key"], short(r["title"]),
+              "expected" if r.get("provisional") else "due", r["due"]))
+    more(d, ": kyb deadlines")
+if inc["count"]:
+    print("OPEN INCIDENTS (%d): check before touching these services" % inc["count"])
+    for r in inc["items"]:
+        facts = [x for x in (r.get("service"), r["status"]) if x]
+        if r.get("age_days") is not None:
+            facts.append("%dd" % r["age_days"])
+        print("  %-8s %s  %s (%s)" % (r["severity"], r["key"], short(r["title"]), ", ".join(facts)))
+    more(inc, ": kyb incidents")
+if work["count"]:
+    print("ACTIVE WORK (%d)" % work["count"])
+    for r in work["items"]:
+        note = r.get("assignee") or ""
+        if r.get("priority"):
+            note = (r["priority"] + (", " + note if note else ""))
+        line = "  %-11s %s  %s" % (r["status"], r["key"], short(r["title"]))
+        if note:
+            line += " (%s)" % note
+        if r.get("blocked_reason"):
+            line += " - waits on: " + short(r["blocked_reason"], 60)
+        print(line)
+    more(work, ": kyb tasks")
+if gone["count"]:
+    print("RECENTLY RETRACTED (%d): rejected or wrong, do not bring these back unasked" % gone["count"])
+    for r in gone["items"]:
+        print("  %s  %s (%s%s)" % (r["key"], short(r["title"]), r["at"][:10], ", " + who(r) if who(r) else ""))
+    more(gone, "")
+if changed["count"]:
+    print("RECENTLY CHANGED (%d)" % changed["count"])
+    for r in changed["items"]:
+        print("  %s  %s (%s%s)" % (r["key"], short(r["title"]), r["at"][:10], ", " + who(r) if who(r) else ""))
+    more(changed, ": kyb brief --limit N")
 '
     ;;
   diff)

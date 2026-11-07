@@ -144,7 +144,15 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
   `--no-deadlines` (`?deadlines=false`) leaves it off. `kyb deadlines` is the full calendar:
   overdue, this week, later. A bare date is judged by the caller's calendar (the CLI sends its
   own date as `X-KYB-Today`); otherwise by the server's `TZ`. KYB reminds, it never schedules:
-  no notifications, no recurrence. The agent skill has a session-start hook recipe.
+  no notifications, no recurrence.
+- **A brief at session start** — `kyb brief` (`GET /brief`, MCP `kyb_brief`) is what is live
+  in the base, as pointers only: deadlines, open incidents by severity, active work (in progress,
+  blocked, urgent), and knowledge retracted or changed in the last 7 days, with who wrote it. Each
+  section is capped with "+N more", so it fits in about 40 lines. The installer registers a
+  Claude Code `SessionStart` hook that puts it into every new session's context, with a 3-second
+  limit and silence when the server is down; an agent learns about an open incident or a
+  retracted decision without having to know to ask. `KYB_BRIEF=0` or `install.sh --no-brief`
+  turns it off; other agents run `kyb brief` themselves.
 
 Closing archives the task; `kyb tasks` and the search keep the full record. Every write is a
 commit, so `kyb history <key>` + `kyb get <key> --at <sha>` reconstruct who held a task, in
@@ -283,6 +291,7 @@ kyb task --key task-renew-api-cert --title "..." --due 2026-03-14 --hard [--remi
 kyb task --key task-answer-quote --title "..." --waits-on "the quote" --expected 2026-03-20 <<< "body"
 kyb task-status task-renew-api-cert --due 2026-03-21    # move a deadline: a version, shown by kyb diff
 kyb deadlines [--within 14d] [--overdue] [--hard] [--tag a,b] [--assignee A] [--json]
+kyb brief [--tag a,b] [--service X] [--since 7d] [--limit N] [--json]   # what is live, as pointers
 # every read above prints overdue and nearly due tasks as a banner on stderr; --no-deadlines omits it
 ```
 
@@ -470,6 +479,7 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 | `GET` | `/tasks` | `?status=&priority=&assignee=&parent_task=&followups=open&all=true&limit=` — live tasks (`open`, `in_progress`, `blocked`) by default, freshest on top; same archive rules as `/incidents` |
 | `POST` | `/tasks/{key}/transition` | partial update: `{status?, assignee?, parent_task?, blocked_reason?, due?, hard?, remind_days?, waits_on?, expected?}` — `status` is a **live** one (`open\|in_progress\|blocked`), and without it the task keeps its own; omitted fields keep their stored value, leaving `blocked` clears `blocked_reason`, and a terminal status is refused with a pointer to `/tasks/{key}/resolve` |
 | `GET` | `/deadlines` | `?within=<days>&overdue=true&hard=true&tag=&assignee=` → `{today, count, deadlines:[{key, title, status, due, days_left, overdue, hard?, provisional?, waits_on?, bucket}]}` — every live task with a date, soonest first, `bucket` `overdue\|this_week\|later`. "Today" is the `X-KYB-Today: YYYY-MM-DD` header, or the server's date in its `TZ` |
+| `GET` | `/brief` | `?tag=&service=&since=7d&limit=` → `{today, since, deadlines, incidents, work, retracted, changed}`, each section `{count, more, items}` of pointers (key, title, one fact; never a body). Incidents `open`/`mitigated` by severity; work `in_progress`, `blocked` and high/critical `open` tasks; retracted and changed knowledge within `since` (`7d`, `24h`, a date or an RFC3339 time), newest first, with `by`. `limit` (1-50) replaces the caps 5/5/7/5/5; `service` matches an incident's service or a tag |
 | `POST` | `/tasks/{key}/resolve` | `{resolution, status?=done}` — flips status, records the outcome; a non-`blocked` status clears `blocked_reason`; `done`/`dropped` archive |
 | `GET` | `/search` | `?q=&tag=&history=&limit=&sort=recent&kind=&status=&service=&priority=&assignee=&parent_task=` → ranked hits with full bodies; an empty `q` lists newest first |
 | `GET` | `/export` | `?at=<rev>&after=<key>&limit=` → JSON lines: a `snapshot` line (the commit, `total`, `counts` per kind and state), one `entry` line per key in key order with `state` `active`\|`archived`\|`retracted` (a removed key as it was just before removal), an `end` line with `next_after` and `complete`. Pages that pass the same `at` read one commit, so writes made meanwhile change nothing; earlier versions stay in `/knowledge/{key}/history`. Needs the read role, like `/search` |

@@ -15,3 +15,5 @@ scripts/fleet.local.sh
 .prod/
 .idea/
 scripts/__pycache__/
+__pycache__/
+*.pyc

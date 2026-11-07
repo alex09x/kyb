@@ -38,7 +38,7 @@ fn bad_request(msg: String) -> Reply {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": msg })))
 }
 
-fn clock(headers: &HeaderMap) -> Result<Clock, Reply> {
+pub(crate) fn clock(headers: &HeaderMap) -> Result<Clock, Reply> {
     let Some(raw) = headers.get(TODAY_HEADER) else {
         return Ok(Clock::new(Utc::now(), None));
     };

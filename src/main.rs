@@ -10,6 +10,8 @@
 
 mod audit;
 mod auth;
+mod brief;
+mod brief_api;
 mod config;
 mod deadline;
 mod deadline_api;
@@ -317,6 +319,7 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/tasks/{key}/transition", post(transition_task))
         .route("/search", get(search).layer(deadlines()))
         .route("/deadlines", get(deadline_api::list))
+        .route("/brief", get(brief_api::brief))
         .route("/export", get(export::export))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
@@ -1875,7 +1878,7 @@ async fn reindex(State(st): St) -> Reply {
 /// So the check has to happen on the client, before the request, against a list
 /// the server publishes. Names match the query parameters exactly; entries are
 /// only ever added, never renamed, because an older CLI matches on the string.
-const CAPABILITIES: [&str; 5] = ["as_of", "changed_between", "deadlines", "diff", "export"];
+const CAPABILITIES: [&str; 6] = ["as_of", "brief", "changed_between", "deadlines", "diff", "export"];
 
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
@@ -2282,7 +2285,7 @@ mod api_tests {
         assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
         let caps: Vec<&str> =
             v["capabilities"].as_array().unwrap().iter().map(|c| c.as_str().unwrap()).collect();
-        for want in ["as_of", "changed_between", "diff"] {
+        for want in ["as_of", "brief", "changed_between", "diff"] {
             assert!(caps.contains(&want), "healthz must advertise {want}, got {caps:?}");
         }
     }
@@ -4136,6 +4139,7 @@ mod published_claims {
 
         let probes = [
             ("as_of", "/search?q=one&as_of=2999-01-01"),
+            ("brief", "/brief"),
             ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
             ("deadlines", "/deadlines"),
             ("diff", "/knowledge/svc/diff"),

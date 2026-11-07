@@ -38,6 +38,9 @@ none. (`skills/install.sh` already injects this into every agent's global instru
 
 Whenever you touch one of our services, servers or deploys — a base nobody feeds is worthless.
 
+**Start from the brief** (`kyb brief`; Claude Code gets it at session start): open incidents,
+work in progress and recently retracted decisions, before you plan anything.
+
 **Ask first.** Try a couple of phrasings and the tag; one query is not a search:
 ```bash
 kyb query "orders_api clickhouse"
@@ -432,17 +435,54 @@ read leaves it off (scripts, bulk reads); over HTTP that is `?deadlines=false`, 
 overrides it). A caller that sends none — an MCP client, a script — gets the server's date in
 its own time zone (`TZ` in the server's environment).
 
-**Deadlines at session start (optional).** So that they are seen even in a session that never
-queries the base, have the agent's session-start hook print them. Claude Code,
-`~/.claude/settings.json`:
+### The session brief
 
-```json
-{"hooks": {"SessionStart": [{"hooks": [{"type": "command",
-  "command": "kyb deadlines --within 14d 2>/dev/null || true"}]}]}}
+`kyb brief` is what is live in the base right now, as pointers: deadlines, open incidents,
+active work, and the knowledge retracted or changed recently. Each row is a key, a title and one
+fact, never a body; `kyb get <key>` reads the rest. Every section is capped and says `+N more`,
+so the whole brief stays under about 40 lines.
+
+```bash
+kyb brief                                  # the default: changes of the last 7 days
+kyb brief --tag edge | --service orders-api | --since 24h | --limit 3 | --json
 ```
 
-What a `SessionStart` hook prints is added to the session's context. Other agents: run the same
-command from whatever their start hook or startup script is.
+```
+KYB brief, today 2026-03-16, changes since 2026-03-09. Pointers only: kyb get <key> for details.
+DEADLINES: 1 overdue
+  2d late    HARD task-renew-api-cert  Renew the api.example.com certificate (due 2026-03-14)
+OPEN INCIDENTS (1): check before touching these services
+  high     inc-2026-03-15-orders-api-oom  orders-api OOM-killed under load (orders-api, mitigated, 1d)
+ACTIVE WORK (2)
+  in_progress task-raise-log-retention  Raise log retention to 30 days (agent-a)
+  blocked     task-migrate-ch  Move ClickHouse to the new disks - waits on: disk delivery
+RECENTLY RETRACTED (1): rejected or wrong, do not bring these back unasked
+  orders-api-sharding-plan  Shard orders-api by tenant (2026-03-12, codex in btcr)
+RECENTLY CHANGED (1)
+  clickhouse-disks  ClickHouse data disks (2026-03-15, claude in infra)
+```
+
+| Section | What qualifies |
+|---|---|
+| Deadlines | the deadline block: late or inside the reminder window, late first |
+| Open incidents | `open` and `mitigated`, highest severity first, with service, status and age |
+| Active work | tasks `in_progress` and `blocked` (with what they wait on), then `open` ones ranked high or critical |
+| Recently retracted | knowledge removed within `--since`: a decision taken back or a fact that was wrong |
+| Recently changed | knowledge written within `--since`, with who wrote it |
+
+`--tag` (every tag must match) and `--service` narrow every section; only incidents have a
+service field, so on the other kinds `--service X` matches the tag `X`.
+
+**At session start you get it without asking.** `skills/install.sh` registers a Claude Code
+`SessionStart` hook, `~/.local/bin/kyb-brief-hook`, that runs `kyb brief` with a 3-second limit
+and adds its output to the session's context. It fails silent: a server that is down, slow or
+too old to have a brief gives no output, never a slower start. `KYB_BRIEF=0` switches it off,
+`KYB_BRIEF_ARGS="--tag edge"` narrows it, and `install.sh --no-brief` does not register it.
+Codex and Antigravity have no such hook: **run `kyb brief` yourself at the start of a session.**
+
+When you read it: treat a retracted entry as a rejected decision, not as an idea to bring back;
+check an open incident before you touch the service it names; and do not start work that is
+already in progress or blocked under someone else.
 
 ---
 
