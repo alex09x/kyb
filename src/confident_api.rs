@@ -68,13 +68,6 @@ async fn run_check(st: &AppState, q: &Query<'_>) -> Check {
     st.confident.check(q, qvec.as_deref())
 }
 
-fn refuse_denied(st: &AppState) -> Option<Reply> {
-    let by = caller();
-    confident::denied(&by.workspace, &st.confident_deny).then(|| {
-        reject(StatusCode::FORBIDDEN, "this workspace does not record decisions (KYB_CONFIDENT_DENY)")
-    })
-}
-
 /// Validate, commit and index a record. The caller holds the writer lock.
 fn save(st: &AppState, rec: Record, msg: &str, vector: Option<Vec<f32>>) -> Result<String, Reply> {
     rec.validate().map_err(|e| reject(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
@@ -145,9 +138,6 @@ pub struct AskReq {
 }
 
 pub async fn ask(State(st): St, Json(r): Json<AskReq>) -> Reply {
-    if let Some(no) = refuse_denied(&st) {
-        return no;
-    }
     let gist = r.gist.trim().to_string();
     if let Err(e) = confident::validate_gist(&gist) {
         return reject(StatusCode::BAD_REQUEST, format!("{e:#}"));
@@ -211,9 +201,6 @@ async fn update(
     what: &str,
     change: impl FnOnce(&mut Record) -> Result<bool, String>,
 ) -> Reply {
-    if let Some(no) = refuse_denied(st) {
-        return no;
-    }
     let _w = st.writer.lock().await;
     let Some(mut rec) = st.confident.get(id) else {
         return reject(StatusCode::NOT_FOUND, format!("no decision record '{id}'"));

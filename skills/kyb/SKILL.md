@@ -535,8 +535,7 @@ How to read a check:
 
 Only the main agent records — never a sub-agent or a background worker — and only questions to
 the owner or choices he could dispute; ordinary work is not a decision. No secrets in any field;
-quote the owner briefly and leave out swearing. Some workspaces record nothing at all (the server
-refuses them); reading the journal still works there.
+quote the owner briefly and leave out swearing.
 
 ---
 

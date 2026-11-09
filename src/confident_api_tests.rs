@@ -34,12 +34,10 @@ fn cfg(data: &std::path::Path, idx: &std::path::Path) -> config::Config {
     }
 }
 
-fn app(deny: &[&str]) -> App {
+fn app() -> App {
     let data = tempfile::tempdir().unwrap();
     let idx = tempfile::tempdir().unwrap();
-    let mut state = build_state_with(&cfg(data.path(), idx.path()), auth::Auth::off()).unwrap();
-    std::sync::Arc::get_mut(&mut state).expect("fresh state").confident_deny =
-        deny.iter().map(|s| s.to_string()).collect();
+    let state = build_state_with(&cfg(data.path(), idx.path()), auth::Auth::off()).unwrap();
     App { router: build_app(state), data, _idx: idx }
 }
 
@@ -85,7 +83,7 @@ const CHECK: &str = "/confident/check?gist=mitts%20release%20patch%20or%20minor&
 
 #[tokio::test]
 async fn ask_decide_and_find_it_again_from_another_session() {
-    let a = app(&[]);
+    let a = app();
     let r = &a.router;
 
     let (st, v) = call(r, "s1", "GET", CHECK, None).await;
@@ -164,7 +162,7 @@ async fn ask_decide_and_find_it_again_from_another_session() {
 
 #[tokio::test]
 async fn records_live_in_git_survive_a_restart_and_stay_out_of_search() {
-    let a = app(&[]);
+    let a = app();
     let (_, v) = call(&a.router, "s1", "POST", "/confident", Some(ask_body())).await;
     let id = v["id"].as_str().unwrap().to_string();
     assert!(a.data.path().join(format!("confident/{id}.json")).is_file());
@@ -181,7 +179,7 @@ async fn records_live_in_git_survive_a_restart_and_stay_out_of_search() {
 
 #[tokio::test]
 async fn only_an_open_question_can_be_abandoned() {
-    let a = app(&[]);
+    let a = app();
     let r = &a.router;
     let (_, v) = call(r, "s1", "POST", "/confident", Some(ask_body())).await;
     let id = v["id"].as_str().unwrap().to_string();
@@ -209,7 +207,7 @@ async fn only_an_open_question_can_be_abandoned() {
 
 #[tokio::test]
 async fn bad_input_is_refused_with_a_reason() {
-    let a = app(&[]);
+    let a = app();
     let r = &a.router;
     let (st, v) =
         call(r, "s1", "GET", "/confident/check?gist=%D0%B2%D1%8B%D0%BF%D1%83%D1%81%D0%BA", None).await;
@@ -232,15 +230,4 @@ async fn bad_input_is_refused_with_a_reason() {
     body["proposed"] = json!("1.0.0");
     let (st, _) = call(r, "s1", "POST", "/confident", Some(body)).await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "proposed must be one of the options");
-}
-
-#[tokio::test]
-async fn a_denied_workspace_records_nothing() {
-    let a = app(&["infra"]);
-    let (st, v) = call(&a.router, "s1", "POST", "/confident", Some(ask_body())).await;
-    assert_eq!(st, StatusCode::FORBIDDEN, "{v}");
-    assert!(!a.data.path().join("confident").exists());
-    // reading the journal is not recording
-    let (st, _) = call(&a.router, "s1", "GET", CHECK, None).await;
-    assert_eq!(st, StatusCode::OK);
 }
