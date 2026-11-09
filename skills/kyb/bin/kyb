@@ -460,6 +460,19 @@ tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
   kyb done <key> [--status dropped] [--resolution "what came of it"]
            (no --resolution: the closing comment is read from stdin)
 
+decision journal (call check before every question to the owner; the gist is ONE English line):
+  kyb confident check "<gist>" [--target a,b] [--kind K] [--question "draft"] [--json]
+           (earlier decisions about the same thing, hazards, lint on the question)
+  kyb confident ask --gist "<gist>" [--target a,b] [--situation S] [--options "a|b"] [--proposed a]
+           [--tradeoff T] [--checked C] [--unchecked U] [--question "as sent"]   (opens a record)
+  kyb confident decided <id> --by owner|agent|review --verdict approve_plain|approve_with_additions|
+           choose_option|defer|correction|reject|confused|counter_question|redirect
+           [--chosen X] [--quote "owner's words"] [--ref commit|PR|tag]
+  kyb confident outcome <id> --result kept|corrected|reverted|dropped --ref <evidence> [--why W]
+  kyb confident abandon <id> [--why W]           (a question nobody answered)
+  kyb confident open [--workspace W] [--all]     (records still waiting for an answer)
+  kyb confident get <id>
+
 deadlines on tasks (task and task-status take the same flags):
   --due YYYY-MM-DD|<date-time with zone>   when it is due ("" clears it)
   --hard | --no-hard                       a miss has real consequences (expiry, contract, regulator)
@@ -919,6 +932,121 @@ if changed["count"]:
     for r in changed["items"]:
         print("  %s  %s (%s%s)" % (r["key"], short(r["title"]), r["at"][:10], ", " + who(r) if who(r) else ""))
     more(changed, ": kyb brief --limit N")
+'
+    ;;
+  confident)
+    sub="${1:-}"; [ $# -gt 0 ] && shift || true
+    require_capability confident "kyb confident" "An older server has no decision journal and would simply answer 404."
+    as_json=""; id=""; gist=""; kind=""; target=""; question=""; situation=""; options=""; proposed=""
+    tradeoff=""; checked=""; unchecked=""; by=""; verdict=""; chosen=""; quote=""; ref=""; result=""
+    why=""; workspace=""; status="open"
+    case "$sub" in
+      decided|outcome|abandon|get) id="${1:-}"; [ -n "$id" ] && [ "${id#-}" = "$id" ] && shift || id="" ;;
+      check) [ $# -gt 0 ] && [ "${1#-}" = "$1" ] && { gist="$1"; shift; } ;;
+    esac
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --gist) gist="$2"; shift 2 ;;
+        --kind) kind="$2"; shift 2 ;;
+        --target) target="$2"; shift 2 ;;
+        --question) question="$2"; shift 2 ;;
+        --situation) situation="$2"; shift 2 ;;
+        --options) options="$2"; shift 2 ;;
+        --proposed) proposed="$2"; shift 2 ;;
+        --tradeoff) tradeoff="$2"; shift 2 ;;
+        --checked) checked="$2"; shift 2 ;;
+        --unchecked) unchecked="$2"; shift 2 ;;
+        --by) by="$2"; shift 2 ;;
+        --verdict) verdict="$2"; shift 2 ;;
+        --chosen) chosen="$2"; shift 2 ;;
+        --quote) quote="$2"; shift 2 ;;
+        --ref) ref="$2"; shift 2 ;;
+        --result) result="$2"; shift 2 ;;
+        --why) why="$2"; shift 2 ;;
+        --workspace) workspace="$2"; shift 2 ;;
+        --status) status="$2"; shift 2 ;;
+        --all) status=""; shift ;;
+        --json) as_json=1; shift ;;
+        *) die "confident $sub: unknown flag $1" ;;
+      esac
+    done
+    # the JSON body is built by python from the environment: no quoting of
+    # free text through the shell, whatever the owner's words contain
+    body_json() {
+      CF_GIST="$gist" CF_KIND="$kind" CF_TARGET="$target" CF_QUESTION="$question" CF_SITUATION="$situation" \
+      CF_OPTIONS="$options" CF_PROPOSED="$proposed" CF_TRADEOFF="$tradeoff" CF_CHECKED="$checked" \
+      CF_UNCHECKED="$unchecked" CF_BY="$by" CF_VERDICT="$verdict" CF_CHOSEN="$chosen" CF_QUOTE="$quote" \
+      CF_REF="$ref" CF_RESULT="$result" CF_WHY="$why" python3 - "$1" <<'PY'
+import json, os, sys
+e = lambda k: os.environ.get("CF_" + k, "")
+lst = lambda k: [x.strip() for x in e(k).split(("|" if k == "OPTIONS" else ",")) if x.strip()]
+shape = {
+    "ask": {"gist": e("GIST"), "target": lst("TARGET"), "options": lst("OPTIONS")},
+    "decided": {"by": e("BY"), "verdict": e("VERDICT")},
+    "outcome": {"result": e("RESULT"), "ref": e("REF"), "why": e("WHY")},
+    "abandon": {"why": e("WHY")},
+}[sys.argv[1]]
+optional = {"ask": ["KIND", "SITUATION", "PROPOSED", "TRADEOFF", "CHECKED", "UNCHECKED", "QUESTION"],
+            "decided": ["CHOSEN", "QUOTE", "REF"]}.get(sys.argv[1], [])
+for k in optional:
+    if e(k):
+        shape[k.lower()] = e(k)
+print(json.dumps(shape))
+PY
+    }
+    post_json() { kyb_curl -X POST -H "content-type: application/json" --data-binary @- "$BASE$1"; }
+    case "$sub" in
+      check)
+        [ -n "$gist" ] || die "confident check: the decision as one English line, e.g. kyb confident check \"orders-api: release patch vs minor after a fix\""
+        out="$(kyb_curl "$BASE/confident/check?gist=$(urlenc "$gist")&target=$(urlenc "$target")&kind=$(urlenc "$kind")&question=$(urlenc "$question")")"
+        ;;
+      ask)
+        [ -n "$gist" ] || die "confident ask: --gist \"one English line\" required"
+        out="$(body_json ask | post_json /confident)"
+        ;;
+      decided)
+        [ -n "$id" ] && [ -n "$by" ] && [ -n "$verdict" ] || die "confident decided: <id> --by owner|agent|review --verdict V required"
+        out="$(body_json decided | post_json "/confident/$(urlenc "$id")/decided")"
+        ;;
+      outcome)
+        [ -n "$id" ] && [ -n "$result" ] && [ -n "$ref" ] || die "confident outcome: <id> --result kept|corrected|reverted|dropped --ref <evidence> required"
+        out="$(body_json outcome | post_json "/confident/$(urlenc "$id")/outcome")"
+        ;;
+      abandon)
+        [ -n "$id" ] || die "confident abandon: <id> required"
+        out="$(body_json abandon | post_json "/confident/$(urlenc "$id")/abandon")"
+        ;;
+      open|list)
+        out="$(kyb_curl "$BASE/confident?status=$(urlenc "$status")&workspace=$(urlenc "$workspace")")"
+        ;;
+      get)
+        [ -n "$id" ] || die "confident get: <id> required"
+        out="$(kyb_curl "$BASE/confident/$(urlenc "$id")")"
+        ;;
+      *) die "confident: check | ask | decided | outcome | abandon | open | get (kyb --help)" ;;
+    esac
+    if [ -n "$as_json" ] || { [ "$sub" != check ] && [ "$sub" != ask ]; }; then printf '%s\n' "$out" | pretty; exit 0; fi
+    printf '%s' "$out" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+if "id" in b:
+    print("Opened %s. When the owner answers: kyb confident decided %s --by owner --verdict ..." % (b["id"], b["id"]))
+    b = b["check"]
+print("Decision journal, kind %s (matched by %s). Evidence for you to judge, not permission." % (b["kind"], b["matched_by"]))
+for h in b["hazards"]:
+    print("  HAZARD %s  %s - %s" % (h["id"], h["gist"], h["why"]))
+if not b["precedents"]:
+    print("  no earlier decision about this")
+for p in b["precedents"]:
+    d = p.get("decision") or {}
+    said = ("%s by %s" % (d["verdict"], d["by"])) if d else p["status"] + (" (stale)" if p.get("stale") else "")
+    if d.get("quote"):
+        said += ": \"%s\"" % d["quote"]
+    outs = ", ".join("%s (%s)" % (o["result"], o["ref"]) for o in p.get("outcomes", []))
+    print("  %.2f %s  %s  [%s, %s]%s" % (p["score"], p["asked_at"][:10], p["gist"], ",".join(p.get("target", [])) or "-",
+          said, "; outcome " + outs if outs else ""))
+for l in b["lint"]:
+    print("  NOTE " + l)
 '
     ;;
   diff)

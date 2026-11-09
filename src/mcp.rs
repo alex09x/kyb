@@ -71,13 +71,26 @@ list. Query it before \
 reasoning about infrastructure instead of guessing, and write back what you verified. \
 Writing the same key again adds a version rather than overwriting, so a superseded fact \
 stays searchable and an answer from the past is marked as one. A read answer carries a \
-`deadlines` block when a task is late or inside its reminder window: act on it, or say so.";
+`deadlines` block when a task is late or inside its reminder window: act on it, or say so. \
+IMPORTANT: before you ask the owner to decide anything, call kyb_confident_check with the \
+decision as one English line - what was decided before about the same thing comes back with its \
+outcome. When you do ask, open a record with kyb_confident_ask; when the owner answers, record it \
+with kyb_confident_decided. The precedents are evidence for you to judge, not permission.";
 
 /// Deliberately not exposed: `rm` and `reindex`. Retracting an entry and
 /// rebuilding the index should not be something an agent reaches for mid-thought,
 /// and both stay one CLI command away for a person who means it.
-const WRITE_TOOLS: [&str; 6] =
-    ["kyb_add", "kyb_incident", "kyb_resolve", "kyb_task", "kyb_task_status", "kyb_done"];
+const WRITE_TOOLS: [&str; 9] = [
+    "kyb_add",
+    "kyb_incident",
+    "kyb_resolve",
+    "kyb_task",
+    "kyb_task_status",
+    "kyb_done",
+    "kyb_confident_ask",
+    "kyb_confident_decided",
+    "kyb_confident_outcome",
+];
 
 pub struct McpState {
     /// The public API router. Tool calls are replayed through it.
@@ -643,6 +656,65 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             push(&mut query, "limit", text_arg(args, "limit"));
             Call { method: "GET", path: "/brief".into(), query, body: None }
         }
+        "kyb_confident_check" => {
+            require(args, &["gist"])?;
+            let mut query = Vec::new();
+            push(&mut query, "gist", text_arg(args, "gist"));
+            let target = list_arg(args, "target");
+            if !target.is_empty() {
+                query.push(("target", target.join(",")));
+            }
+            push(&mut query, "kind", text_arg(args, "kind"));
+            push(&mut query, "question", text_arg(args, "question"));
+            Call { method: "GET", path: "/confident/check".into(), query, body: None }
+        }
+        "kyb_confident_open" => {
+            let mut query = vec![("status", "open".to_string())];
+            push(&mut query, "workspace", text_arg(args, "workspace"));
+            Call { method: "GET", path: "/confident".into(), query, body: None }
+        }
+        "kyb_confident_ask" => {
+            require(args, &["gist"])?;
+            let mut body = json!({
+                "gist": text_arg(args, "gist"),
+                "target": list_arg(args, "target"),
+                "options": list_arg(args, "options"),
+            });
+            for k in ["kind", "situation", "proposed", "tradeoff", "checked", "unchecked", "question"] {
+                if let Some(v) = text_arg(args, k) {
+                    body[k] = json!(v);
+                }
+            }
+            Call { method: "POST", path: "/confident".into(), query: Vec::new(), body: Some(body) }
+        }
+        "kyb_confident_decided" => {
+            require(args, &["id", "by", "verdict"])?;
+            let mut body = json!({"by": text_arg(args, "by"), "verdict": text_arg(args, "verdict")});
+            for k in ["chosen", "quote", "ref"] {
+                if let Some(v) = text_arg(args, k) {
+                    body[k] = json!(v);
+                }
+            }
+            Call {
+                method: "POST",
+                path: format!("/confident/{}/decided", encode(&text_arg(args, "id").unwrap_or_default())),
+                query: Vec::new(),
+                body: Some(body),
+            }
+        }
+        "kyb_confident_outcome" => {
+            require(args, &["id", "result", "ref"])?;
+            Call {
+                method: "POST",
+                path: format!("/confident/{}/outcome", encode(&text_arg(args, "id").unwrap_or_default())),
+                query: Vec::new(),
+                body: Some(json!({
+                    "result": text_arg(args, "result"),
+                    "ref": text_arg(args, "ref"),
+                    "why": text_arg(args, "why").unwrap_or_default(),
+                })),
+            }
+        }
         "kyb_add" => {
             require(args, &["key", "title", "body"])?;
             Call {
@@ -910,6 +982,82 @@ default caps (1-50)"},
             }},
         }),
         json!({
+            "name": "kyb_confident_check",
+            "description": "Before you ask the owner to decide something - a release, a deploy, a \
+push, a deletion, a public post, a design choice - ask the decision journal what was decided \
+before about the same thing. Returns up to 3 earlier decisions from other sessions with who \
+decided, the verdict, the owner's words and the outcome; hazards (an earlier decision on the same \
+target that was corrected, reverted, rejected or never answered); and lint on your draft question. \
+IMPORTANT: call it before every question to the owner. The precedents are evidence for you to \
+judge, never permission to skip asking.",
+            "inputSchema": {"type": "object", "required": ["gist"], "properties": {
+                "gist": {"type": "string", "description": "the decision as ONE English line, at most \
+15 words: action, object, options - e.g. 'orders-api: release patch 0.3.29 vs minor 0.4.0 after a fix'"},
+                "target": {"type": "string", "description": "repositories, services or paths the step \
+touches, comma-separated"},
+                "kind": {"type": "string", "enum": crate::confident::KINDS, "description": "the \
+operation class; absent means derived from the gist"},
+                "question": {"type": "string", "description": "your draft question to the owner, any \
+language; only linted, never stored"},
+            }},
+        }),
+        json!({
+            "name": "kyb_confident_open",
+            "description": "Decision records still waiting for an answer, newest first; `stale` \
+marks the ones open for more than 48 hours. Close each with kyb_confident_decided.",
+            "inputSchema": {"type": "object", "properties": {
+                "workspace": {"type": "string", "description": "only records opened in this workspace"},
+            }},
+        }),
+        json!({
+            "name": "kyb_confident_ask",
+            "description": "Open a decision record at the moment you ask the owner to decide. Only \
+the main agent records, never a sub-agent or a background worker, and only for a question to the \
+owner or a choice he could dispute. Returns the record id (keep it for kyb_confident_decided) and \
+the same check as kyb_confident_check.",
+            "inputSchema": {"type": "object", "required": ["gist"], "properties": {
+                "gist": {"type": "string", "description": "ONE English line, at most 15 words: \
+action, object, options"},
+                "target": list_t,
+                "kind": {"type": "string", "enum": crate::confident::KINDS},
+                "situation": {"type": "string", "description": "what led to the question, briefly"},
+                "options": list_t,
+                "proposed": {"type": "string", "description": "the option you propose; must be one \
+of options"},
+                "tradeoff": {"type": "string", "description": "why the choice is not obvious"},
+                "checked": {"type": "string", "description": "what you verified before asking"},
+                "unchecked": {"type": "string", "description": "what you did not verify"},
+                "question": {"type": "string", "description": "the question as sent; linted, not stored"},
+            }},
+        }),
+        json!({
+            "name": "kyb_confident_decided",
+            "description": "Record the answer to an open decision record, right after it comes. \
+Record what the owner actually said, including 'no', 'later', 'I don't understand' or an \
+answer about something else - those are the most useful records.",
+            "inputSchema": {"type": "object", "required": ["id", "by", "verdict"], "properties": {
+                "id": {"type": "string", "description": "the id kyb_confident_ask returned"},
+                "by": {"type": "string", "enum": crate::confident::DECIDERS},
+                "verdict": {"type": "string", "enum": crate::confident::VERDICTS},
+                "chosen": {"type": "string", "description": "what was decided; may be an option \
+nobody listed"},
+                "quote": {"type": "string", "description": "the owner's words, short; leave out \
+swearing"},
+                "ref": {"type": "string", "description": "the commit, PR or tag that implements it"},
+            }},
+        }),
+        json!({
+            "name": "kyb_confident_outcome",
+            "description": "Append what came of a decision once it is known: kept, corrected, \
+reverted or dropped. A ref to the evidence is required.",
+            "inputSchema": {"type": "object", "required": ["id", "result", "ref"], "properties": {
+                "id": str_t,
+                "result": {"type": "string", "enum": crate::confident::RESULTS},
+                "ref": {"type": "string", "description": "the commit, PR, task or incident that shows it"},
+                "why": str_t,
+            }},
+        }),
+        json!({
             "name": "kyb_add",
             "description": "Write or update one entry. Same call for both: reusing a key does not \
 overwrite, it adds a version, and the old text stays searchable under history. Only verified \
@@ -1125,7 +1273,7 @@ mod mcp_tests {
         let tools = resp["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
 
-        assert_eq!(names.len(), 16, "got {names:?}");
+        assert_eq!(names.len(), 21, "got {names:?}");
         let unique: HashSet<&&str> = names.iter().collect();
         assert_eq!(unique.len(), names.len(), "duplicate tool name in {names:?}");
         for tool in tools {
@@ -1306,9 +1454,11 @@ mod mcp_tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 10, "{names:?}");
-        // the deadline listing and the brief only read, so a read-only client keeps them
+        assert_eq!(names.len(), 12, "{names:?}");
+        // the deadline listing, the brief and the decision check only read, so a
+        // read-only client keeps them
         assert!(names.contains(&"kyb_deadlines") && names.contains(&"kyb_brief"), "{names:?}");
+        assert!(names.contains(&"kyb_confident_check") && names.contains(&"kyb_confident_open"), "{names:?}");
         for write in WRITE_TOOLS {
             assert!(!names.contains(&write), "{write} must not be advertised read-only");
         }
@@ -1386,6 +1536,36 @@ mod mcp_tests {
         }
         let resp = rpc(&app, call("kyb_brief", json!({"since": "next week"}))).await;
         assert!(errored(&resp), "the route's refusal reaches the client");
+    }
+
+    #[tokio::test]
+    async fn the_decision_journal_reaches_an_mcp_client_through_the_same_routes() {
+        let (app, _d, _i, _a) = test_app();
+        let resp = rpc(&app, call("kyb_confident_ask", json!({
+            "gist": "kyb: add a session start hook for the brief", "target": "kyb",
+            "options": ["hook", "tool only"], "proposed": "hook"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let asked: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        let id = asked["id"].as_str().unwrap().to_string();
+
+        let resp = rpc(&app, call("kyb_confident_open", json!({}))).await;
+        let open: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(open["items"][0]["id"], id.as_str(), "{open}");
+
+        let resp = rpc(&app, call("kyb_confident_decided", json!({"id": id, "by": "owner",
+            "verdict": "correction", "chosen": "tool only", "quote": "no hooks for agent context"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+        let resp = rpc(&app, call("kyb_confident_outcome", json!({"id": id, "result": "reverted",
+            "ref": "PR 54"}))).await;
+        assert!(!errored(&resp), "{}", tool_body(&resp));
+
+        let resp = rpc(&app, call("kyb_confident_check", json!({
+            "gist": "kyb: add a session start hook for the digest", "target": "kyb"}))).await;
+        let check: Value = serde_json::from_str(tool_body(&resp)).unwrap();
+        assert_eq!(check["hazards"][0]["id"], id.as_str(), "{check}");
+
+        let resp = rpc(&app, call("kyb_confident_outcome", json!({"id": id, "result": "kept"}))).await;
+        assert!(errored(&resp), "an outcome without a ref is refused before it is sent");
     }
 
     #[tokio::test]

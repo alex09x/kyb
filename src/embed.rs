@@ -500,6 +500,18 @@ impl Semantic {
         scored.truncate(top);
         Ok(scored)
     }
+
+    /// One query vector, for a caller that keeps its own small set of vectors
+    /// (the decision records of confident.rs).
+    pub async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
+        self.embedder.lock().await.embed_query(text)
+    }
+
+    /// One passage vector: what a stored text is embedded as.
+    pub async fn embed_passage(&self, text: &str) -> Result<Vec<f32>> {
+        let mut v = self.embedder.lock().await.embed_passages(&[text.to_string()])?;
+        Ok(v.pop().unwrap_or_default())
+    }
 }
 
 /// Reciprocal rank fusion across two candidate lists that need not agree on

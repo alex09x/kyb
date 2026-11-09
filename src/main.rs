@@ -13,6 +13,9 @@ mod auth;
 mod brief;
 mod brief_api;
 mod config;
+mod confident;
+mod confident_api;
+mod confident_index;
 mod deadline;
 mod deadline_api;
 mod embed;
@@ -72,6 +75,10 @@ pub struct AppState {
     archived_since: std::sync::Mutex<Vec<(u64, String)>>,
     note_seq: std::sync::atomic::AtomicU64,
     pub(crate) auth: auth::Auth,
+    /// Decision records (confident.rs), all in memory with their vectors.
+    confident: confident_index::Index,
+    /// Workspace name fragments that record no decisions (KYB_CONFIDENT_DENY).
+    confident_deny: Vec<String>,
 }
 
 /// The link index with what it takes to rebuild it without re-reading history.
@@ -233,6 +240,33 @@ async fn rebuild_vectors(st: &AppState) {
     finish_vector_rebuild(st, job).await;
 }
 
+/// Decision records are read at start without vectors, so a check works in
+/// words from the first request; `embed_confident` adds the vectors after.
+fn load_confident(st: &AppState, data_dir: &std::path::Path) {
+    let recs = confident_index::Index::load_records(data_dir);
+    let n = recs.len();
+    for r in recs {
+        st.confident.put(r, None);
+    }
+    if n > 0 {
+        eprintln!("kyb: {n} decision records");
+    }
+}
+
+async fn embed_confident(st: &AppState) {
+    let Some(sem) = st.semantic.as_ref() else { return };
+    let recs = st.confident.list("", "");
+    for r in &recs {
+        match sem.embed_passage(&r.gist).await {
+            Ok(v) => st.confident.set_vector(&r.id, v),
+            Err(e) => {
+                eprintln!("kyb: decision records not embedded, checks match by words: {e:#}");
+                return;
+            }
+        }
+    }
+}
+
 fn build_state(cfg: &config::Config) -> Result<Arc<AppState>> {
     build_state_with(cfg, auth::Auth::from_env()?)
 }
@@ -276,7 +310,10 @@ fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppSta
         archived_since: std::sync::Mutex::new(Vec::new()),
         note_seq: std::sync::atomic::AtomicU64::new(0),
         auth,
+        confident: confident_index::Index::default(),
+        confident_deny: confident::deny_from_env(),
     });
+    load_confident(&st, &cfg.data_dir);
     // The one full walk over history happens here, not under the first click.
     // Search and writes do not need it, so a walk that fails is reported, not fatal:
     // versions and diffs try again on request and answer with that error.
@@ -320,6 +357,12 @@ fn api_router(state: Arc<AppState>) -> Router {
         .route("/search", get(search).layer(deadlines()))
         .route("/deadlines", get(deadline_api::list))
         .route("/brief", get(brief_api::brief))
+        .route("/confident", get(confident_api::list).post(confident_api::ask))
+        .route("/confident/check", get(confident_api::check))
+        .route("/confident/{id}", get(confident_api::get_one))
+        .route("/confident/{id}/decided", post(confident_api::decided))
+        .route("/confident/{id}/outcome", post(confident_api::outcome))
+        .route("/confident/{id}/abandon", post(confident_api::abandon))
         .route("/export", get(export::export))
         .route("/tags", get(tags))
         .route("/reindex", post(reindex))
@@ -360,6 +403,7 @@ async fn main() -> Result<()> {
     let state = build_state(&cfg)?;
     let indexed = boot.elapsed();
     rebuild_vectors(&state).await;
+    embed_confident(&state).await;
     let ready = boot.elapsed();
     let state_auth_line = state.auth.describe();
     let app = build_app(state);
@@ -1878,7 +1922,7 @@ async fn reindex(State(st): St) -> Reply {
 /// So the check has to happen on the client, before the request, against a list
 /// the server publishes. Names match the query parameters exactly; entries are
 /// only ever added, never renamed, because an older CLI matches on the string.
-const CAPABILITIES: [&str; 6] = ["as_of", "brief", "changed_between", "deadlines", "diff", "export"];
+const CAPABILITIES: [&str; 7] = ["as_of", "brief", "changed_between", "confident", "deadlines", "diff", "export"];
 
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
@@ -4141,6 +4185,7 @@ mod published_claims {
             ("as_of", "/search?q=one&as_of=2999-01-01"),
             ("brief", "/brief"),
             ("changed_between", "/search?q=one&changed_between=2000-01-01,2999-01-01"),
+            ("confident", "/confident/check?gist=release%20patch%20vs%20minor"),
             ("deadlines", "/deadlines"),
             ("diff", "/knowledge/svc/diff"),
             ("export", "/export"),

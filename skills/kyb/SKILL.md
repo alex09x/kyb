@@ -43,6 +43,12 @@ infrastructure, one call (`kyb brief`, MCP `kyb_brief`) shows the open incidents
 progress or blocked, the deadlines and the decisions retracted recently. It is context for the
 task you were given, **not a to-do list**: never start work from it on your own.
 
+**Before you ask the owner to decide anything, run `kyb confident check` — also important.**
+A release, a deploy, a push, a deletion, a public post, a design choice: one call shows what was
+decided before about the same thing, by whom and how it turned out. When you do ask, open a
+record with `kyb confident ask`, and record the answer with `kyb confident decided`. See
+[Decision journal](#decision-journal-kyb-confident).
+
 **Ask first.** Try a couple of phrasings and the tag; one query is not a search:
 ```bash
 kyb query "orders_api clickhouse"
@@ -483,6 +489,54 @@ When you read it: it is background for **your** task. Act on an item only when t
 were given concerns it; never pick work up from the brief on your own. Treat a retracted entry as
 a rejected decision, not as an idea to bring back; check an open incident before you touch the
 service it names; and do not start work that is already in progress or blocked under someone else.
+
+### Decision journal (kyb confident)
+
+Every question you ask the owner is a decision someone will face again. The journal keeps what
+was decided, by whom, in which words and how it turned out, so the next agent asks better, or
+knows the answer was already given. It learns from what you record, so **record honestly**: a
+"no", a "later", an "I don't understand" or an answer about something else is the most useful
+record there is.
+
+The **gist** is how records find each other across sessions: **one English line, at most 15
+words — action, object, options**, whatever language you talk to the owner in. Good:
+`orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix`. Bad: the whole question pasted.
+
+```bash
+# 1. before asking: what was decided before about this?
+kyb confident check "orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix" --target orders-api \
+  --question "Release 0.3.29? And roll it out to every machine?"
+# 2. when you ask: open a record (it runs the same check and returns an id)
+kyb confident ask --gist "orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix" --target orders-api \
+  --options "0.3.29|0.4.0" --proposed 0.3.29 --tradeoff "a minor signals features that are not there" \
+  --checked "tests and CI green" --unchecked "not tried on the arm build node"
+# 3. right after the answer
+kyb confident decided conf-20261108-orders-api-release-patch-0-3-29-vs-minor-0-4-0-a1b2 \
+  --by owner --verdict approve_plain --quote "ship it" --ref orders-api@v0.3.29
+# 4. later, by anyone, once the result is known (a ref is required)
+kyb confident outcome <id> --result reverted --ref "PR #61" --why "broke the x86 build"
+kyb confident open                       # records still waiting for an answer (stale after 48 h)
+```
+
+Verdicts: `approve_plain`, `approve_with_additions` (yes, and also…), `choose_option` (he picked
+one, possibly one you did not list), `defer`, `correction` (the plan or premise was wrong),
+`reject`, `confused` (he did not understand the question), `counter_question` (he asked for facts
+first), `redirect` (he answered about something else).
+
+How to read a check:
+
+- **Precedents** are earlier decisions from other sessions, best match first, with the owner's
+  words and the outcome. They are **evidence for you to judge, never permission**: decide whether
+  the earlier answer really applies, and say so when you ask ("last time you chose the patch").
+- **Hazards** are earlier decisions on the same target that were corrected, rejected, reverted,
+  dropped or never answered. Come with evidence, or do not ask the same thing the same way again.
+- **Lint** flags a question that bundles several decisions, and facts you list as unchecked:
+  check what you can yourself before you ask.
+
+Only the main agent records — never a sub-agent or a background worker — and only questions to
+the owner or choices he could dispute; ordinary work is not a decision. No secrets in any field;
+quote the owner briefly and leave out swearing. Some workspaces record nothing at all (the server
+refuses them); reading the journal still works there.
 
 ---
 
