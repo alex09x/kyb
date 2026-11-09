@@ -21,5 +21,8 @@ services:
       # Whose calendar decides "today" for a caller that does not send its own
       # date (the CLI does): an IANA zone such as America/Los_Angeles.
       TZ: "${TZ:-UTC}"
+      # Workspace names whose agents record no decisions (kyb confident),
+      # comma-separated. Set it in .env, never here: the names are private.
+      KYB_CONFIDENT_DENY: "${KYB_CONFIDENT_DENY:-}"
     volumes:
       - ./data:/data # ./data/kyb-data — git canon, ./data/index — Tantivy, ./data/auth.json — token book

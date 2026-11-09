@@ -106,6 +106,12 @@ agent on every machine, and it is reached through the `kyb` CLI.
   recently. It is context for the task you were given, not a to-do list: never start work from
   it on your own. Treat a retracted entry as a rejected decision, and check an open incident
   before touching the service it names.
+- **`kyb confident check "<the decision as one English line>"` before you ask the owner to
+  decide anything** (a release, a deploy, a push, a deletion, a public post, a design choice).
+  It shows what was decided before about the same thing and how it turned out: evidence for
+  you to judge, never permission. When you ask, open a record with `kyb confident ask`; right
+  after the answer, `kyb confident decided <id>` - record "no", "later" and "I don't
+  understand" too. Main agent only, never a sub-agent.
 - **Query it before reasoning about our infrastructure.** Do not guess about our hosts, ports,
   services or deploys — `kyb query "..."` first. One phrasing is not a search; try a couple.
 - **Write back what you learn.** Found nothing, or only a thin entry while you now understand
