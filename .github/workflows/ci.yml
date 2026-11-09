@@ -56,9 +56,16 @@ jobs:
       # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
       # Cargo CLI. No build cache is restored: every run compiles from scratch.
       - uses: alex09x/mitts@v0.3.28
+        id: mitts
+        # a failed release download (GitHub answering 504) is not a failed build:
+        # the same version is published on crates.io and installed from there
+        continue-on-error: true
         with:
           version: v0.3.28
           cache: 'false'
+      - name: Install Mitts from crates.io when the release download failed
+        if: steps.mitts.outcome == 'failure'
+        run: cargo install mitts --version 0.3.28 --locked
       - run: mitts test --locked -c
 
   # The golden-vector test skips when no model is present, which would make it a
@@ -72,9 +79,16 @@ jobs:
       # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
       # Cargo CLI. No build cache is restored: every run compiles from scratch.
       - uses: alex09x/mitts@v0.3.28
+        id: mitts
+        # a failed release download (GitHub answering 504) is not a failed build:
+        # the same version is published on crates.io and installed from there
+        continue-on-error: true
         with:
           version: v0.3.28
           cache: 'false'
+      - name: Install Mitts from crates.io when the release download failed
+        if: steps.mitts.outcome == 'failure'
+        run: cargo install mitts --version 0.3.28 --locked
       - name: Cache the embedding model
         id: model-cache
         uses: actions/cache@v4
@@ -163,9 +177,16 @@ jobs:
       # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
       # Cargo CLI. No build cache is restored: every run compiles from scratch.
       - uses: alex09x/mitts@v0.3.28
+        id: mitts
+        # a failed release download (GitHub answering 504) is not a failed build:
+        # the same version is published on crates.io and installed from there
+        continue-on-error: true
         with:
           version: v0.3.28
           cache: 'false'
+      - name: Install Mitts from crates.io when the release download failed
+        if: steps.mitts.outcome == 'failure'
+        run: cargo install mitts --version 0.3.28 --locked
       - name: Build macOS binary
         run: mitts build --release --locked
       - name: Verify Homebrew formula
@@ -239,9 +260,16 @@ jobs:
       # Builds and tests go through Mitts (https://github.com/alex09x/mitts), not the
       # Cargo CLI. No build cache is restored: every run compiles from scratch.
       - uses: alex09x/mitts@v0.3.28
+        id: mitts
+        # a failed release download (GitHub answering 504) is not a failed build:
+        # the same version is published on crates.io and installed from there
+        continue-on-error: true
         with:
           version: v0.3.28
           cache: 'false'
+      - name: Install Mitts from crates.io when the release download failed
+        if: steps.mitts.outcome == 'failure'
+        run: cargo install mitts --version 0.3.28 --locked
 
       - name: Assert Apple Silicon runner
         run: |
