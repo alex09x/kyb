@@ -159,7 +159,8 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
   sessions, hazards (the same kind of step on the same target that went wrong or was never
   answered) and lint on the draft question. Records are JSON files in the same git repository,
   matched by the same embedding model, and never ranked by ordinary search. A precedent is
-  evidence for the agent to judge, not permission.
+  evidence for the agent to judge, not permission. Every field is English, the owner's words
+  translated; the server refuses a record in another script and names the word it found.
 
 Closing archives the task; `kyb tasks` and the search keep the full record. Every write is a
 commit, so `kyb history <key>` + `kyb get <key> --at <sha>` reconstruct who held a task, in

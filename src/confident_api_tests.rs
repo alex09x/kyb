@@ -230,4 +230,29 @@ async fn bad_input_is_refused_with_a_reason() {
     body["proposed"] = json!("1.0.0");
     let (st, _) = call(r, "s1", "POST", "/confident", Some(body)).await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "proposed must be one of the options");
+
+    // every stored field is English; the owner's words arrive translated
+    let mut body = ask_body();
+    body["situation"] = json!("фикс смержен, CI зелёный");
+    let (st, v) = call(r, "s1", "POST", "/confident", Some(body)).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert!(v["error"].as_str().unwrap().contains("situation must be in English"), "{v}");
+    let (_, v) = call(r, "s1", "POST", "/confident", Some(ask_body())).await;
+    let id = v["id"].as_str().unwrap().to_string();
+    let (st, v) = call(
+        r,
+        "s1",
+        "POST",
+        &format!("/confident/{id}/decided"),
+        Some(json!({"by": "owner", "verdict": "approve_plain", "quote": "Выкатывай"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+    let (_, v) = call(r, "s1", "GET", &format!("/confident/{id}"), None).await;
+    assert_eq!(v["status"], "open", "a refused answer leaves the record as it was");
+    // the draft question is linted, never stored, so any language is fine there
+    let mut body = ask_body();
+    body["question"] = json!("Выпускаем 0.3.29?");
+    let (st, _) = call(r, "s1", "POST", "/confident", Some(body)).await;
+    assert_eq!(st, StatusCode::OK);
 }

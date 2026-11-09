@@ -111,7 +111,8 @@ agent on every machine, and it is reached through the `kyb` CLI.
   It shows what was decided before about the same thing and how it turned out: evidence for
   you to judge, never permission. When you ask, open a record with `kyb confident ask`; right
   after the answer, `kyb confident decided <id>` - record "no", "later" and "I don't
-  understand" too. Main agent only, never a sub-agent.
+  understand" too. Every field in English, the owner's words translated. Main agent only, never
+  a sub-agent.
 - **Query it before reasoning about our infrastructure.** Do not guess about our hosts, ports,
   services or deploys — `kyb query "..."` first. One phrasing is not a search; try a couple.
 - **Write back what you learn.** Found nothing, or only a thin entry while you now understand
