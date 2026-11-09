@@ -327,12 +327,18 @@ pub fn parse_time(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| t.with_timezone(&chrono::Utc))
 }
 
-/// A workspace whose name contains one of these substrings records nothing.
-/// Configured by the operator (`KYB_CONFIDENT_DENY`, comma-separated), so the
-/// list of private areas never lives in code.
+/// A workspace named in this list records nothing. Configured by the operator
+/// (`KYB_CONFIDENT_DENY`, comma-separated), so the list of private areas never
+/// lives in code. A name matches a whole path segment of the workspace, case
+/// aside: `tax` refuses `tax` and `tax/2025`, never `ridx-syntax`.
 pub fn denied(workspace: &str, deny: &[String]) -> bool {
-    let w = workspace.to_lowercase();
-    !w.is_empty() && deny.iter().any(|d| !d.is_empty() && w.contains(&d.to_lowercase()))
+    let w = workspace.trim().to_lowercase();
+    if w.is_empty() {
+        return false;
+    }
+    w.split('/').map(str::trim).any(|seg| {
+        deny.iter().map(|d| d.trim().to_lowercase()).any(|d| !d.is_empty() && seg == d)
+    })
 }
 
 pub fn deny_from_env() -> Vec<String> {

@@ -77,7 +77,7 @@ pub struct AppState {
     pub(crate) auth: auth::Auth,
     /// Decision records (confident.rs), all in memory with their vectors.
     confident: confident_index::Index,
-    /// Workspace name fragments that record no decisions (KYB_CONFIDENT_DENY).
+    /// Workspace names that record no decisions (KYB_CONFIDENT_DENY).
     confident_deny: Vec<String>,
 }
 
