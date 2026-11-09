@@ -97,6 +97,27 @@ fn a_record_is_validated_field_by_field() {
 }
 
 #[test]
+fn every_field_of_a_record_is_english() {
+    let mut r = rec("conf-20261108-x-0a0b", "release patch vs minor", "release_version", &[], "s", 0);
+    r.decision = Some(Decision {
+        by: "owner".into(),
+        verdict: "approve_plain".into(),
+        quote: "Ну ты релиз выкатил. Выкатывай.".into(),
+        ..Default::default()
+    });
+    let err = r.validate().unwrap_err().to_string();
+    assert!(err.contains("quote must be in English") && err.contains("Ну"), "{err}");
+
+    r.decision.as_mut().unwrap().quote = "You shipped the fix, release it.".into();
+    r.situation = "Мы ничего не меняли".into();
+    assert!(r.validate().is_err(), "situation too");
+    r.situation = "a fix for Müller's café export, 100% green".into();
+    assert!(r.validate().is_ok(), "Latin letters with accents, digits and symbols are fine");
+    assert_eq!(non_english("ok — всё"), Some("всё".into()));
+    assert_eq!(non_english("deploy 0.3.4 → fleet ✓"), None);
+}
+
+#[test]
 fn ids_are_valid_keys_with_the_prefix() {
     let id = new_id("mitts: release patch 0.3.29 vs minor 0.4.0", Utc::now());
     assert!(id.starts_with(PREFIX), "{id}");

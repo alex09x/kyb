@@ -498,9 +498,15 @@ knows the answer was already given. It learns from what you record, so **record 
 "no", a "later", an "I don't understand" or an answer about something else is the most useful
 record there is.
 
-The **gist** is how records find each other across sessions: **one English line, at most 15
-words — action, object, options**, whatever language you talk to the owner in. Good:
-`orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix`. Bad: the whole question pasted.
+**Every field is written in English**, whatever language you talk to the owner in: the gist,
+the situation, the options, the trade-off, what you checked, and the owner's own words, which you
+translate faithfully and keep short. The journal stays in one language so that it can be searched
+and analysed as a whole. The server refuses a record with Cyrillic or any other non-Latin script
+and names the word it found.
+
+The **gist** is how records find each other across sessions: **one line, at most 15 words:
+action, object, options**. Good: `orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix`.
+Bad: the whole question pasted.
 
 ```bash
 # 1. before asking: what was decided before about this?
@@ -535,7 +541,7 @@ How to read a check:
 
 Only the main agent records — never a sub-agent or a background worker — and only questions to
 the owner or choices he could dispute; ordinary work is not a decision. No secrets in any field;
-quote the owner briefly and leave out swearing.
+quote the owner briefly, in English, and leave out swearing.
 
 ---
 

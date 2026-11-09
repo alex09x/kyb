@@ -173,6 +173,12 @@ impl Record {
             if let Some(hit) = find_secret(text) {
                 bail!("{name} looks like a secret ({hit}…) — store secrets as pointers, never in a record");
             }
+            if let Some(word) = non_english(text) {
+                bail!(
+                    "{name} must be in English (found '{word}'): the journal is kept in one language so it \
+                     can be searched and analysed as a whole; translate the owner's words, keep their meaning"
+                );
+            }
         }
         if let Some(d) = &self.decision {
             if !DECIDERS.contains(&d.by.as_str()) {
@@ -217,6 +223,18 @@ impl Record {
         }
         out
     }
+}
+
+/// The first word written in a script other than Latin, if any. Latin letters
+/// with accents (a name like `Müller`, a word like `café`) pass; Cyrillic, Greek,
+/// CJK and the rest do not. Digits, punctuation and symbols never count.
+pub fn non_english(text: &str) -> Option<String> {
+    let latin = |c: char| {
+        c.is_ascii() || ('\u{00C0}'..='\u{024F}').contains(&c) || ('\u{1E00}'..='\u{1EFF}').contains(&c)
+    };
+    text.split_whitespace()
+        .find(|w| w.chars().any(|c| c.is_alphabetic() && !latin(c)))
+        .map(|w| w.chars().take(24).collect())
 }
 
 /// The gist is what gets matched, and matching works when every record states

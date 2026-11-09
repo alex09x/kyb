@@ -1011,7 +1011,9 @@ marks the ones open for more than 48 hours. Close each with kyb_confident_decide
         }),
         json!({
             "name": "kyb_confident_ask",
-            "description": "Open a decision record at the moment you ask the owner to decide. Only \
+            "description": "Open a decision record at the moment you ask the owner to decide. Every \
+field is written in English, whatever language you talk to the owner in; the server refuses \
+other scripts. Only \
 the main agent records, never a sub-agent or a background worker, and only for a question to the \
 owner or a choice he could dispute. Returns the record id (keep it for kyb_confident_decided) and \
 the same check as kyb_confident_check.",
@@ -1041,8 +1043,8 @@ answer about something else - those are the most useful records.",
                 "verdict": {"type": "string", "enum": crate::confident::VERDICTS},
                 "chosen": {"type": "string", "description": "what was decided; may be an option \
 nobody listed"},
-                "quote": {"type": "string", "description": "the owner's words, short; leave out \
-swearing"},
+                "quote": {"type": "string", "description": "the owner's words translated into \
+English, short, meaning kept; leave out swearing"},
                 "ref": {"type": "string", "description": "the commit, PR or tag that implements it"},
             }},
         }),

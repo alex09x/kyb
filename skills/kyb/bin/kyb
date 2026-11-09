@@ -460,14 +460,14 @@ tasks and ideas (key must start with task-, e.g. task-raise-log-retention):
   kyb done <key> [--status dropped] [--resolution "what came of it"]
            (no --resolution: the closing comment is read from stdin)
 
-decision journal (call check before every question to the owner; the gist is ONE English line):
+decision journal (call check before every question to the owner; every field in English, the gist ONE line):
   kyb confident check "<gist>" [--target a,b] [--kind K] [--question "draft"] [--json]
            (earlier decisions about the same thing, hazards, lint on the question)
   kyb confident ask --gist "<gist>" [--target a,b] [--situation S] [--options "a|b"] [--proposed a]
            [--tradeoff T] [--checked C] [--unchecked U] [--question "as sent"]   (opens a record)
   kyb confident decided <id> --by owner|agent|review --verdict approve_plain|approve_with_additions|
            choose_option|defer|correction|reject|confused|counter_question|redirect
-           [--chosen X] [--quote "owner's words"] [--ref commit|PR|tag]
+           [--chosen X] [--quote "owner's words, in English"] [--ref commit|PR|tag]
   kyb confident outcome <id> --result kept|corrected|reverted|dropped --ref <evidence> [--why W]
   kyb confident abandon <id> [--why W]           (a question nobody answered)
   kyb confident open [--workspace W] [--all]     (records still waiting for an answer)
