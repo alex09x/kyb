@@ -325,6 +325,21 @@ impl Store {
         Ok(if existing.is_some() { UpsertOutcome::Updated(c) } else { UpsertOutcome::Created(c) })
     }
 
+    /// Write and commit a file that is not an entry (a decision record of
+    /// confident.rs). It goes through the same git history, so every change to
+    /// it is a version. Paths outside a plain `<dir>/<name>` are refused.
+    pub fn write_file(&self, rel: &str, contents: &str, msg: &str) -> Result<(String, i64)> {
+        let ok = rel.split('/').count() == 2
+            && !rel.contains("..")
+            && !KIND_DIRS.contains(&rel.split('/').next().unwrap_or(""))
+            && !rel.ends_with(".md");
+        anyhow::ensure!(ok, "refusing to write '{rel}': not a plain <dir>/<file> outside the entry folders");
+        let abs = self.root.join(rel);
+        fs::create_dir_all(abs.parent().expect("rel has a dir"))?;
+        fs::write(&abs, contents)?;
+        self.commit_path(rel, msg, false)
+    }
+
     fn remove_file(&self, key: &str, msg: &str) -> Result<Option<String>> {
         let Some(rel) = self.existing_rel(key) else {
             return Ok(None);
