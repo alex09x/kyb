@@ -77,8 +77,6 @@ pub struct AppState {
     pub(crate) auth: auth::Auth,
     /// Decision records (confident.rs), all in memory with their vectors.
     confident: confident_index::Index,
-    /// Workspace names that record no decisions (KYB_CONFIDENT_DENY).
-    confident_deny: Vec<String>,
 }
 
 /// The link index with what it takes to rebuild it without re-reading history.
@@ -311,7 +309,6 @@ fn build_state_with(cfg: &config::Config, auth: auth::Auth) -> Result<Arc<AppSta
         note_seq: std::sync::atomic::AtomicU64::new(0),
         auth,
         confident: confident_index::Index::default(),
-        confident_deny: confident::deny_from_env(),
     });
     load_confident(&st, &cfg.data_dir);
     // The one full walk over history happens here, not under the first click.

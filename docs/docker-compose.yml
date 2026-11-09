@@ -38,6 +38,5 @@ services:
       KYB_AUTH_FILE: /data/auth.json
       KYB_ANON: "${KYB_ANON:-}"
       TZ: "${TZ:-UTC}"
-      KYB_CONFIDENT_DENY: "${KYB_CONFIDENT_DENY:-}"
     volumes:
       - ./data:/data

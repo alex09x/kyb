@@ -159,8 +159,7 @@ the same close-with-an-outcome discipline and none of the incident ceremony.
   sessions, hazards (the same kind of step on the same target that went wrong or was never
   answered) and lint on the draft question. Records are JSON files in the same git repository,
   matched by the same embedding model, and never ranked by ordinary search. A precedent is
-  evidence for the agent to judge, not permission. `KYB_CONFIDENT_DENY` lists workspace names
-  that record nothing (a whole name or path segment; `tax` never matches `syntax`).
+  evidence for the agent to judge, not permission.
 
 Closing archives the task; `kyb tasks` and the search keep the full record. Every write is a
 commit, so `kyb history <key>` + `kyb get <key> --at <sha>` reconstruct who held a task, in
@@ -493,7 +492,7 @@ from `src/web/css` and `src/web/js` at compile time and driven end to end by a b
 | `GET` | `/deadlines` | `?within=<days>&overdue=true&hard=true&tag=&assignee=` → `{today, count, deadlines:[{key, title, status, due, days_left, overdue, hard?, provisional?, waits_on?, bucket}]}` — every live task with a date, soonest first, `bucket` `overdue\|this_week\|later`. "Today" is the `X-KYB-Today: YYYY-MM-DD` header, or the server's date in its `TZ` |
 | `GET` | `/brief` | `?tag=&service=&since=7d&limit=` → `{today, since, deadlines, incidents, work, retracted, changed}`, each section `{count, more, items}` of pointers (key, title, one fact; never a body). Incidents `open`/`mitigated` by severity; work `in_progress`, `blocked` and high/critical `open` tasks; retracted and changed knowledge within `since` (`7d`, `24h`, a date or an RFC3339 time), newest first, with `by`. `limit` (1-50) replaces the caps 5/5/7/5/5; `service` matches an incident's service or a tag |
 | `GET` | `/confident/check` | `?gist=&target=&kind=&question=` → `{kind, matched_by, precedents, hazards, lint}`. `gist` is one English line; `kind` is derived from it when absent; records from the caller's own session younger than an hour are left out |
-| `POST` | `/confident` | `{gist, target?, kind?, situation?, options?, proposed?, tradeoff?, checked?, unchecked?, question?}` → `{id, sha, check}` — opens a decision record; refused for a workspace in `KYB_CONFIDENT_DENY` |
+| `POST` | `/confident` | `{gist, target?, kind?, situation?, options?, proposed?, tradeoff?, checked?, unchecked?, question?}` → `{id, sha, check}` — opens a decision record |
 | `POST` | `/confident/{id}/decided` | `{by: owner\|agent\|review, verdict, chosen?, quote?, ref?}`; a retry of the same answer commits nothing (`changed: false`) |
 | `POST` | `/confident/{id}/outcome` | `{result: kept\|corrected\|reverted\|dropped, ref, why?}` — appended; `ref` is required |
 | `POST` | `/confident/{id}/abandon` | `{why?}` — an open question nobody answered |
