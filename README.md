@@ -209,7 +209,7 @@ brew install alex09x/apps/kyb && brew services start kyb
 
 # Docker: the server only, with the embedding model baked in (linux/amd64, linux/arm64)
 mkdir kyb && cd kyb && curl -fsSLO https://kybmemory.com/docker-compose.yml
-KYB_VERSION=v0.3.3 KYB_UID=$(id -u) KYB_GID=$(id -g) docker compose up -d
+KYB_VERSION=v0.3.4 KYB_UID=$(id -u) KYB_GID=$(id -g) docker compose up -d
 
 # crates.io: the kyb-server binary only, lexical search until KYB_MODEL is set
 cargo install knowyourbusiness --locked && kyb-server

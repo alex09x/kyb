@@ -13,7 +13,7 @@
 # (./data/auth.json) and the request log. Back up ./data, nothing else.
 #
 # Settings come from the environment or from a .env file beside this file:
-#   KYB_VERSION       image tag, e.g. v0.3.3 (default: latest)
+#   KYB_VERSION       image tag, e.g. v0.3.4 (default: latest)
 #   KYB_UID, KYB_GID  the host user that owns ./data (default 1000:1000; set them
 #                     to `id -u` and `id -g`, or the canon ends up unreadable).
 #                     Rootless Docker: 0 and 0, which is the host user there.

@@ -23,7 +23,7 @@
 #                                      native = macOS release archive under launchd, no Homebrew;
 #                                      client = only the CLI and skill, for a server elsewhere
 #   KYB_SERVER=your-server             where the CLI points (client mode; default this machine)
-#   KYB_VERSION=v0.3.3                 release to install (default: the latest release)
+#   KYB_VERSION=v0.3.4                 release to install (default: the latest release)
 #   KYB_DIR=~/kyb                      Docker and native: where the data (and compose files) live
 #   KYB_PORT=9310                      Docker and native: port on 127.0.0.1
 #   KYB_DRY_RUN=1                      print the plan and change nothing
