@@ -122,12 +122,12 @@ fn negative_and_stale_are_read_from_the_record() {
 
 #[test]
 fn denied_workspaces_match_a_whole_name() {
-    let deny = vec!["tax".to_string(), " Legal_Vault ".to_string()];
+    let deny = vec!["tax".to_string(), " Private_Notes ".to_string()];
     assert!(denied("tax", &deny));
     assert!(denied("TAX/2025", &deny), "a subdirectory of a denied workspace is denied");
-    assert!(denied("legal_vault", &deny));
+    assert!(denied("private_notes", &deny));
     assert!(!denied("ridx-syntax", &deny), "a name that merely contains a denied one is not refused");
-    assert!(!denied("legal_vault-notes", &deny));
+    assert!(!denied("private_notes-old", &deny));
     assert!(!denied("infra", &deny));
     assert!(!denied("", &deny), "an unnamed workspace is not refused by name");
     assert!(!denied("anything", &[]));
