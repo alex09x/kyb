@@ -563,21 +563,21 @@ the Cargo CLI is not used. CI builds the image and smoke-tests that the containe
 
 ## Citation
 
-For academic or archival reference, cite the published v0.3.3 release:
+For academic or archival reference, cite the published v0.3.4 release:
 
 ```bibtex
 @misc{panasenko2026kyb,
-  doi = {10.5281/zenodo.23683977},
-  url = {https://zenodo.org/records/23683977},
+  doi = {10.5281/zenodo.24095013},
+  url = {https://zenodo.org/records/24095013},
   author = {Panasenko, Alexander},
   title = {KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents},
-  version = {0.3.3},
+  version = {0.3.4},
   publisher = {Zenodo},
   year = {2026}
 }
 ```
 
-- Alexander Panasenko. *KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents* (v0.3.3). Zenodo. https://doi.org/10.5281/zenodo.23683977 ([concept DOI: 10.5281/zenodo.22850723](https://doi.org/10.5281/zenodo.22850723))
+- Alexander Panasenko. *KYB (Know Your Business): Git-backed knowledge base and incident tracker for AI agents* (v0.3.4). Zenodo. https://doi.org/10.5281/zenodo.24095013 ([concept DOI: 10.5281/zenodo.22850723](https://doi.org/10.5281/zenodo.22850723))
 
 Slides: [*KYB: Shared Operational Memory for AI Agents*](https://zenodo.org/records/23911562) (12 slides, PDF, Zenodo).
 
