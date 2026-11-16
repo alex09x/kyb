@@ -67,8 +67,8 @@ curl -sf -H "x-kyb-today: 2026-03-10" "$KYB_URL/brief" > "$work/http.json"
 python3 - "$work/cli.json" "$work/http.json" <<'PY' || fail "--json differs from GET /brief"
 import json, sys
 a, b = (json.load(open(p)) for p in sys.argv[1:])
-assert sorted(a) == sorted(b) == ["changed", "deadlines", "incidents", "retracted", "since", "today", "work"], (a, b)
-for s in ("deadlines", "incidents", "work", "retracted", "changed"):
+assert sorted(a) == sorted(b) == ["changed", "deadlines", "incidents", "lessons", "retracted", "since", "today", "work"], (a, b)
+for s in ("deadlines", "incidents", "work", "retracted", "changed", "lessons"):
     assert a[s]["count"] == b[s]["count"] and [i["key"] for i in a[s]["items"]] == [i["key"] for i in b[s]["items"]], s
 PY
 
@@ -86,5 +86,19 @@ grep -q "since" "$work/err.txt" || fail "--since: the refusal does not say why: 
 "$cli" resolve inc-2026-03-01-svc03 --resolution "restarted" >/dev/null
 "$cli" brief --service svc03 > "$work/svc.txt"
 ! grep -q "OPEN INCIDENTS" "$work/svc.txt" || fail "a resolved incident is still in the brief"
+
+# the owner's lessons: in every brief of their scope, whatever it is narrowed to
+echo "The owner asked for this on 2026-03-01." | "$cli" confident learn --key lesson-e2e-everywhere \
+  --title "Ask before any production deploy" --scope all >/dev/null || fail "confident learn --scope all"
+echo "Only from the release job." | "$cli" confident learn --key lesson-e2e-elsewhere \
+  --title "Run migrations from the release job" --scope other-project >/dev/null || fail "confident learn"
+"$cli" confident learn --key e2e-no-prefix --title x --scope all </dev/null 2>/dev/null && fail "a lesson key without lesson- was accepted"
+"$cli" brief --service svc01 > "$work/lessons.txt"
+grep -qF "LESSONS FROM THE OWNER (1)" "$work/lessons.txt" || fail "lessons: $(cat "$work/lessons.txt")"
+grep -qF "lesson-e2e-everywhere" "$work/lessons.txt" || fail "the lesson for all is missing"
+! grep -q "lesson-e2e-elsewhere" "$work/lessons.txt" || fail "another project's lesson leaked in"
+KYB_WORKSPACE=/some/path/other-project "$cli" confident lessons > "$work/other.txt"
+grep -qF "2 lessons from the owner" "$work/other.txt" || fail "lessons of other-project: $(cat "$work/other.txt")"
+"$cli" confident lessons --all | grep -qF "2 lessons from the owner" || fail "confident lessons --all"
 
 echo "kyb brief CLI tests passed"
