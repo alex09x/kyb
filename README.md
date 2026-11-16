@@ -47,7 +47,8 @@ reports**: what broke, the impact, how to live with it, and how it ended.
 ## How it works
 
 - **Git is the canon — there is no database.** One markdown file (YAML frontmatter + body)
-  per entry — under `knowledge/`, `incidents/` or `tasks/` by kind — one commit per change,
+  per entry — under `knowledge/`, `incidents/` or `tasks/` by kind, the owner's lessons under
+  `confident/lessons/` — one commit per change,
   **a commit sha is a version id**. History, diff and rollback come for free; the canon can
   be read and edited with any text editor. (Flat pre-v2 canons migrate themselves on start.)
 - **The tree holds only what is live.** Closing an incident or a task *archives* it: the
