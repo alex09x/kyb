@@ -73,6 +73,8 @@ const LESSONS_IN_CHECK: usize = 3;
 /// How close in meaning a lesson must be to the step to be shown (e5 cosine;
 /// the same bar as a precedent, since e5 rates unrelated English near 0.8).
 const LESSON_SIMILARITY: f32 = 0.85;
+/// How many of the closest entries are looked through for lessons.
+const LESSON_WINDOW: usize = 150;
 
 /// What the owner taught about work like this step: the lessons closest in
 /// meaning, then the ones sharing its words. A lesson is standing guidance, so
@@ -82,11 +84,16 @@ async fn related_lessons(st: &AppState, gist: &str) -> Vec<Value> {
         |h: &crate::index::Hit| h.tags.iter().any(|t| t.eq_ignore_ascii_case(crate::brief::LESSON_TAG));
     let mut found: Vec<crate::index::Hit> = Vec::new();
     if let Some(sem) = st.semantic.as_ref() {
-        match sem.search(gist, 40).await {
+        // The similarity is computed over the whole base anyway; a wide window only
+        // keeps runbooks and service notes on a common topic from crowding a lesson out.
+        match sem.search(gist, LESSON_WINDOW).await {
             Ok(scored) => {
                 for (key, _) in scored.into_iter().filter(|(_, s)| *s >= LESSON_SIMILARITY) {
+                    if found.len() >= LESSONS_IN_CHECK {
+                        break;
+                    }
                     if let Ok(Some(h)) = st.index.get_live(&key) {
-                        if is_lesson(&h) && found.len() < LESSONS_IN_CHECK {
+                        if is_lesson(&h) {
                             found.push(h);
                         }
                     }
