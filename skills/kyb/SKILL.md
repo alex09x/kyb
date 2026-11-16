@@ -19,7 +19,7 @@ or `~/.config/kyb/host` (written by the installer) and acts only as an HTTP clie
 server is unavailable it reports the address and stops; it never opens SSH or attempts remote
 repair. Every response is JSON. **If your client already lists `kyb_*` tools, use those** — they
 are the same service over MCP, and this manual still describes what each one means. The canon is a git repo on the server: one md file per entry
-(`knowledge/`, `incidents/`, `tasks/` by kind), one commit per change, **commit sha = version
+(`knowledge/`, `incidents/`, `tasks/` by kind; lessons in `confident/lessons/`), one commit per change, **commit sha = version
 id** — nothing is ever lost.
 
 ---

@@ -12,12 +12,24 @@ use std::path::{Path, PathBuf};
 /// Layout v2: one directory per kind — `knowledge/`, `incidents/`, `tasks/` —
 /// and the working tree holds only what is live (open incidents/tasks,
 /// current knowledge). Closed entries are archived: the file is removed, the
-/// content stays in git history and in the search index.
+/// content stays in git history and in the search index. The owner's lessons
+/// are knowledge too, kept apart in `confident/lessons/` next to the decision
+/// records.
 pub struct Store {
     root: PathBuf,
 }
 
 const KIND_DIRS: [&str; 3] = ["knowledge", "incidents", "tasks"];
+
+/// Where a knowledge entry tagged `lesson` lives. Which folder holds an entry
+/// follows its tags, so tagging an old entry a lesson moves it here and
+/// dropping the tag moves it back - in one commit, never a retraction.
+const LESSONS_DIR: &str = "confident/lessons";
+
+fn is_lesson(entry: &Entry) -> bool {
+    entry.kind == KIND_KNOWLEDGE
+        && entry.tags.iter().any(|t| t.eq_ignore_ascii_case(crate::brief::LESSON_TAG))
+}
 
 fn dir_for_key(key: &str) -> &'static str {
     if key.starts_with(INCIDENT_PREFIX) {
@@ -98,11 +110,12 @@ impl HistoryIndex {
     }
 }
 
-/// The key a repository path belongs to: `<kind>/<key>.md` in the current
-/// layout, `<key>.md` in the pre-migration one. Any other file is not an entry.
+/// The key a repository path belongs to: `<kind>/<key>.md` or
+/// `confident/lessons/<key>.md` in the current layout, `<key>.md` in the
+/// pre-migration one. Any other file is not an entry.
 fn key_of_path(path: &str) -> Option<String> {
     let key = path.rsplit('/').next()?.strip_suffix(".md")?;
-    if path == Store::file_rel(key) || path == Store::legacy_rel(key) {
+    if Store::candidate_rels(key).iter().any(|rel| rel == path) {
         Some(key.to_string())
     } else {
         None
@@ -123,6 +136,7 @@ impl Store {
         }
         let store = Store { root: root.to_path_buf() };
         store.migrate_layout()?;
+        store.migrate_lessons()?;
         Ok(store)
     }
 
@@ -147,10 +161,31 @@ impl Store {
         format!("{key}.md")
     }
 
+    fn lesson_rel(key: &str) -> String {
+        format!("{LESSONS_DIR}/{key}.md")
+    }
+
+    /// Where this entry is written: its kind's folder, or the lessons folder.
+    fn entry_rel(entry: &Entry) -> String {
+        if is_lesson(entry) {
+            Self::lesson_rel(&entry.key)
+        } else {
+            Self::file_rel(&entry.key)
+        }
+    }
+
+    /// Every path a key's file has had or can have, newest layout first.
+    fn candidate_rels(key: &str) -> Vec<String> {
+        let mut rels = vec![Self::file_rel(key)];
+        if dir_for_key(key) == "knowledge" {
+            rels.push(Self::lesson_rel(key));
+        }
+        rels.push(Self::legacy_rel(key));
+        rels
+    }
+
     fn existing_rel(&self, key: &str) -> Option<String> {
-        [Self::file_rel(key), Self::legacy_rel(key)]
-            .into_iter()
-            .find(|rel| self.root.join(rel).is_file())
+        Self::candidate_rels(key).into_iter().find(|rel| self.root.join(rel).is_file())
     }
 
     /// One-time move from the flat layout to per-kind directories, done by the
@@ -209,6 +244,55 @@ impl Store {
         Ok(())
     }
 
+    /// Lessons written before they had a folder of their own move to
+    /// `confident/lessons/` on start, in one commit: a move, not a new version
+    /// and not a retraction. A lesson tag removed by hand moves the file back.
+    fn migrate_lessons(&self) -> Result<()> {
+        let mut moves: Vec<(String, String)> = vec![];
+        for dir in ["knowledge", LESSONS_DIR] {
+            let Ok(rd) = fs::read_dir(self.root.join(dir)) else { continue };
+            for f in rd {
+                let p = f?.path();
+                if !p.is_file() || p.extension().and_then(|x| x.to_str()) != Some("md") {
+                    continue;
+                }
+                let Ok(s) = fs::read_to_string(&p) else { continue };
+                let Ok(entry) = Entry::from_markdown(&s) else { continue };
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                let old_rel = format!("{dir}/{name}");
+                if name != Self::legacy_rel(&entry.key) || dir_for_key(&entry.key) != "knowledge" {
+                    continue;
+                }
+                let new_rel = Self::entry_rel(&entry);
+                if new_rel != old_rel {
+                    moves.push((old_rel, new_rel));
+                }
+            }
+        }
+        if moves.is_empty() {
+            return Ok(());
+        }
+        let repo = self.repo()?;
+        let mut idx = repo.index()?;
+        for (old_rel, new_rel) in &moves {
+            self.move_in_index(&mut idx, old_rel, new_rel)?;
+        }
+        self.commit_index(&repo, &mut idx, &format!("kyb: move {} lessons to {LESSONS_DIR}", moves.len()))?;
+        eprintln!("kyb: moved {} entries between knowledge/ and {LESSONS_DIR}/", moves.len());
+        Ok(())
+    }
+
+    fn move_in_index(&self, idx: &mut git2::Index, old_rel: &str, new_rel: &str) -> Result<()> {
+        let new_abs = self.root.join(new_rel);
+        fs::create_dir_all(new_abs.parent().expect("an entry folder has a parent"))?;
+        fs::rename(self.root.join(old_rel), &new_abs)?;
+        if idx.get_path(Path::new(old_rel), 0).is_some() {
+            idx.remove_path(Path::new(old_rel))?;
+        }
+        idx.add_path(Path::new(new_rel))?;
+        Ok(())
+    }
+
     fn commit_index(&self, repo: &Repository, idx: &mut git2::Index, msg: &str) -> Result<(String, i64)> {
         idx.write()?;
         let tree = repo.find_tree(idx.write_tree()?)?;
@@ -244,7 +328,7 @@ impl Store {
         };
         let tree = commit.tree()?;
         // pre-migration commits hold the file at the legacy flat path
-        for rel in [Self::file_rel(key), Self::legacy_rel(key)] {
+        for rel in Self::candidate_rels(key) {
             let Ok(te) = tree.get_path(Path::new(&rel)) else { continue };
             let blob = te.to_object(&repo)?.peel_to_blob()?;
             let s = std::str::from_utf8(blob.content()).context("file is not utf-8")?;
@@ -315,12 +399,26 @@ impl Store {
             }
         }
         entry.updated_at = today.to_string();
-        let rel = Self::file_rel(&entry.key);
+        let rel = Self::entry_rel(&entry);
         let abs = self.root.join(&rel);
         fs::create_dir_all(abs.parent().expect("kind dir has a parent"))?;
-        fs::write(&abs, entry.to_markdown())?;
-        let (sha, committed_at) =
-            self.commit_path(&rel, &format!("kyb: upsert {}", entry.key), false)?;
+        let msg = format!("kyb: upsert {}", entry.key);
+        // a lesson tag added or removed moves the file in the same commit
+        let moved_from = self.existing_rel(&entry.key).filter(|old| *old != rel);
+        let (sha, committed_at) = match moved_from {
+            None => {
+                fs::write(&abs, entry.to_markdown())?;
+                self.commit_path(&rel, &msg, false)?
+            }
+            Some(old) => {
+                let repo = self.repo()?;
+                let mut idx = repo.index()?;
+                self.move_in_index(&mut idx, &old, &rel)?;
+                fs::write(&abs, entry.to_markdown())?;
+                idx.add_path(Path::new(&rel))?;
+                self.commit_index(&repo, &mut idx, &msg)?
+            }
+        };
         let c = Committed { sha, committed_at, entry };
         Ok(if existing.is_some() { UpsertOutcome::Updated(c) } else { UpsertOutcome::Created(c) })
     }
@@ -364,7 +462,7 @@ impl Store {
     pub fn list_head(&self) -> Result<Vec<Entry>> {
         let mut out = vec![];
         let mut dirs = vec![self.root.clone()];
-        for d in KIND_DIRS {
+        for d in KIND_DIRS.into_iter().chain([LESSONS_DIR]) {
             let p = self.root.join(d);
             if p.is_dir() {
                 dirs.push(p);
@@ -400,7 +498,7 @@ impl Store {
             let oid = oid?;
             let commit = repo.find_commit(oid)?;
             let tree = commit.tree()?;
-            for rel in [Self::file_rel(key), Self::legacy_rel(key)] {
+            for rel in Self::candidate_rels(key) {
                 let Ok(te) = tree.get_path(Path::new(&rel)) else { continue };
                 let blob = te.to_object(&repo)?.peel_to_blob()?;
                 let Ok(s) = std::str::from_utf8(blob.content()) else { continue };
@@ -581,7 +679,7 @@ impl Store {
                 Err(_) => None,
             };
             let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
-            let mut changes: Vec<(String, &str)> = vec![];
+            let mut changes: Vec<(String, &str, git2::Oid)> = vec![];
             for d in diff.deltas() {
                 let change = match d.status() {
                     Delta::Added => "added",
@@ -592,27 +690,36 @@ impl Store {
                 let file = if change == "deleted" { d.old_file() } else { d.new_file() };
                 let Some(path) = file.path().and_then(|p| p.to_str()) else { continue };
                 if let Some(key) = key_of_path(path) {
-                    changes.push((key, change));
+                    changes.push((key, change, file.id()));
                 }
             }
-            // a key both added and deleted in one commit moved between layouts: not a change to it
-            let moved: HashSet<&str> = changes
-                .iter()
-                .filter(|(k, c)| *c == "added" && changes.iter().any(|(k2, c2)| k2 == k && *c2 == "deleted"))
-                .map(|(k, _)| k.as_str())
-                .collect();
+            // A key both added and deleted in one commit moved between folders.
+            // The same blob is a pure move, not a change to it; a different one
+            // (a lesson tag added as it moved) is one modification.
+            let mut moved: HashMap<String, bool> = HashMap::new();
+            for (k, c, id) in &changes {
+                if *c != "added" {
+                    continue;
+                }
+                if let Some((_, _, old)) = changes.iter().find(|(k2, c2, _)| k2 == k && *c2 == "deleted") {
+                    moved.insert(k.clone(), old == id);
+                }
+            }
             let who = commit.author();
             let author = crate::auth::shown_author(who.name().unwrap_or_default(), who.email().unwrap_or_default());
             let by = crate::auth::By::from_message(commit.message().unwrap_or_default());
-            for (key, change) in &changes {
-                if moved.contains(key.as_str()) {
-                    continue;
-                }
+            for (key, change, _) in &changes {
+                let change: &str = match moved.get(key) {
+                    None => change,
+                    Some(true) => continue,
+                    Some(false) if *change == "deleted" => continue,
+                    Some(false) => "modified",
+                };
                 fresh.entry(key.clone()).or_default().push(VersionInfo {
                     sha: oid.to_string(),
                     committed_at: iso(commit.time().seconds()),
                     message: commit.summary().unwrap_or("").to_string(),
-                    change: (*change).into(),
+                    change: change.into(),
                     author: Some(author.clone()),
                     by: by.clone(),
                 });
@@ -659,15 +766,19 @@ impl Store {
             let mut files = vec![];
             let mut detected_key = None;
             let mut action = "updated".to_string();
+            let (mut added, mut deleted) = (HashSet::new(), HashSet::new());
             for d in diff.deltas() {
                 if let Some(path) = d.new_file().path().and_then(|p| p.to_str()) {
                     files.push(path.to_string());
-                    if detected_key.is_none() {
-                        if let Some(filename) = path.rsplit('/').next() {
-                            if let Some(k) = filename.strip_suffix(".md") {
-                                detected_key = Some(k.to_string());
-                            }
+                    if let Some(k) = path.rsplit('/').next().and_then(|f| f.strip_suffix(".md")) {
+                        if detected_key.is_none() {
+                            detected_key = Some(k.to_string());
                         }
+                        match d.status() {
+                            Delta::Added => added.insert(k.to_string()),
+                            Delta::Deleted => deleted.insert(k.to_string()),
+                            _ => false,
+                        };
                     }
                 }
                 match d.status() {
@@ -676,8 +787,16 @@ impl Store {
                     _ => {}
                 }
             }
+            // a file moved between folders (a lesson tag added or dropped) is an edit
+            if added.intersection(&deleted).next().is_some() {
+                action = "updated".to_string();
+            }
             let msg = commit.summary().unwrap_or("").trim().to_string();
-            if msg.contains("resolve") {
+            // the service reorganising its own folders is about no single entry
+            if msg.starts_with("kyb: move ") || msg.starts_with("kyb: migrate ") {
+                detected_key = None;
+                action = "transitioned".to_string();
+            } else if msg.contains("resolve") {
                 action = "resolved".to_string();
             } else if msg.contains("delete") {
                 action = "retracted".to_string();
@@ -824,6 +943,79 @@ mod tests {
             body: body.into(),
             ..Default::default()
         }
+    }
+
+    fn lesson(key: &str, body: &str) -> Entry {
+        Entry { tags: vec!["lesson".into(), "all".into()], ..entry(key, body) }
+    }
+
+    // a lesson lives in confident/lessons; the tag decides, and a move is never
+    // a retraction nor a lost version
+    #[test]
+    fn lessons_live_in_their_own_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store.upsert(lesson("lesson-ask-first", "the owner said so"), "2026-11-16").unwrap();
+        assert!(dir.path().join("confident/lessons/lesson-ask-first.md").is_file());
+        assert!(!dir.path().join("knowledge/lesson-ask-first.md").exists());
+        assert_eq!(store.get("lesson-ask-first").unwrap().unwrap().body, "the owner said so");
+        assert!(store.list_head().unwrap().iter().any(|e| e.key == "lesson-ask-first"));
+
+        // an old entry tagged a lesson moves in the commit that tags it
+        store.upsert(entry("rule-old", "a house rule"), "2026-11-16").unwrap();
+        store.upsert(lesson("rule-old", "a house rule"), "2026-11-16").unwrap();
+        assert!(dir.path().join("confident/lessons/rule-old.md").is_file());
+        assert!(!dir.path().join("knowledge/rule-old.md").exists());
+        let feed = store.recent_commits(1).unwrap();
+        assert_eq!((feed[0].action.as_str(), feed[0].key.as_deref()), ("updated", Some("rule-old")));
+        let versions = store.history("rule-old").unwrap();
+        let changes: Vec<&str> = versions.iter().map(|v| v.change.as_str()).collect();
+        assert_eq!(changes, ["modified", "added"], "the tagging is one version: {versions:?}");
+        let (docs, retractions) = store.walk_history_and_retractions().unwrap();
+        assert!(retractions.is_empty(), "a move is no retraction");
+        assert_eq!(docs.iter().filter(|d| d.entry.key == "rule-old").count(), 2);
+        let first = &versions[1].sha;
+        assert_eq!(store.get_at("rule-old", first).unwrap().unwrap().tags, ["test"], "old versions stay readable");
+
+        // the tag dropped: back to knowledge/
+        store.upsert(entry("rule-old", "a house rule"), "2026-11-16").unwrap();
+        assert!(dir.path().join("knowledge/rule-old.md").is_file());
+        assert!(!dir.path().join("confident/lessons/rule-old.md").exists());
+        assert!(store.walk_history_and_retractions().unwrap().1.is_empty());
+        assert_eq!(store.recent_commits(1).unwrap()[0].action, "updated");
+        store.delete("lesson-ask-first").unwrap();
+        assert!(!dir.path().join("confident/lessons/lesson-ask-first.md").exists());
+    }
+
+    // lessons written before the folder existed move there on open, in one
+    // commit that is neither a version nor a retraction
+    #[test]
+    fn lessons_in_knowledge_move_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = Store::open(dir.path()).unwrap();
+            store.upsert(entry("plain-fact", "stays"), "2026-11-16").unwrap();
+            store.upsert(lesson("lesson-old", "written before"), "2026-11-16").unwrap();
+            // put it back where the previous release kept it
+            let repo = store.repo().unwrap();
+            let mut idx = repo.index().unwrap();
+            store.move_in_index(&mut idx, "confident/lessons/lesson-old.md", "knowledge/lesson-old.md").unwrap();
+            store.commit_index(&repo, &mut idx, "the old layout").unwrap();
+        }
+        let store = Store::open(dir.path()).unwrap();
+        assert!(dir.path().join("confident/lessons/lesson-old.md").is_file());
+        assert!(!dir.path().join("knowledge/lesson-old.md").exists());
+        assert!(dir.path().join("knowledge/plain-fact.md").is_file());
+        assert_eq!(store.history("lesson-old").unwrap().len(), 1, "moves are not versions");
+        let feed = store.recent_commits(1).unwrap();
+        assert_eq!((feed[0].action.as_str(), feed[0].key.as_deref()), ("transitioned", None), "the move is a system event");
+        let (docs, retractions) = store.walk_history_and_retractions().unwrap();
+        assert!(retractions.is_empty());
+        assert_eq!(docs.iter().filter(|d| d.entry.key == "lesson-old").count(), 1);
+        // a second open finds nothing to move
+        let head = store.history_index(None).unwrap().head;
+        let again = Store::open(dir.path()).unwrap();
+        assert_eq!(again.history_index(None).unwrap().head, head);
     }
 
     #[test]
