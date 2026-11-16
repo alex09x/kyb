@@ -766,15 +766,19 @@ impl Store {
             let mut files = vec![];
             let mut detected_key = None;
             let mut action = "updated".to_string();
+            let (mut added, mut deleted) = (HashSet::new(), HashSet::new());
             for d in diff.deltas() {
                 if let Some(path) = d.new_file().path().and_then(|p| p.to_str()) {
                     files.push(path.to_string());
-                    if detected_key.is_none() {
-                        if let Some(filename) = path.rsplit('/').next() {
-                            if let Some(k) = filename.strip_suffix(".md") {
-                                detected_key = Some(k.to_string());
-                            }
+                    if let Some(k) = path.rsplit('/').next().and_then(|f| f.strip_suffix(".md")) {
+                        if detected_key.is_none() {
+                            detected_key = Some(k.to_string());
                         }
+                        match d.status() {
+                            Delta::Added => added.insert(k.to_string()),
+                            Delta::Deleted => deleted.insert(k.to_string()),
+                            _ => false,
+                        };
                     }
                 }
                 match d.status() {
@@ -783,8 +787,16 @@ impl Store {
                     _ => {}
                 }
             }
+            // a file moved between folders (a lesson tag added or dropped) is an edit
+            if added.intersection(&deleted).next().is_some() {
+                action = "updated".to_string();
+            }
             let msg = commit.summary().unwrap_or("").trim().to_string();
-            if msg.contains("resolve") {
+            // the service reorganising its own folders is about no single entry
+            if msg.starts_with("kyb: move ") || msg.starts_with("kyb: migrate ") {
+                detected_key = None;
+                action = "transitioned".to_string();
+            } else if msg.contains("resolve") {
                 action = "resolved".to_string();
             } else if msg.contains("delete") {
                 action = "retracted".to_string();
@@ -954,6 +966,8 @@ mod tests {
         store.upsert(lesson("rule-old", "a house rule"), "2026-11-16").unwrap();
         assert!(dir.path().join("confident/lessons/rule-old.md").is_file());
         assert!(!dir.path().join("knowledge/rule-old.md").exists());
+        let feed = store.recent_commits(1).unwrap();
+        assert_eq!((feed[0].action.as_str(), feed[0].key.as_deref()), ("updated", Some("rule-old")));
         let versions = store.history("rule-old").unwrap();
         let changes: Vec<&str> = versions.iter().map(|v| v.change.as_str()).collect();
         assert_eq!(changes, ["modified", "added"], "the tagging is one version: {versions:?}");
@@ -968,6 +982,7 @@ mod tests {
         assert!(dir.path().join("knowledge/rule-old.md").is_file());
         assert!(!dir.path().join("confident/lessons/rule-old.md").exists());
         assert!(store.walk_history_and_retractions().unwrap().1.is_empty());
+        assert_eq!(store.recent_commits(1).unwrap()[0].action, "updated");
         store.delete("lesson-ask-first").unwrap();
         assert!(!dir.path().join("confident/lessons/lesson-ask-first.md").exists());
     }
@@ -992,6 +1007,8 @@ mod tests {
         assert!(!dir.path().join("knowledge/lesson-old.md").exists());
         assert!(dir.path().join("knowledge/plain-fact.md").is_file());
         assert_eq!(store.history("lesson-old").unwrap().len(), 1, "moves are not versions");
+        let feed = store.recent_commits(1).unwrap();
+        assert_eq!((feed[0].action.as_str(), feed[0].key.as_deref()), ("transitioned", None), "the move is a system event");
         let (docs, retractions) = store.walk_history_and_retractions().unwrap();
         assert!(retractions.is_empty());
         assert_eq!(docs.iter().filter(|d| d.entry.key == "lesson-old").count(), 1);
