@@ -82,6 +82,28 @@ fn ask_body() -> Value {
 const CHECK: &str = "/confident/check?gist=mitts%20release%20patch%20or%20minor&target=mitts";
 
 #[tokio::test]
+async fn a_check_brings_the_lessons_about_such_a_step() {
+    let a = app();
+    let r = &a.router;
+    let lesson = |key: &str, title: &str, tags: &[&str]| {
+        json!({"key": key, "title": title, "body": "the owner said so", "tags": tags})
+    };
+    for body in [
+        lesson("lesson-release-after-green-gate", "Release after a green gate without asking", &["lesson", "all"]),
+        lesson("lesson-no-hooks", "No session start hooks for agent context", &["lesson", "all"]),
+        lesson("mitts-release-notes", "How mitts release notes are written", &["mitts"]),
+    ] {
+        let (st, v) = call(r, "s1", "POST", "/knowledge", Some(body)).await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+    }
+    let (st, v) = call(r, "s1", "GET", CHECK, None).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let keys: Vec<&str> = v["lessons"].as_array().unwrap().iter().map(|l| l["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["lesson-release-after-green-gate"], "only lessons, and only the related one: {v}");
+    assert_eq!(v["lessons"][0]["title"], "Release after a green gate without asking");
+}
+
+#[tokio::test]
 async fn ask_decide_and_find_it_again_from_another_session() {
     let a = app();
     let r = &a.router;

@@ -68,6 +68,47 @@ async fn run_check(st: &AppState, q: &Query<'_>) -> Check {
     st.confident.check(q, qvec.as_deref())
 }
 
+/// At most this many lessons ride along with a check.
+const LESSONS_IN_CHECK: usize = 3;
+/// How close in meaning a lesson must be to the step to be shown (e5 cosine;
+/// the same bar as a precedent, since e5 rates unrelated English near 0.8).
+const LESSON_SIMILARITY: f32 = 0.85;
+
+/// What the owner taught about work like this step: the lessons closest in
+/// meaning, then the ones sharing its words. A lesson is standing guidance, so
+/// the check shows it whether or not anyone asked about the same step before.
+async fn related_lessons(st: &AppState, gist: &str) -> Vec<Value> {
+    let is_lesson =
+        |h: &crate::index::Hit| h.tags.iter().any(|t| t.eq_ignore_ascii_case(crate::brief::LESSON_TAG));
+    let mut found: Vec<crate::index::Hit> = Vec::new();
+    if let Some(sem) = st.semantic.as_ref() {
+        match sem.search(gist, 40).await {
+            Ok(scored) => {
+                for (key, _) in scored.into_iter().filter(|(_, s)| *s >= LESSON_SIMILARITY) {
+                    if let Ok(Some(h)) = st.index.get_live(&key) {
+                        if is_lesson(&h) && found.len() < LESSONS_IN_CHECK {
+                            found.push(h);
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("kyb: lessons for a check fall back to words: {e:#}"),
+        }
+    }
+    let opts = crate::index::SearchOpts {
+        tags: vec![crate::brief::LESSON_TAG.into()],
+        kind: Some(crate::model::KIND_KNOWLEDGE.into()),
+        limit: LESSONS_IN_CHECK,
+        ..Default::default()
+    };
+    for h in st.index.search(gist, &opts).unwrap_or_default().into_iter().filter(|h| h.is_head) {
+        if found.len() < LESSONS_IN_CHECK && !found.iter().any(|f| f.key == h.key) {
+            found.push(h);
+        }
+    }
+    found.into_iter().map(|h| json!({"key": h.key, "title": h.title})).collect()
+}
+
 /// Validate, commit and index a record. The caller holds the writer lock.
 fn save(st: &AppState, rec: Record, msg: &str, vector: Option<Vec<f32>>) -> Result<String, Reply> {
     rec.validate().map_err(|e| reject(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
@@ -109,7 +150,9 @@ pub async fn check(State(st): St, Q(q): Q<CheckQ>) -> Reply {
         now: now(),
     };
     let c = run_check(&st, &query).await;
-    (StatusCode::OK, Json(json!(c)))
+    let mut body = json!(c);
+    body["lessons"] = json!(related_lessons(&st, &gist).await);
+    (StatusCode::OK, Json(body))
 }
 
 #[derive(Deserialize)]

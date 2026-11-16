@@ -101,25 +101,25 @@ runs on them, how services are wired and who calls whom, deploys, ports, configs
 decisions we made and why. It is stored in git with full version history, it is shared by every
 agent on every machine, and it is reached through the `kyb` CLI.
 
-- **`kyb brief` before infrastructure work — important, do not skip it.** One call shows what
-  is live: open incidents, work in progress or blocked, deadlines, and decisions retracted
-  recently. It is context for the task you were given, not a to-do list: never start work from
-  it on your own. Treat a retracted entry as a rejected decision, and check an open incident
-  before touching the service it names. It also lists the owner's standing rules for every
-  project and for the one you are in: follow them.
-- **The owner's preferences, house rules and lessons go to KYB, not to your local memory.**
-  When the owner states how agents should work ("never deploy prod unasked", "commit, then hot
-  reload"), or you learn a lesson every agent needs, write it with `kyb rule --key rule-<slug>
-  --title "<the rule in one line>" --scope all|here` (body on stdin, `kyb rule --template`).
-  A provider's own memory (Claude's memory folder, Codex, Gemini) is seen by that provider in
-  that folder only; at most keep a pointer to the rule's key there. `kyb rules` lists them.
+- **`kyb brief` when you start work — important, do not skip it.** One call shows the owner's
+  lessons for every project and for the one you are in (follow them), and what is live: open
+  incidents, work in progress or blocked, deadlines, and decisions retracted recently. The rest
+  is context for the task you were given, not a to-do list: never start work from it on your
+  own. Treat a retracted entry as a rejected decision, and check an open incident before
+  touching the service it names.
+- **What the owner teaches goes to KYB, not to your local memory.** When the owner corrects
+  you, refuses, redirects, explains why, or says how agents should work ("stop asking, just
+  release", "never deploy prod unasked"), write it right away: `kyb confident learn --key
+  lesson-<slug> --title "<the lesson in one line>" --scope all|here` (body on stdin: the
+  owner's words translated, why, how to apply; `kyb confident learn --template`). Your
+  provider's own memory (Claude's memory folder, Codex, Gemini) is read by that provider in that
+  folder only; keep at most a pointer to the lesson's key there. A plain "yes" teaches nothing:
+  record nothing for it.
 - **`kyb confident check "<the decision as one English line>"` before you ask the owner to
   decide anything** (a release, a deploy, a push, a deletion, a public post, a design choice).
-  It shows what was decided before about the same thing and how it turned out: evidence for
-  you to judge, never permission. When you ask, open a record with `kyb confident ask`; right
-  after the answer, `kyb confident decided <id>` - record "no", "later" and "I don't
-  understand" too. Every field in English, the owner's words translated. Main agent only, never
-  a sub-agent.
+  It shows the lessons about such a step and what was decided before: if a lesson already
+  answers, act and report instead of asking. Every word in English. Main agent only, never a
+  sub-agent.
 - **Query it before reasoning about our infrastructure.** Do not guess about our hosts, ports,
   services or deploys — `kyb query "..."` first. One phrasing is not a search; try a couple.
 - **Write back what you learn.** Found nothing, or only a thin entry while you now understand

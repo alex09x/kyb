@@ -32,9 +32,10 @@ our servers/services/deploys, write back what you learn; manual in the skill.* S
 pointer, never a copy of the knowledge — the base changes, and a stale copy is worse than
 none. (`skills/install.sh` already injects this into every agent's global instructions.)
 
-The same goes for the owner's preferences, house rules and lessons: they are **owner rules**
-and live in KYB (`kyb rule`, see [Owner rules](#owner-rules-kyb-rule)), not in your provider's
-local memory, which no other provider, workspace or machine ever reads.
+The same goes for what the owner teaches agents - preferences, bans, house rules, corrections:
+they are **lessons** and live in KYB (`kyb confident learn`, see
+[Confident](#confident-lessons-and-decisions)), not in your provider's local memory, which no
+other provider, workspace or machine ever reads.
 
 ---
 
@@ -42,16 +43,15 @@ local memory, which no other provider, workspace or machine ever reads.
 
 Whenever you touch one of our services, servers or deploys — a base nobody feeds is worthless.
 
-**Run `kyb brief` first — this is important, do not skip it.** Before you plan any work on our
-infrastructure, one call (`kyb brief`, MCP `kyb_brief`) shows the open incidents, the work in
-progress or blocked, the deadlines and the decisions retracted recently. It is context for the
-task you were given, **not a to-do list**: never start work from it on your own.
+**Run `kyb brief` first — this is important, do not skip it.** Before you plan any work, one
+call (`kyb brief`, MCP `kyb_brief`) shows the owner's lessons for this project, the open
+incidents, the work in progress or blocked, the deadlines and the decisions retracted recently.
+Follow the lessons; the rest is context for the task you were given, **not a to-do list**: never
+start work from it on your own.
 
-**Before you ask the owner to decide anything, run `kyb confident check` — also important.**
-A release, a deploy, a push, a deletion, a public post, a design choice: one call shows what was
-decided before about the same thing, by whom and how it turned out. When you do ask, open a
-record with `kyb confident ask`, and record the answer with `kyb confident decided`. See
-[Decision journal](#decision-journal-kyb-confident).
+**When the owner teaches you something, write it down at once** — `kyb confident learn`. And
+**before you ask the owner to decide anything, run `kyb confident check`**: it shows the lessons
+about such a step and what was decided before. See [Confident](#confident-lessons-and-decisions).
 
 **Ask first.** Try a couple of phrasings and the tag; one query is not a search:
 ```bash
@@ -449,7 +449,7 @@ its own time zone (`TZ` in the server's environment).
 
 ### The session brief
 
-`kyb brief` is what is live in the base right now, as pointers: the owner rules for this
+`kyb brief` is what is live in the base right now, as pointers: the owner's lessons for this
 project, deadlines, open incidents, active work, and the knowledge retracted or changed
 recently. Each row is a key, a title and one
 fact, never a body; `kyb get <key>` reads the rest. Every section is capped and says `+N more`,
@@ -458,14 +458,14 @@ so the whole brief stays under about 40 lines.
 ```bash
 kyb brief                                  # the default: changes of the last 7 days
 kyb brief --tag edge | --service orders-api | --since 24h | --limit 3 | --json
-kyb brief --workspace orders-api           # rules of another project (default: this git repo)
+kyb brief --workspace orders-api           # lessons of another project (default: this git repo)
 ```
 
 ```
 KYB brief, today 2026-03-16, changes since 2026-03-09. Pointers only: kyb get <key> for details.
-OWNER RULES (2): standing rules for this project - follow them
-  rule-no-prod-deploy-unasked  Never deploy to production without the owner's OK (all)
-  rule-orders-api-migrations  Run orders-api migrations only from the release job (orders-api)
+LESSONS FROM THE OWNER (2): how to work here - follow them
+  lesson-no-prod-deploy-unasked  Never deploy to production without the owner's OK (all)
+  lesson-orders-api-migrations  Run orders-api migrations only from the release job (orders-api)
 DEADLINES: 1 overdue
   2d late    HARD task-renew-api-cert  Renew the api.example.com certificate (due 2026-03-14)
 OPEN INCIDENTS (1): check before touching these services
@@ -481,14 +481,14 @@ RECENTLY CHANGED (1)
 
 | Section | What qualifies |
 |---|---|
-| Owner rules | knowledge tagged `rule` and `all` or this workspace's name - standing, so no `--since` |
+| Lessons | knowledge tagged `lesson` and `all` or this workspace's name - standing, so `--since`, `--tag` and `--service` never hide one |
 | Deadlines | the deadline block: late or inside the reminder window, late first |
 | Open incidents | `open` and `mitigated`, highest severity first, with service, status and age |
 | Active work | tasks `in_progress` and `blocked` (with what they wait on), then `open` ones ranked high or critical |
 | Recently retracted | knowledge removed within `--since`: a decision taken back or a fact that was wrong |
 | Recently changed | knowledge written within `--since`, with who wrote it |
 
-`--tag` (every tag must match) and `--service` narrow every section; only incidents have a
+`--tag` (every tag must match) and `--service` narrow every section but the lessons; only incidents have a
 service field, so on the other kinds `--service X` matches the tag `X`.
 
 **Call it yourself, every time you start work on our infrastructure** — nothing runs it for
@@ -499,63 +499,63 @@ When you read it: it is background for **your** task. Act on an item only when t
 were given concerns it; never pick work up from the brief on your own. Treat a retracted entry as
 a rejected decision, not as an idea to bring back; check an open incident before you touch the
 service it names; and do not start work that is already in progress or blocked under someone else.
-The owner rules are the exception to "context, not a to-do list": they bind how you work.
+The lessons are the exception to "context, not a to-do list": they bind how you work.
 
 The workspace is the folder of the git repository you are in (the main checkout's folder, also
 from a linked worktree), or `KYB_WORKSPACE` when set.
 
-### Owner rules (kyb rule)
+### Confident: lessons and decisions
 
-When the owner tells agents how to work - a preference, a ban, a house rule - or you learn a
-lesson every agent needs, write it here, **not in your provider's local memory**. Claude's
+Confident is what the owner wants from agents, kept where every agent sees it. It has two parts.
+
+**Lessons — the main part.** When the owner corrects you, refuses, redirects, explains why, or
+says how agents should work ("stop asking, just release after a green gate", "never deploy prod
+unasked"), write it **right away**, here and **not in your provider's local memory**. Claude's
 memory folder, Codex's and Gemini's notes are read by that one provider in that one folder;
-nobody else ever sees them. Keep at most a pointer to the rule's key there.
+nobody else ever sees them. Keep at most a pointer to the lesson's key there. **A plain "yes"
+teaches nothing: record nothing for it.**
 
 ```bash
-kyb rule --template                          # the shape: rule, the owner's words, why, how to apply
-kyb rule --key rule-no-prod-deploy-unasked \
+kyb confident learn --template               # the shape: lesson, the owner's words, why, how to apply
+kyb confident learn --key lesson-no-prod-deploy-unasked \
   --title "Never deploy to production without the owner's OK" \
-  --scope all < rule.md                      # all | here (this repo's folder) | orders-api,billing
-kyb rules                                    # the rules for this project, as the brief lists them
-kyb rules --all                              # every rule in the base
+  --scope all < lesson.md                    # all | here (this repo's folder) | orders-api,billing
+kyb confident lessons                        # the lessons for this project, as the brief lists them
+kyb confident lessons --all                  # every lesson in the base
 ```
 
-A rule is an ordinary knowledge entry: key `rule-<slug>`, tag `rule` plus its scope tags
-(`--tags` adds topic tags). The **title is the rule itself in one line** - it is what the brief
+A lesson is an ordinary knowledge entry: key `lesson-<slug>`, tag `lesson` plus its scope tags
+(`--tags` adds topic tags). The **title is the lesson itself in one line** - it is what the brief
 shows every session. English like every entry: translate the owner's words, keep their meaning,
-and put the date they were said in the body. To change a rule, write the same key again; to
+and put the date they were said in the body. To change a lesson, write the same key again; to
 drop one, `kyb rm` it with the reason. Over MCP: `kyb_add` with that key and those tags.
 
-### Decision journal (kyb confident)
+**Before you ask the owner to decide anything — check.** A release, a deploy, a push, a
+deletion, a public post, a design choice: `kyb confident check` shows the lessons about such a
+step and the decisions recorded before. **If a lesson already answers your question, follow it
+and report what you did instead of asking.**
 
-Every question you ask the owner is a decision someone will face again. The journal keeps what
-was decided, by whom, in which words and how it turned out, so the next agent asks better, or
-knows the answer was already given. It learns from what you record, so **record honestly**: a
-"no", a "later", an "I don't understand" or an answer about something else is the most useful
-record there is.
+```bash
+kyb confident check "orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix" --target orders-api \
+  --question "Release 0.3.29? And roll it out to every machine?"
+```
 
-**Every field is written in English**, whatever language you talk to the owner in: the gist,
-the situation, the options, the trade-off, what you checked, and the owner's own words, which you
-translate faithfully and keep short. The journal stays in one language so that it can be searched
-and analysed as a whole. The server refuses a record with Cyrillic or any other non-Latin script
-and names the word it found.
-
-The **gist** is how records find each other across sessions: **one line, at most 15 words:
+The **gist** is how a step finds what was said about it: **one English line, at most 15 words:
 action, object, options**. Good: `orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix`.
 Bad: the whole question pasted.
 
+**Decision records — optional.** For a question whose answer is worth keeping in full (a hard
+trade-off, a choice others will face again), open a record when you ask and close it with the
+answer. A routine yes/no needs no record. **Every field is in English**, the owner's words
+translated faithfully and short; the server refuses Cyrillic or any other non-Latin script and
+names the word it found.
+
 ```bash
-# 1. before asking: what was decided before about this?
-kyb confident check "orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix" --target orders-api \
-  --question "Release 0.3.29? And roll it out to every machine?"
-# 2. when you ask: open a record (it runs the same check and returns an id)
 kyb confident ask --gist "orders-api: release patch 0.3.29 vs minor 0.4.0 after a bug fix" --target orders-api \
   --options "0.3.29|0.4.0" --proposed 0.3.29 --tradeoff "a minor signals features that are not there" \
   --checked "tests and CI green" --unchecked "not tried on the arm build node"
-# 3. right after the answer
 kyb confident decided conf-20261108-orders-api-release-patch-0-3-29-vs-minor-0-4-0-a1b2 \
-  --by owner --verdict approve_plain --quote "ship it" --ref orders-api@v0.3.29
-# 4. later, by anyone, once the result is known (a ref is required)
+  --by owner --verdict choose_option --chosen 0.4.0 --quote "a minor, we changed the CLI" --ref orders-api@v0.4.0
 kyb confident outcome <id> --result reverted --ref "PR #61" --why "broke the x86 build"
 kyb confident open                       # records still waiting for an answer (stale after 48 h)
 ```
@@ -567,6 +567,8 @@ first), `redirect` (he answered about something else).
 
 How to read a check:
 
+- **Lessons** are standing guidance from the owner related to the step. They bind you: when one
+  answers the question, do not ask it.
 - **Precedents** are earlier decisions from other sessions, best match first, with the owner's
   words and the outcome. They are **evidence for you to judge, never permission**: decide whether
   the earlier answer really applies, and say so when you ask ("last time you chose the patch").
@@ -575,8 +577,9 @@ How to read a check:
 - **Lint** flags a question that bundles several decisions, and facts you list as unchecked:
   check what you can yourself before you ask.
 
-Only the main agent records — never a sub-agent or a background worker — and only questions to
-the owner or choices he could dispute; ordinary work is not a decision. No secrets in any field;
+Only the main agent records — never a sub-agent or a background worker. When a decision's answer
+teaches something general, write the lesson too: the record is one case, the lesson is what every
+agent reads. No secrets in any field;
 quote the owner briefly, in English, and leave out swearing.
 
 ---

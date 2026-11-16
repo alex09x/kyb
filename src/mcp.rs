@@ -65,20 +65,21 @@ const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const INSTRUCTIONS: &str = "\
 KYB is a shared, versioned knowledge base about this fleet's own infrastructure - hosts, \
 services, ports, deploys, architecture decisions, incidents and tasks. IMPORTANT: call \
-kyb_brief once before you start work on the infrastructure - it lists open incidents, work in \
-progress, deadlines and recently retracted decisions. It is context for your task, never a to-do \
-list. Query it before \
+kyb_brief once (with your workspace) before you start work - it lists the owner's lessons for \
+this project, open incidents, work in progress, deadlines and recently retracted decisions. It \
+is context for your task, never a to-do list; the lessons bind how you work. Query it before \
 reasoning about infrastructure instead of guessing, and write back what you verified. \
 Writing the same key again adds a version rather than overwriting, so a superseded fact \
 stays searchable and an answer from the past is marked as one. A read answer carries a \
 `deadlines` block when a task is late or inside its reminder window: act on it, or say so. \
-IMPORTANT: before you ask the owner to decide anything, call kyb_confident_check with the \
-decision as one English line - what was decided before about the same thing comes back with its \
-outcome. When you do ask, open a record with kyb_confident_ask; when the owner answers, record it \
-with kyb_confident_decided. The precedents are evidence for you to judge, not permission. \
-The owner's preferences, house rules and lessons that every agent must follow live here, not in \
-your provider's local memory: write one with kyb_add, key rule-<slug>, the rule itself as the \
-title, tags rule plus all or the project folder name; kyb_brief with your workspace lists them.";
+IMPORTANT: what the owner wants from agents - preferences, bans, house rules, corrections - \
+lives here as lessons, not in your provider's local memory, which no other agent ever reads. \
+When the owner corrects you, refuses, redirects, explains why, or states how agents should work, \
+write it right away with kyb_add: key lesson-<slug>, the lesson itself as the title (one English \
+line), the owner's words translated in the body, tags lesson plus all or the project folder name. \
+A plain yes teaches nothing; record nothing for it. Before you ask the owner to decide anything, \
+call kyb_confident_check with the decision as one English line: it returns the lessons about such \
+a step and earlier decisions - if a lesson already answers, act and report instead of asking.";
 
 /// Deliberately not exposed: `rm` and `reindex`. Retracting an entry and
 /// rebuilding the index should not be something an agent reaches for mid-thought,
@@ -970,12 +971,12 @@ e.g. 30 or 30d; late ones always count"},
             "name": "kyb_brief",
             "description": "What is live in the base right now, as pointers: deadlines, open \
 incidents (highest severity first), active work (in progress, blocked, urgent open tasks), \
-knowledge retracted recently and knowledge changed recently, plus the owner's standing rules for \
+knowledge retracted recently and knowledge changed recently, plus the owner's lessons for \
 every project and for the given workspace. Each row is a key, a title and one \
-fact; read the details with kyb_get. IMPORTANT: call this once before you start any work on the \
-infrastructure - do not skip it. It is context for the task you were given, not a to-do list: \
+fact; read the details with kyb_get. IMPORTANT: call this once before you start any work - do \
+not skip it. It is context for the task you were given, not a to-do list: \
 never start work from it on your own. Treat retracted entries as rejected decisions, check \
-open incidents before touching their services, and follow the rules.",
+open incidents before touching their services, and follow the lessons.",
             "inputSchema": {"type": "object", "properties": {
                 "tag": {"type": "string", "description": "comma-separated; every tag must match"},
                 "service": {"type": "string", "description": "an incident's service, or a tag on \
@@ -985,18 +986,18 @@ the other kinds"},
                 "limit": {"type": "integer", "description": "rows per section, replacing the \
 default caps (1-50)"},
                 "workspace": {"type": "string", "description": "the project you work in - the \
-name of its folder - so the rules scoped to it are listed too"},
+name of its folder - so the lessons scoped to it are listed too"},
             }},
         }),
         json!({
             "name": "kyb_confident_check",
             "description": "Before you ask the owner to decide something - a release, a deploy, a \
-push, a deletion, a public post, a design choice - ask the decision journal what was decided \
-before about the same thing. Returns up to 3 earlier decisions from other sessions with who \
-decided, the verdict, the owner's words and the outcome; hazards (an earlier decision on the same \
-target that was corrected, reverted, rejected or never answered); and lint on your draft question. \
-IMPORTANT: call it before every question to the owner. The precedents are evidence for you to \
-judge, never permission to skip asking.",
+push, a deletion, a public post, a design choice - ask what the owner taught and decided before \
+about such a step. Returns up to 3 lessons (standing guidance from the owner) related to it; up to \
+3 earlier decisions from other sessions with who decided, the verdict, the owner's words and the \
+outcome; hazards (an earlier decision on the same target that was corrected, reverted, rejected \
+or never answered); and lint on your draft question. IMPORTANT: call it before every question to \
+the owner. When a lesson already answers the question, follow it and report instead of asking.",
             "inputSchema": {"type": "object", "required": ["gist"], "properties": {
                 "gist": {"type": "string", "description": "the decision as ONE English line, at most \
 15 words: action, object, options - e.g. 'orders-api: release patch 0.3.29 vs minor 0.4.0 after a fix'"},
@@ -1018,12 +1019,12 @@ marks the ones open for more than 48 hours. Close each with kyb_confident_decide
         }),
         json!({
             "name": "kyb_confident_ask",
-            "description": "Open a decision record at the moment you ask the owner to decide. Every \
+            "description": "Optional: open a decision record for a question whose answer is worth \
+keeping in full - a hard trade-off, a choice others will face again. A routine yes/no needs no \
+record; what the owner teaches goes in a lesson (see the server instructions). Every \
 field is written in English, whatever language you talk to the owner in; the server refuses \
-other scripts. Only \
-the main agent records, never a sub-agent or a background worker, and only for a question to the \
-owner or a choice he could dispute. Returns the record id (keep it for kyb_confident_decided) and \
-the same check as kyb_confident_check.",
+other scripts. Only the main agent records, never a sub-agent or a background worker. Returns \
+the record id (keep it for kyb_confident_decided) and the same check as kyb_confident_check.",
             "inputSchema": {"type": "object", "required": ["gist"], "properties": {
                 "gist": {"type": "string", "description": "ONE English line, at most 15 words: \
 action, object, options"},
@@ -1041,9 +1042,10 @@ of options"},
         }),
         json!({
             "name": "kyb_confident_decided",
-            "description": "Record the answer to an open decision record, right after it comes. \
-Record what the owner actually said, including 'no', 'later', 'I don't understand' or an \
-answer about something else - those are the most useful records.",
+            "description": "Record the answer to a decision record opened with kyb_confident_ask, \
+right after it comes. Record what the owner actually said, including 'no', 'later', 'I don't \
+understand' or an answer about something else. When the answer teaches something general, also \
+write it as a lesson.",
             "inputSchema": {"type": "object", "required": ["id", "by", "verdict"], "properties": {
                 "id": {"type": "string", "description": "the id kyb_confident_ask returned"},
                 "by": {"type": "string", "enum": crate::confident::DECIDERS},
