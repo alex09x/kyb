@@ -105,7 +105,14 @@ agent on every machine, and it is reached through the `kyb` CLI.
   is live: open incidents, work in progress or blocked, deadlines, and decisions retracted
   recently. It is context for the task you were given, not a to-do list: never start work from
   it on your own. Treat a retracted entry as a rejected decision, and check an open incident
-  before touching the service it names.
+  before touching the service it names. It also lists the owner's standing rules for every
+  project and for the one you are in: follow them.
+- **The owner's preferences, house rules and lessons go to KYB, not to your local memory.**
+  When the owner states how agents should work ("never deploy prod unasked", "commit, then hot
+  reload"), or you learn a lesson every agent needs, write it with `kyb rule --key rule-<slug>
+  --title "<the rule in one line>" --scope all|here` (body on stdin, `kyb rule --template`).
+  A provider's own memory (Claude's memory folder, Codex, Gemini) is seen by that provider in
+  that folder only; at most keep a pointer to the rule's key there. `kyb rules` lists them.
 - **`kyb confident check "<the decision as one English line>"` before you ask the owner to
   decide anything** (a release, a deploy, a push, a deletion, a public post, a design choice).
   It shows what was decided before about the same thing and how it turned out: evidence for

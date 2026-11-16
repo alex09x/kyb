@@ -75,7 +75,10 @@ stays searchable and an answer from the past is marked as one. A read answer car
 IMPORTANT: before you ask the owner to decide anything, call kyb_confident_check with the \
 decision as one English line - what was decided before about the same thing comes back with its \
 outcome. When you do ask, open a record with kyb_confident_ask; when the owner answers, record it \
-with kyb_confident_decided. The precedents are evidence for you to judge, not permission.";
+with kyb_confident_decided. The precedents are evidence for you to judge, not permission. \
+The owner's preferences, house rules and lessons that every agent must follow live here, not in \
+your provider's local memory: write one with kyb_add, key rule-<slug>, the rule itself as the \
+title, tags rule plus all or the project folder name; kyb_brief with your workspace lists them.";
 
 /// Deliberately not exposed: `rm` and `reindex`. Retracting an entry and
 /// rebuilding the index should not be something an agent reaches for mid-thought,
@@ -654,6 +657,7 @@ fn plan(name: &str, args: &Value) -> Result<Call, String> {
             push(&mut query, "service", text_arg(args, "service"));
             push(&mut query, "since", text_arg(args, "since"));
             push(&mut query, "limit", text_arg(args, "limit"));
+            push(&mut query, "workspace", text_arg(args, "workspace"));
             Call { method: "GET", path: "/brief".into(), query, body: None }
         }
         "kyb_confident_check" => {
@@ -966,11 +970,12 @@ e.g. 30 or 30d; late ones always count"},
             "name": "kyb_brief",
             "description": "What is live in the base right now, as pointers: deadlines, open \
 incidents (highest severity first), active work (in progress, blocked, urgent open tasks), \
-knowledge retracted recently and knowledge changed recently. Each row is a key, a title and one \
+knowledge retracted recently and knowledge changed recently, plus the owner's standing rules for \
+every project and for the given workspace. Each row is a key, a title and one \
 fact; read the details with kyb_get. IMPORTANT: call this once before you start any work on the \
 infrastructure - do not skip it. It is context for the task you were given, not a to-do list: \
-never start work from it on your own. Treat retracted entries as rejected decisions, and check \
-open incidents before touching their services.",
+never start work from it on your own. Treat retracted entries as rejected decisions, check \
+open incidents before touching their services, and follow the rules.",
             "inputSchema": {"type": "object", "properties": {
                 "tag": {"type": "string", "description": "comma-separated; every tag must match"},
                 "service": {"type": "string", "description": "an incident's service, or a tag on \
@@ -979,6 +984,8 @@ the other kinds"},
 (default), 24h, a YYYY-MM-DD date or an RFC3339 time"},
                 "limit": {"type": "integer", "description": "rows per section, replacing the \
 default caps (1-50)"},
+                "workspace": {"type": "string", "description": "the project you work in - the \
+name of its folder - so the rules scoped to it are listed too"},
             }},
         }),
         json!({

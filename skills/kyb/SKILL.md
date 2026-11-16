@@ -32,6 +32,10 @@ our servers/services/deploys, write back what you learn; manual in the skill.* S
 pointer, never a copy of the knowledge — the base changes, and a stale copy is worse than
 none. (`skills/install.sh` already injects this into every agent's global instructions.)
 
+The same goes for the owner's preferences, house rules and lessons: they are **owner rules**
+and live in KYB (`kyb rule`, see [Owner rules](#owner-rules-kyb-rule)), not in your provider's
+local memory, which no other provider, workspace or machine ever reads.
+
 ---
 
 ## 1. The default loop: ask → assess → enrich
@@ -445,18 +449,23 @@ its own time zone (`TZ` in the server's environment).
 
 ### The session brief
 
-`kyb brief` is what is live in the base right now, as pointers: deadlines, open incidents,
-active work, and the knowledge retracted or changed recently. Each row is a key, a title and one
+`kyb brief` is what is live in the base right now, as pointers: the owner rules for this
+project, deadlines, open incidents, active work, and the knowledge retracted or changed
+recently. Each row is a key, a title and one
 fact, never a body; `kyb get <key>` reads the rest. Every section is capped and says `+N more`,
 so the whole brief stays under about 40 lines.
 
 ```bash
 kyb brief                                  # the default: changes of the last 7 days
 kyb brief --tag edge | --service orders-api | --since 24h | --limit 3 | --json
+kyb brief --workspace orders-api           # rules of another project (default: this git repo)
 ```
 
 ```
 KYB brief, today 2026-03-16, changes since 2026-03-09. Pointers only: kyb get <key> for details.
+OWNER RULES (2): standing rules for this project - follow them
+  rule-no-prod-deploy-unasked  Never deploy to production without the owner's OK (all)
+  rule-orders-api-migrations  Run orders-api migrations only from the release job (orders-api)
 DEADLINES: 1 overdue
   2d late    HARD task-renew-api-cert  Renew the api.example.com certificate (due 2026-03-14)
 OPEN INCIDENTS (1): check before touching these services
@@ -472,6 +481,7 @@ RECENTLY CHANGED (1)
 
 | Section | What qualifies |
 |---|---|
+| Owner rules | knowledge tagged `rule` and `all` or this workspace's name - standing, so no `--since` |
 | Deadlines | the deadline block: late or inside the reminder window, late first |
 | Open incidents | `open` and `mitigated`, highest severity first, with service, status and age |
 | Active work | tasks `in_progress` and `blocked` (with what they wait on), then `open` ones ranked high or critical |
@@ -489,6 +499,32 @@ When you read it: it is background for **your** task. Act on an item only when t
 were given concerns it; never pick work up from the brief on your own. Treat a retracted entry as
 a rejected decision, not as an idea to bring back; check an open incident before you touch the
 service it names; and do not start work that is already in progress or blocked under someone else.
+The owner rules are the exception to "context, not a to-do list": they bind how you work.
+
+The workspace is the folder of the git repository you are in (the main checkout's folder, also
+from a linked worktree), or `KYB_WORKSPACE` when set.
+
+### Owner rules (kyb rule)
+
+When the owner tells agents how to work - a preference, a ban, a house rule - or you learn a
+lesson every agent needs, write it here, **not in your provider's local memory**. Claude's
+memory folder, Codex's and Gemini's notes are read by that one provider in that one folder;
+nobody else ever sees them. Keep at most a pointer to the rule's key there.
+
+```bash
+kyb rule --template                          # the shape: rule, the owner's words, why, how to apply
+kyb rule --key rule-no-prod-deploy-unasked \
+  --title "Never deploy to production without the owner's OK" \
+  --scope all < rule.md                      # all | here (this repo's folder) | orders-api,billing
+kyb rules                                    # the rules for this project, as the brief lists them
+kyb rules --all                              # every rule in the base
+```
+
+A rule is an ordinary knowledge entry: key `rule-<slug>`, tag `rule` plus its scope tags
+(`--tags` adds topic tags). The **title is the rule itself in one line** - it is what the brief
+shows every session. English like every entry: translate the owner's words, keep their meaning,
+and put the date they were said in the body. To change a rule, write the same key again; to
+drop one, `kyb rm` it with the reason. Over MCP: `kyb_add` with that key and those tags.
 
 ### Decision journal (kyb confident)
 

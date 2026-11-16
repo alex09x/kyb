@@ -89,6 +89,31 @@ if want not in caps:
 PY
 }
 
+# has_capability <capability>: a silent yes/no, for a parameter that is only an
+# addition. A server without it is still asked, just without that parameter.
+has_capability() {
+  curl -sS -m 5 "$BASE/healthz" 2>/dev/null | CAP_WANT="$1" python3 -c '
+import json, os, sys
+try:
+    caps = json.load(sys.stdin).get("capabilities") or []
+except Exception:
+    caps = []
+raise SystemExit(0 if os.environ["CAP_WANT"] in caps else 1)'
+}
+
+# The project this agent works in: env KYB_WORKSPACE, else the folder of the git
+# repository (the main checkout, also from a linked worktree), else the current
+# folder. Rules are scoped by this name.
+kyb_workspace() {
+  if [ -n "${KYB_WORKSPACE:-}" ]; then printf '%s' "$KYB_WORKSPACE"; return; fi
+  local common
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
+  case "$common" in
+    */.git) basename "$(dirname "$common")" ;;
+    *) basename "$PWD" ;;
+  esac
+}
+
 pretty() {
   local in
   in="$(cat)"
@@ -412,7 +437,10 @@ kyb — Know Your Business (our infrastructure knowledge base)
   kyb get <key> [--at <sha>]
   kyb deadlines [--within 30d] [--overdue] [--hard] [--tag a,b] [--assignee A] [--json]
                                                     (open tasks with a due date: overdue / this week / later)
-  kyb brief [--tag a,b] [--service X] [--since 7d] [--limit N] [--json]
+  kyb brief [--tag a,b] [--service X] [--since 7d] [--limit N] [--workspace W] [--json]
+  kyb rule --key rule-<slug> --title "<the rule>" --scope all|here|<p,...> [--tags a,b]
+                                                (an owner rule; body on stdin, --template)
+  kyb rules [--workspace W | --all] [--json]    (the owner rules for this project)
                                                     (call before infra work: deadlines, open incidents, active work,
                                                     recently retracted and changed knowledge, as pointers)
   kyb history <key>
@@ -849,19 +877,22 @@ for bucket in ("overdue", "this_week", "later"):
 '
     ;;
   brief)
-    tag=""; service=""; since=""; limit=""; as_json=""
+    tag=""; service=""; since=""; limit=""; as_json=""; workspace=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --tag|--tags) tag="$2"; shift 2 ;;
         --service) service="$2"; shift 2 ;;
         --since) since="$2"; shift 2 ;;
         --limit) limit="$2"; shift 2 ;;
+        --workspace) workspace="$2"; shift 2 ;;
         --json) as_json=1; shift ;;
         *) die "brief: unknown flag $1" ;;
       esac
     done
     require_capability brief "kyb brief" "An older server has no such route and would simply answer 404."
-    out="$(kyb_curl "$BASE/brief?tag=$(urlenc "$tag")&service=$(urlenc "$service")&since=$(urlenc "$since")&limit=$(urlenc "$limit")")"
+    # an older server refuses a parameter it does not know: send it only when it is understood
+    ws=""; has_capability rules && ws="&workspace=$(urlenc "${workspace:-$(kyb_workspace)}")"
+    out="$(kyb_curl "$BASE/brief?tag=$(urlenc "$tag")&service=$(urlenc "$service")&since=$(urlenc "$since")&limit=$(urlenc "$limit")$ws")"
     if [ -n "$as_json" ]; then printf '%s\n' "$out" | pretty; exit 0; fi
     printf '%s' "$out" | python3 -c '
 import json, sys
@@ -886,11 +917,17 @@ def more(section, hint):
 
 since = b["since"][:10]
 d, inc, work, gone, changed = b["deadlines"], b["incidents"], b["work"], b["retracted"], b["changed"]
-if not any(s["count"] for s in (d, inc, work, gone, changed)):
+rules = b.get("rules") or {"count": 0, "more": 0, "items": []}
+if not any(s["count"] for s in (d, inc, work, gone, changed, rules)):
     print("KYB brief: nothing due, open or in progress, and nothing changed since %s." % since)
     raise SystemExit(0)
 print("KYB brief, today %s, changes since %s. Pointers only: kyb get <key> for details." % (b["today"], since))
 print("Context for your current task, not a to-do list: act on an item only if the task concerns it.")
+if rules["count"]:
+    print("OWNER RULES (%d): standing rules for this project - follow them" % rules["count"])
+    for r in rules["items"]:
+        print("  %s  %s (%s)" % (r["key"], short(r["title"], 110), r["scope"]))
+    more(rules, ": kyb rules")
 if d["count"]:
     soon = d["count"] - d["overdue"]
     said = ([("%d overdue" % d["overdue"])] if d["overdue"] else []) + ([("%d due soon" % soon)] if soon else [])
@@ -932,6 +969,80 @@ if changed["count"]:
     for r in changed["items"]:
         print("  %s  %s (%s%s)" % (r["key"], short(r["title"]), r["at"][:10], ", " + who(r) if who(r) else ""))
     more(changed, ": kyb brief --limit N")
+'
+    ;;
+  rule)
+    if [ "${1:-}" = "--template" ]; then
+      cat <<'TPL'
+# An owner rule: a preference, a house rule or a lesson every agent must follow.
+# The title is the rule itself in one line. Every word in English; the owner's
+# words translated, their meaning kept. File with:
+#   kyb rule --key rule-<slug> --title "<the rule>" --scope all|here|<project,...> < this-file
+## Rule
+<what to do or never do, and where it applies>
+
+## The owner's words
+<translated quote, with the date it was said>
+
+## Why
+<the reason the owner gave, or the incident behind it>
+
+## How to apply
+<what an agent does differently; the cases it does not cover>
+TPL
+      exit 0
+    fi
+    key=""; title=""; scope=""; tags=""; refs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --key) key="$2"; shift 2 ;;
+        --title) title="$2"; shift 2 ;;
+        --scope) scope="$2"; shift 2 ;;
+        --tags) tags="$2"; shift 2 ;;
+        --refs) refs="$2"; shift 2 ;;
+        *) die "rule: unknown flag $1" ;;
+      esac
+    done
+    [ -n "$key" ] && [ -n "$title" ] && [ -n "$scope" ] || die \
+      "rule: --key rule-<slug>, --title \"<the rule>\" and --scope all|here|<project,...> are required (body from stdin; kyb rule --template)"
+    case "$key" in rule-?*) ;; *) die "rule: the key starts with rule- (got '$key')" ;; esac
+    [ "$scope" = "here" ] && scope="$(kyb_workspace)"
+    exec "$0" add --key "$key" --title "$title" --tags "rule,$scope${tags:+,$tags}" --refs "$refs"
+    ;;
+  rules)
+    workspace=""; all=""; as_json=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --workspace) workspace="$2"; shift 2 ;;
+        --all) all=1; shift ;;
+        --json) as_json=1; shift ;;
+        *) die "rules: unknown flag $1" ;;
+      esac
+    done
+    if [ -n "$all" ]; then
+      out="$(kyb_curl "$BASE/search?q=&tag=rule&limit=500")"
+    else
+      require_capability rules "kyb rules" "An older server does not list the rules of a project; kyb rules --all lists every rule."
+      out="$(kyb_curl "$BASE/brief?workspace=$(urlenc "${workspace:-$(kyb_workspace)}")&limit=50")"
+    fi
+    if [ -n "$as_json" ]; then printf '%s\n' "$out" | pretty; exit 0; fi
+    printf '%s' "$out" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+if "rules" in b:
+    rows, more = b["rules"]["items"], b["rules"]["more"]
+elif "hits" in b:
+    rows = [{"key": r["key"], "title": r["title"],
+             "scope": ",".join(t for t in r.get("tags", []) if t != "rule")} for r in b["hits"]]
+    more = 0
+else:
+    print(json.dumps(b, indent=2), file=sys.stderr)
+    raise SystemExit(1)
+print("%d owner rule%s" % (len(rows) + more, "" if len(rows) + more == 1 else "s"))
+for r in rows:
+    print("  %s  %s (%s)" % (r["key"], r["title"], r["scope"]))
+if more:
+    print("  +%d more: kyb rules --all" % more)
 '
     ;;
   confident)

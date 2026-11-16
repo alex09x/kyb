@@ -196,6 +196,28 @@ async fn deadlines_ride_along_by_the_callers_calendar() {
 }
 
 #[tokio::test]
+async fn the_rules_for_every_project_and_for_this_one_are_listed() {
+    let (app, _d, _i) = app_with_tmp();
+    fact(&app, "rule-no-prod-deploy-unasked", &["rule", "all", "deploy"]).await;
+    fact(&app, "rule-orders-api-migrations", &["rule", "Orders-API"]).await;
+    fact(&app, "rule-billing-freeze", &["rule", "billing"]).await;
+    fact(&app, "orders-api-ports", &["orders-api"]).await;
+
+    let b = brief(&app, "?workspace=orders-api").await;
+    assert_eq!(keys(&b, "rules"), ["rule-no-prod-deploy-unasked", "rule-orders-api-migrations"]);
+    assert_eq!(b["rules"]["items"][0]["scope"], "all");
+    assert_eq!(b["rules"]["items"][1]["scope"], "orders-api");
+    assert_eq!(b["rules"]["items"][1]["title"], "Title of rule-orders-api-migrations");
+
+    let b = brief(&app, "").await;
+    assert_eq!(keys(&b, "rules"), ["rule-no-prod-deploy-unasked"], "no workspace: only the rules for all");
+    let b = brief(&app, "?workspace=orders-api&tag=deploy").await;
+    assert_eq!(keys(&b, "rules"), ["rule-no-prod-deploy-unasked"], "a tag narrows the rules too");
+    let b = brief(&app, "?workspace=billing&limit=1").await;
+    assert_eq!((b["rules"]["count"].clone(), b["rules"]["more"].clone()), (json!(2), json!(1)));
+}
+
+#[tokio::test]
 async fn a_malformed_question_is_refused() {
     let (app, _d, _i) = app_with_tmp();
     for query in
@@ -205,6 +227,6 @@ async fn a_malformed_question_is_refused() {
         assert_eq!(st, StatusCode::BAD_REQUEST, "{query}: {v}");
     }
     // the CLI sends every flag, empty when not given: that is "no filter"
-    let b = brief(&app, "?tag=&service=&since=&limit=").await;
+    let b = brief(&app, "?tag=&service=&since=&limit=&workspace=").await;
     assert!(b["since"].as_str().is_some());
 }
