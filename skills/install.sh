@@ -115,6 +115,12 @@ agent on every machine, and it is reached through the `kyb` CLI.
   provider's own memory (Claude's memory folder, Codex, Gemini) is read by that provider in that
   folder only; keep at most a pointer to the lesson's key there. A plain "yes" teaches nothing:
   record nothing for it.
+- **Notes already in your local memory: check them against KYB.** When you read your memory
+  (Claude: `~/.claude/projects/<project>/memory/`) and find the owner's preferences, rules,
+  corrections or lessons other agents would need, look each one up (`kyb confident lessons
+  --all`, `kyb query "..."`). Missing or thinner in KYB → write it as a lesson (or a knowledge
+  entry for facts about our systems), then leave a pointer to the key in the local note. Never
+  copy secrets or personal matters that are not about how agents work.
 - **`kyb confident check "<the decision as one English line>"` before you ask the owner to
   decide anything** (a release, a deploy, a push, a deletion, a public post, a design choice).
   It shows the lessons about such a step and what was decided before: if a lesson already

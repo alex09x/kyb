@@ -524,6 +524,13 @@ kyb confident lessons                        # the lessons for this project, as 
 kyb confident lessons --all                  # every lesson in the base
 ```
 
+**Notes already in your local memory.** When you read your provider's memory (Claude:
+`~/.claude/projects/<project>/memory/`) and it holds the owner's preferences, rules, corrections
+or lessons other agents would need, check each against KYB (`kyb confident lessons --all`,
+`kyb query "..."`). Missing, or thinner here → write it as a lesson (a fact about our systems as
+a knowledge entry instead), then leave a pointer to the key in the local note. Never copy
+secrets or personal matters that are not about how agents work.
+
 A lesson is an ordinary knowledge entry: key `lesson-<slug>`, tag `lesson` plus its scope tags
 (`--tags` adds topic tags). The **title is the lesson itself in one line** - it is what the brief
 shows every session. English like every entry: translate the owner's words, keep their meaning,

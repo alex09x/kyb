@@ -77,7 +77,9 @@ lives here as lessons, not in your provider's local memory, which no other agent
 When the owner corrects you, refuses, redirects, explains why, or states how agents should work, \
 write it right away with kyb_add: key lesson-<slug>, the lesson itself as the title (one English \
 line), the owner's words translated in the body, tags lesson plus all or the project folder name. \
-A plain yes teaches nothing; record nothing for it. Before you ask the owner to decide anything, \
+A plain yes teaches nothing; record nothing for it. When your local memory already holds such \
+notes, check each against KYB and write the missing ones as lessons, leaving a pointer behind. \
+Before you ask the owner to decide anything, \
 call kyb_confident_check with the decision as one English line: it returns the lessons about such \
 a step and earlier decisions - if a lesson already answers, act and report instead of asking.";
 
