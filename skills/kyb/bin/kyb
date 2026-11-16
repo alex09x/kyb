@@ -89,6 +89,39 @@ if want not in caps:
 PY
 }
 
+# has_capability <capability>: a silent yes/no, for a parameter that is only an
+# addition. A server without it is still asked, just without that parameter.
+has_capability() {
+  curl -sS -m 5 "$BASE/healthz" 2>/dev/null | CAP_WANT="$1" python3 -c '
+import json, os, sys
+try:
+    caps = json.load(sys.stdin).get("capabilities") or []
+except Exception:
+    caps = []
+raise SystemExit(0 if os.environ["CAP_WANT"] in caps else 1)'
+}
+
+# The project this agent works in, as one name - lessons are scoped by it. Env
+# KYB_WORKSPACE (a path counts by its last folder); else the git repository's
+# folder: the main checkout's, also from a linked worktree, and a submodule's
+# own; else PROD_WORKSPACE_NAME; else the current folder. Unlike by_workspace
+# (attribution), a subfolder of the repository is the same project.
+kyb_workspace() {
+  if [ -n "${KYB_WORKSPACE:-}" ]; then
+    case "$KYB_WORKSPACE" in /*) basename "$KYB_WORKSPACE" ;; *) printf '%s' "$KYB_WORKSPACE" ;; esac
+    return
+  fi
+  local common top
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top=""
+  case "$common" in
+    */.git) basename "$(dirname "$common")" ;;
+    *) if [ -n "$top" ]; then basename "$top"
+       elif [ -n "${PROD_WORKSPACE_NAME:-}" ]; then printf '%s' "$PROD_WORKSPACE_NAME"
+       else basename "$PWD"; fi ;;
+  esac
+}
+
 pretty() {
   local in
   in="$(cat)"
@@ -412,7 +445,10 @@ kyb — Know Your Business (our infrastructure knowledge base)
   kyb get <key> [--at <sha>]
   kyb deadlines [--within 30d] [--overdue] [--hard] [--tag a,b] [--assignee A] [--json]
                                                     (open tasks with a due date: overdue / this week / later)
-  kyb brief [--tag a,b] [--service X] [--since 7d] [--limit N] [--json]
+  kyb brief [--tag a,b] [--service X] [--since 7d] [--limit N] [--workspace W] [--json]
+  kyb confident learn --key lesson-<slug> --title "<the lesson>" --scope all|here|<p,...> [--tags a,b]
+                                                (what the owner taught; body on stdin, --template)
+  kyb confident lessons [--workspace W | --all] [--json]   (the lessons for this project)
                                                     (call before infra work: deadlines, open incidents, active work,
                                                     recently retracted and changed knowledge, as pointers)
   kyb history <key>
@@ -849,19 +885,22 @@ for bucket in ("overdue", "this_week", "later"):
 '
     ;;
   brief)
-    tag=""; service=""; since=""; limit=""; as_json=""
+    tag=""; service=""; since=""; limit=""; as_json=""; workspace=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --tag|--tags) tag="$2"; shift 2 ;;
         --service) service="$2"; shift 2 ;;
         --since) since="$2"; shift 2 ;;
         --limit) limit="$2"; shift 2 ;;
+        --workspace) workspace="$2"; shift 2 ;;
         --json) as_json=1; shift ;;
         *) die "brief: unknown flag $1" ;;
       esac
     done
     require_capability brief "kyb brief" "An older server has no such route and would simply answer 404."
-    out="$(kyb_curl "$BASE/brief?tag=$(urlenc "$tag")&service=$(urlenc "$service")&since=$(urlenc "$since")&limit=$(urlenc "$limit")")"
+    # an older server refuses a parameter it does not know: send it only when it is understood
+    ws=""; has_capability lessons && ws="&workspace=$(urlenc "${workspace:-$(kyb_workspace)}")"
+    out="$(kyb_curl "$BASE/brief?tag=$(urlenc "$tag")&service=$(urlenc "$service")&since=$(urlenc "$since")&limit=$(urlenc "$limit")$ws")"
     if [ -n "$as_json" ]; then printf '%s\n' "$out" | pretty; exit 0; fi
     printf '%s' "$out" | python3 -c '
 import json, sys
@@ -886,11 +925,17 @@ def more(section, hint):
 
 since = b["since"][:10]
 d, inc, work, gone, changed = b["deadlines"], b["incidents"], b["work"], b["retracted"], b["changed"]
-if not any(s["count"] for s in (d, inc, work, gone, changed)):
+lessons = b.get("lessons") or {"count": 0, "more": 0, "items": []}
+if not any(s["count"] for s in (d, inc, work, gone, changed, lessons)):
     print("KYB brief: nothing due, open or in progress, and nothing changed since %s." % since)
     raise SystemExit(0)
 print("KYB brief, today %s, changes since %s. Pointers only: kyb get <key> for details." % (b["today"], since))
 print("Context for your current task, not a to-do list: act on an item only if the task concerns it.")
+if lessons["count"]:
+    print("LESSONS FROM THE OWNER (%d): how to work here - follow them" % lessons["count"])
+    for r in lessons["items"]:
+        print("  %s  %s (%s)" % (r["key"], short(r["title"], 110), r["scope"]))
+    more(lessons, ": kyb confident lessons")
 if d["count"]:
     soon = d["count"] - d["overdue"]
     said = ([("%d overdue" % d["overdue"])] if d["overdue"] else []) + ([("%d due soon" % soon)] if soon else [])
@@ -934,8 +979,86 @@ if changed["count"]:
     more(changed, ": kyb brief --limit N")
 '
     ;;
+  lesson)
+    if [ "${1:-}" = "--template" ]; then
+      cat <<'TPL'
+# A lesson: what the owner wants from agents - a preference, a ban, a house rule,
+# a correction worth remembering. The title is the lesson itself in one line.
+# Every word in English; the owner's words translated, their meaning kept. File with:
+#   kyb confident learn --key lesson-<slug> --title "<the lesson>" --scope all|here|<project,...> < this-file
+## Lesson
+<what to do or never do, and where it applies>
+
+## The owner's words
+<translated quote, with the date it was said>
+
+## Why
+<the reason the owner gave, or the incident behind it>
+
+## How to apply
+<what an agent does differently; the cases it does not cover>
+TPL
+      exit 0
+    fi
+    key=""; title=""; scope=""; tags=""; refs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --key) key="$2"; shift 2 ;;
+        --title) title="$2"; shift 2 ;;
+        --scope) scope="$2"; shift 2 ;;
+        --tags) tags="$2"; shift 2 ;;
+        --refs) refs="$2"; shift 2 ;;
+        *) die "confident learn: unknown flag $1" ;;
+      esac
+    done
+    [ -n "$key" ] && [ -n "$title" ] && [ -n "$scope" ] || die \
+      "confident learn: --key lesson-<slug>, --title \"<the lesson>\" and --scope all|here|<project,...> are required (body from stdin; kyb confident learn --template)"
+    case "$key" in lesson-?*) ;; *) die "confident learn: the key starts with lesson- (got '$key')" ;; esac
+    [ "$scope" = "here" ] && scope="$(kyb_workspace)"
+    exec "$0" add --key "$key" --title "$title" --tags "lesson,$scope${tags:+,$tags}" --refs "$refs"
+    ;;
+  lessons)
+    workspace=""; all=""; as_json=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --workspace) workspace="$2"; shift 2 ;;
+        --all) all=1; shift ;;
+        --json) as_json=1; shift ;;
+        *) die "confident lessons: unknown flag $1" ;;
+      esac
+    done
+    if [ -n "$all" ]; then
+      out="$(kyb_curl "$BASE/search?q=&tag=lesson&limit=500")"
+    else
+      require_capability lessons "kyb confident lessons" "An older server does not list the lessons of a project; kyb confident lessons --all lists every lesson."
+      out="$(kyb_curl "$BASE/brief?workspace=$(urlenc "${workspace:-$(kyb_workspace)}")&limit=50")"
+    fi
+    if [ -n "$as_json" ]; then printf '%s\n' "$out" | pretty; exit 0; fi
+    printf '%s' "$out" | python3 -c '
+import json, sys
+b = json.load(sys.stdin)
+if "lessons" in b:
+    rows, more = b["lessons"]["items"], b["lessons"]["more"]
+elif "hits" in b:
+    rows = [{"key": r["key"], "title": r["title"],
+             "scope": ",".join(t for t in r.get("tags", []) if t != "lesson")} for r in b["hits"]]
+    more = 0
+else:
+    print(json.dumps(b, indent=2), file=sys.stderr)
+    raise SystemExit(1)
+print("%d lesson%s from the owner" % (len(rows) + more, "" if len(rows) + more == 1 else "s"))
+for r in rows:
+    print("  %s  %s (%s)" % (r["key"], r["title"], r["scope"]))
+if more:
+    print("  +%d more: kyb confident lessons --all" % more)
+'
+    ;;
   confident)
     sub="${1:-}"; [ $# -gt 0 ] && shift || true
+    case "$sub" in
+      learn) exec "$0" lesson "$@" ;;
+      lessons) exec "$0" lessons "$@" ;;
+    esac
     require_capability confident "kyb confident" "An older server has no decision journal and would simply answer 404."
     as_json=""; id=""; gist=""; kind=""; target=""; question=""; situation=""; options=""; proposed=""
     tradeoff=""; checked=""; unchecked=""; by=""; verdict=""; chosen=""; quote=""; ref=""; result=""
@@ -1023,7 +1146,7 @@ PY
         [ -n "$id" ] || die "confident get: <id> required"
         out="$(kyb_curl "$BASE/confident/$(urlenc "$id")")"
         ;;
-      *) die "confident: check | ask | decided | outcome | abandon | open | get (kyb --help)" ;;
+      *) die "confident: learn | lessons | check | ask | decided | outcome | abandon | open | get (kyb --help)" ;;
     esac
     if [ -n "$as_json" ] || { [ "$sub" != check ] && [ "$sub" != ask ]; }; then printf '%s\n' "$out" | pretty; exit 0; fi
     printf '%s' "$out" | python3 -c '
@@ -1032,6 +1155,11 @@ b = json.load(sys.stdin)
 if "id" in b:
     print("Opened %s. When the owner answers: kyb confident decided %s --by owner --verdict ..." % (b["id"], b["id"]))
     b = b["check"]
+lessons = b.get("lessons") or []
+if lessons:
+    print("LESSONS from the owner about such a step - if one answers your question, follow it and report instead of asking:")
+    for l in lessons:
+        print("  %s  %s" % (l["key"], l["title"]))
 print("Decision journal, kind %s (matched by %s). Evidence for you to judge, not permission." % (b["kind"], b["matched_by"]))
 for h in b["hazards"]:
     print("  HAZARD %s  %s - %s" % (h["id"], h["gist"], h["why"]))

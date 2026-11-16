@@ -1919,7 +1919,8 @@ async fn reindex(State(st): St) -> Reply {
 /// So the check has to happen on the client, before the request, against a list
 /// the server publishes. Names match the query parameters exactly; entries are
 /// only ever added, never renamed, because an older CLI matches on the string.
-const CAPABILITIES: [&str; 7] = ["as_of", "brief", "changed_between", "confident", "deadlines", "diff", "export"];
+const CAPABILITIES: [&str; 8] =
+    ["as_of", "brief", "changed_between", "confident", "deadlines", "diff", "export", "lessons"];
 
 async fn healthz(State(st): St) -> Reply {
     let heads = st.store.list_head().unwrap_or_default();
@@ -4186,6 +4187,7 @@ mod published_claims {
             ("deadlines", "/deadlines"),
             ("diff", "/knowledge/svc/diff"),
             ("export", "/export"),
+            ("lessons", "/brief?workspace=orders-api"),
         ];
         assert_eq!(probes.len(), super::CAPABILITIES.len(), "a capability was added without a probe");
 

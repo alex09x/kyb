@@ -27,6 +27,14 @@ pub const CAP_INCIDENTS: usize = 5;
 pub const CAP_WORK: usize = 7;
 pub const CAP_RETRACTED: usize = 5;
 pub const CAP_CHANGED: usize = 5;
+/// The lessons are read every session, so the section is allowed to be longer
+/// than the news sections; past this the rest is one `kyb confident lessons` away.
+pub const CAP_LESSONS: usize = 30;
+/// A lesson is a knowledge entry tagged `lesson`: what the owner wants from
+/// agents - a preference, a ban, a house rule, a correction worth remembering.
+/// Its scope is a tag too - `all`, or the name of the project folder it binds.
+pub const LESSON_TAG: &str = "lesson";
+pub const LESSON_SCOPE_ALL: &str = "all";
 /// `--limit` replaces every cap; more than this is not a brief any longer.
 pub const MAX_LIMIT: usize = 50;
 pub const DEFAULT_SINCE: &str = "7d";
@@ -167,6 +175,38 @@ pub struct ChangeRow {
 /// Newest first.
 pub fn sort_changes(rows: &mut [ChangeRow]) {
     rows.sort_by(|a, b| b.at.cmp(&a.at).then(a.key.cmp(&b.key)));
+}
+
+/// A lesson that binds the project the brief was asked for.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LessonRow {
+    pub key: String,
+    /// The lesson itself, in one line.
+    pub title: String,
+    /// `all`, or the project names among its tags.
+    pub scope: String,
+}
+
+/// Whether an entry with these tags is a lesson for `workspace`: tagged
+/// `lesson`, and scoped to every project or to this one. Without a workspace
+/// only the lessons for every project apply - a brief that does not say where
+/// it runs cannot know which project lessons are its own.
+pub fn lesson_scope(tags: &[String], workspace: Option<&str>) -> Option<String> {
+    let has = |want: &str| tags.iter().any(|t| t.eq_ignore_ascii_case(want));
+    if !has(LESSON_TAG) {
+        return None;
+    }
+    if has(LESSON_SCOPE_ALL) {
+        return Some(LESSON_SCOPE_ALL.into());
+    }
+    workspace.filter(|w| has(w)).map(|w| w.to_ascii_lowercase())
+}
+
+/// The lessons for every project first, then this project's; by key within each.
+pub fn sort_lessons(rows: &mut [LessonRow]) {
+    rows.sort_by(|a, b| {
+        (a.scope != LESSON_SCOPE_ALL).cmp(&(b.scope != LESSON_SCOPE_ALL)).then(a.key.cmp(&b.key))
+    });
 }
 
 #[cfg(test)]

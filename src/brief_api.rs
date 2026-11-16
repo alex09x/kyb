@@ -12,7 +12,7 @@
 //! start hook. A read-only aggregation over what the index and the history
 //! already hold: no schema of its own, nothing stored.
 
-use crate::brief::{self, ChangeRow, IncidentRow, Scope, WorkRow};
+use crate::brief::{self, ChangeRow, IncidentRow, LessonRow, Scope, WorkRow};
 use crate::deadline::{self, Task};
 use crate::{index, model, AppState, Reply, St, Q};
 use axum::extract::State;
@@ -37,6 +37,9 @@ pub struct BriefQ {
     since: Option<String>,
     /// Replaces the cap of every section.
     limit: Option<String>,
+    /// The project the agent works in (its folder name): the lessons scoped to it
+    /// are listed next to the lessons for every project.
+    workspace: Option<String>,
 }
 
 fn bad_request(msg: String) -> Reply {
@@ -227,6 +230,22 @@ pub async fn brief(State(st): St, headers: HeaderMap, Q(q): Q<BriefQ>) -> Reply 
         .collect();
     brief::sort_changes(&mut retracted);
 
+    // The lessons in force here: standing guidance on how to work, not news, so
+    // neither the time window nor --tag/--service narrows them - a lesson for
+    // every project must not vanish from a brief asked about one service.
+    let workspace = q.workspace.as_deref().map(str::trim).filter(|w| !w.is_empty());
+    let mut lessons: Vec<LessonRow> = knowledge
+        .iter()
+        .filter_map(|h| {
+            brief::lesson_scope(&h.tags, workspace).map(|scope| LessonRow {
+                key: h.key.clone(),
+                title: h.title.clone(),
+                scope,
+            })
+        })
+        .collect();
+    brief::sort_lessons(&mut lessons);
+
     // who wrote it, looked up only for the rows that are shown
     let changed_cap = cap(brief::CAP_CHANGED);
     for row in changed.iter_mut().take(changed_cap) {
@@ -244,6 +263,7 @@ pub async fn brief(State(st): St, headers: HeaderMap, Q(q): Q<BriefQ>) -> Reply 
         "work": brief::section(work_rows, cap(brief::CAP_WORK)),
         "retracted": brief::section(retracted, cap(brief::CAP_RETRACTED)),
         "changed": brief::section(changed, changed_cap),
+        "lessons": brief::section(lessons, cap(brief::CAP_LESSONS)),
     });
     (StatusCode::OK, Json(body))
 }
