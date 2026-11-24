@@ -23,6 +23,7 @@ truth that survives between sessions and across machines.
 [![rust](https://img.shields.io/badge/rust-edition_2021-dea584?labelColor=1a1d24)](Cargo.toml)
 [![search](https://img.shields.io/badge/search-hybrid_·_~6ms-00b3c4?labelColor=1a1d24)](#search-quality)
 [![skills.sh](https://skills.sh/b/alex09x/kyb/kyb)](https://skills.sh/alex09x/kyb/kyb)
+[![alex09x/kyb MCP server](https://glama.ai/mcp/servers/alex09x/kyb/badges/score.svg)](https://glama.ai/mcp/servers/alex09x/kyb)
 
 <br/>
 
